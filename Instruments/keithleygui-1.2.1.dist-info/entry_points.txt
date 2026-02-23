@@ -1,0 +1,3 @@
+[console_scripts]
+keithleygui = keithleygui.main:run
+
