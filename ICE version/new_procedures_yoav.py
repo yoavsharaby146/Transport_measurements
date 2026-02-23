@@ -155,7 +155,7 @@ class Resistance_time_measurement(Procedure):
         vals = [time.time() - t0]+ list(temperature)
 
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
@@ -194,7 +194,7 @@ class Resistance_time_measurement(Procedure):
         else:
             vals += [math.nan] * 2
         if self.use_magnet:
-            vals += [magnet.get_magnet_field_read()]
+            vals += [magnet.magnet_field_read_response()]
         else:
             vals.append(math.nan)
         return vals
@@ -317,7 +317,7 @@ class Resistance_gate_sweep_measurement(Procedure):
 
     def getmeas(self, t0):
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         temperature = read_temperature()
         vals = [time.time() - t0] + list(temperature)
@@ -340,7 +340,7 @@ class Resistance_gate_sweep_measurement(Procedure):
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
         if self.use_magnet:
-            vals.append(magnet.get_magnet_field_read())
+            vals.append(magnet.magnet_field_read_response())
         else:
             vals.append(math.nan)
 
@@ -520,7 +520,7 @@ class Resistance_magnet_sweep_measurement(Procedure):
     def getmeas(self, t0):
         # 1. Magnet Write (Trigger)
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         # 2. Temperature & Time
         temperature = read_temperature()
@@ -548,7 +548,7 @@ class Resistance_magnet_sweep_measurement(Procedure):
 
         # 6. Magnet Read (Last Column)
         if self.use_magnet:
-            vals.append(magnet.get_magnet_field_read())
+            vals.append(magnet.magnet_field_read_response())
         else:
             vals.append(math.nan)
 
@@ -561,21 +561,21 @@ class Resistance_magnet_sweep_measurement(Procedure):
         time_0 = time.time()
         log.info("starting to sweep field to %g Tesla", self.Target_field)
         # --- 1. Persistent Heater Logic ---
-        current_field = magnet.get_magnet_field()
-        persistent_heater_status = magnet.get_persistent_switch_heater()
+        current_field = magnet.magnet_field
+        persistent_heater_status = magnet.persistent_switch_heater
         print('Persistent switch heater mode: %s' % persistent_heater_status)
         # Test if the magnet heater is on, in case the persistent heater is off
         # turn it on and wait 10 min
         if persistent_heater_status == '0':
             log.info("Heater is OFF. Turning ON and waiting 600s...")
-            magnet.set_persistent_switch_heater('ON')
+            magnet.persistent_switch_heater = 'ON'
             time.sleep(600)
             log.info("Heater warm-up complete.")
 
         # --- 2. Setup Sweep ---
         #### magnetic field at beginning for progress
 
-        origin_field = magnet.get_magnet_field()
+        origin_field = magnet.magnet_field
         magnet.go_to_target_field(self.Target_field)
 
         total_sweep_range = abs(self.Target_field - origin_field)
@@ -600,9 +600,9 @@ class Resistance_magnet_sweep_measurement(Procedure):
 
     def shutdown(self):
         if self.use_magnet == True:
-            current_field = magnet.get_magnet_field()
+            current_field = magnet.magnet_field
             if abs(current_field-self.Target_field) > 0.003:
-                magnet.set_sweep_mode('PAUSE')
+                magnet.sweep_mode = 'PAUSE'
                 log.info("Measurement stopped before reaching target field")
         log.info("Finished measuring")
 proc_resistance_magnet = {
@@ -721,7 +721,7 @@ class Resistance_two_gate_scan_sweep_measurement(Procedure):
     def getmeas(self, t0):
         # 1. Magnet Write (Trigger)
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         # 2. Temperature & Time
         temperature = read_temperature()
@@ -749,7 +749,7 @@ class Resistance_two_gate_scan_sweep_measurement(Procedure):
 
         # 6. Magnet Read (Last Column)
         if self.use_magnet:
-            vals.append(magnet.get_magnet_field_read())
+            vals.append(magnet.magnet_field_read_response())
         else:
             vals.append(math.nan)
 
@@ -829,7 +829,8 @@ class Resistance_two_gate_scan_sweep_measurement(Procedure):
         # Gate_2.shutdown()
         # log.info("Keithley off")
         log.info("Finished measuring two gate sweep")
-proc_resistance_two_gate_sweep = {"Resistance two gate sweep measurement": dict(
+proc_resistance_two_gate_sweep = {
+"Resistance two gate sweep measurement": dict(
         cls=Resistance_two_gate_scan_sweep_measurement,
         category=["Gate Sweep"],
     description="Sweeps two gates simultaneously along a line defined by Start/End points for each gate.\n"
@@ -961,7 +962,7 @@ class Resistance_carrier_density_farward_backward_measurement(Procedure):
         temperature = read_temperature()
         vals = [time.time() - t0, temperature[0], temperature[1], temperature[2], temperature[3]]
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
                      Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
@@ -1006,7 +1007,7 @@ class Resistance_carrier_density_farward_backward_measurement(Procedure):
         else:
             vals += [math.nan, math.nan]
         if self.use_magnet:
-            vals += [magnet.get_magnet_field_read()]
+            vals += [magnet.magnet_field_read_response()]
         else:
             vals += [math.nan]
         return vals
@@ -1096,12 +1097,11 @@ class Resistance_carrier_density_farward_backward_measurement(Procedure):
     def shutdown(self):
         ##        sys.exit()
         # Return to 0 after sweep for device safety
-        magnet.set_sweep_mode('PAUSE')
+        magnet.sweep_mode = 'PAUSE'
         # Gate_2.shutdown()
         # log.info("Keithley off")
         log.info("Finished measuring")
 proc_resistance_carrier_density ={
-
 "Resistance carrier density sweep measurement": dict(
         cls=Resistance_carrier_density_farward_backward_measurement,
         category=["Gate Sweep"],
@@ -1228,7 +1228,7 @@ class Resistance_two_gate_mapping_measurement(Procedure):
 
     def getmeas(self, t0):
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         temperature = read_temperature()
         vals = [time.time() - t0] + list(temperature)
@@ -1251,7 +1251,7 @@ class Resistance_two_gate_mapping_measurement(Procedure):
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
         if self.use_magnet:
-            vals.append(magnet.get_magnet_field_read())
+            vals.append(magnet.magnet_field_read_response())
         else:
             vals.append(math.nan)
         return vals
@@ -1387,7 +1387,7 @@ class Resistance_two_gate_mapping_measurement(Procedure):
     def shutdown(self):
         log.info(f"Finished measuring {self.scan_mode} 2D mapping")
 proc_resistance_two_gate_map = {
-    "Resistance two gate mapping measurement": dict(
+"Resistance two gate mapping measurement": dict(
         cls=Resistance_two_gate_mapping_measurement,
         category=["2D Mapping", "Gate Sweep", "Keithley 2450"],
         description="2D Resistance Map with Selectable Scan Mode.\n"
@@ -1510,7 +1510,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
         temperature = read_temperature()
         vals = [time.time() - t0, temperature[0], temperature[1], temperature[2], temperature[3]]
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
                      Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
@@ -1555,7 +1555,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
         else:
             vals += [math.nan, math.nan]
         if self.use_magnet:
-            vals += [magnet.get_magnet_field_read()]
+            vals += [magnet.magnet_field_read_response()]
         else:
             vals += [math.nan]
         return vals
@@ -1597,17 +1597,18 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
         gate_range_bwd = gate_range_fwd[::-1]
 
         # 2. Magnet Safety Check
-        if magnet.get_persistent_switch_heater() == '0':
-            magnet.set_persistent_switch_heater('ON')
+        if magnet.persistent_switch_heater
+ == '0':
+            magnet.persistent_switch_heater = 'ON'
             log.info("Persistent switch heater turned ON. Delaying 10min.")
             time.sleep(600)
             # 3. Initial Ramping (Start positions)
             log.info(f"Moving to Initial Position: Field={self.field_start}T, Gate={self.gate_start}V")
             magnet.go_to_target_field(self.field_start)
             # We wait for magnet to reach start while taking data
-        while abs(magnet.get_magnet_field() - self.field_start) > 0.003:
+        while abs(magnet.magnet_field - self.field_start) > 0.003:
             if self.should_stop():
-                magnet.set_sweep_mode('PAUSE')
+                magnet.sweep_mode = 'PAUSE'
                 log.warning("User stopped measurement during initial magnet sweep, magnet is Paused")
                 return
 
@@ -1626,9 +1627,9 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
             # Move Field (skip wait on first iteration if already there)
             if i > 0:
                 magnet.go_to_target_field(field)
-                while abs(magnet.get_magnet_field() - field) > 0.003:
+                while abs(magnet.magnet_field - field) > 0.003:
                     if self.should_stop():
-                        magnet.set_sweep_mode('PAUSE')
+                        magnet.sweep_mode = 'PAUSE'
                         log.warning("User stopped measurement during  magnet ramp, magnet is Paused")
                         return
                     self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
@@ -1678,7 +1679,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
                         return
 
     def shutdown(self):
-        magnet.set_sweep_mode('PAUSE')
+        magnet.sweep_mode = 'PAUSE'
         log.info("Finished measuring")
 proc_resistance_magnet_gate_map = {
 "Resistance magnet and gate mapping measurement": dict(
@@ -1812,7 +1813,7 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
 
     def getmeas(self, t0):
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         temperature = read_temperature()
         vals = [time.time() - t0] + list(temperature)
@@ -1835,7 +1836,7 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
         if self.use_magnet:
-            vals.append(magnet.get_magnet_field_read())
+            vals.append(magnet.magnet_field_read_response())
         else:
             vals.append(math.nan)
 
@@ -1894,8 +1895,9 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
         gate_2_list_bwd = gate_2_list_fwd[::-1]
 
         # --- 3. Initial Magnet Safety & Positioning ---
-        if magnet.get_persistent_switch_heater() == '0':
-            magnet.set_persistent_switch_heater('ON')
+        if magnet.persistent_switch_heater
+ == '0':
+            magnet.persistent_switch_heater = 'ON'
             log.info("Magnet heater ON. Waiting 10min...")
             time.sleep(600)
 
@@ -1910,9 +1912,9 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
 
         # Wait for Magnet to reach start
         # decide at a later time if i want to document the ramping data
-        while abs(magnet.get_magnet_field() - self.field_start) > 0.003:
+        while abs(magnet.magnet_field - self.field_start) > 0.003:
             if self.should_stop():
-                magnet.set_sweep_mode('PAUSE')
+                magnet.sweep_mode = 'PAUSE'
                 log.warning("Measurement stopped by user, MAGNET is PAUSED")
                 return
             #self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
@@ -1933,9 +1935,9 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
             # --- Move Magnet (Skip first point as we are already there) ---
             if i > 0:
                 magnet.go_to_target_field(field)
-                while abs(magnet.get_magnet_field() - field) > 0.003:
+                while abs(magnet.magnet_field - field) > 0.003:
                     if self.should_stop():
-                        magnet.set_sweep_mode('PAUSE')
+                        magnet.sweep_mode = 'PAUSE'
                         log.warning("User stopped during magnet ramp")
                         return
                     self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
@@ -1978,14 +1980,14 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
 
                     if self.should_stop():
                         log.warning("Measurement stopped by user during gate sweep")
-                        magnet.set_sweep_mode('PAUSE')
+                        magnet.sweep_mode = 'PAUSE'
                         return
 
     def shutdown(self):
-        magnet.set_sweep_mode('PAUSE')
+        magnet.sweep_mode = 'PAUSE'
         log.info("Finished measuring")
 proc_resistance_magnet_2gate_map = {
-    "Resistance Magnet and 2-Gate Map": dict(
+"Resistance Magnet and 2-Gate Map": dict(
         cls=Resistance_magnet_and_2gate_mapping_measurement,
         category=["2D Mapping", "Gate Sweep", "Magnetic Field"],
         description="2D Map: Magnetic Field (Outer) vs Simultaneous Two-Gate Sweep (Inner).\n"
@@ -2099,7 +2101,7 @@ class Differential_conductance_SRS860(Procedure):
         vals = [time.time() - t0] + list(temperature)
 
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
@@ -2122,7 +2124,7 @@ class Differential_conductance_SRS860(Procedure):
         for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2)]:
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
-        vals.append(magnet.get_magnet_field_read() if self.use_magnet else math.nan)
+        vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
         return vals
 
     def generate_range(self, start, end, step_units):
@@ -2300,7 +2302,7 @@ class Differential_conductance_Zurich(Procedure):
         vals = [time.time() - t0] + list(temperature)
 
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
@@ -2329,7 +2331,7 @@ class Differential_conductance_Zurich(Procedure):
         for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2)]:
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
-        vals.append(magnet.get_magnet_field_read() if self.use_magnet else math.nan)
+        vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
         return vals
 
     def generate_range(self, start, end, step_mv):
@@ -2508,7 +2510,7 @@ class Differential_conductance_Zurich_gated(Procedure):
         temperature = read_temperature()
         vals = [time.time() - t0, temperature[0], temperature[1], temperature[2], temperature[3]]
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
@@ -2547,7 +2549,7 @@ class Differential_conductance_Zurich_gated(Procedure):
         else:
             vals += [math.nan, math.nan]
         if self.use_magnet:
-            vals += [magnet.get_magnet_field_read()]
+            vals += [magnet.magnet_field_read_response()]
         else:
             vals += [math.nan]
         return vals
@@ -2640,7 +2642,8 @@ class Differential_conductance_Zurich_gated(Procedure):
     def shutdown(self):
 ##        sys.exit()
         log.info("Finished measuring")
-proc_differential_conductance_Zurich_gate = {    "Differential conductance Zurich gated": dict(
+proc_differential_conductance_Zurich_gate = {    
+"Differential conductance Zurich gated": dict(
         cls=Differential_conductance_Zurich_gated,
         category=["Tunneling junction"],
         description="New measurement for renu",
@@ -2753,7 +2756,7 @@ class Differential_Resistance_Zurich(Procedure):
         vals = [time.time() - t0] + list(temperature)
 
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
@@ -2785,7 +2788,7 @@ class Differential_Resistance_Zurich(Procedure):
         for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2)]:
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
-        vals.append(magnet.get_magnet_field_read() if self.use_magnet else math.nan)
+        vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
         return vals
 
     def generate_range(self, start, end, step_units):
@@ -2846,7 +2849,7 @@ class Differential_Resistance_Zurich(Procedure):
     def shutdown(self):
         log.info("Finished measuring")
 proc_differential_resistance_Zurich = {
-    "Differential Resistance Zurich": dict(
+"Differential Resistance Zurich": dict(
         cls=Differential_Resistance_Zurich,
         category="Differential Resistance",
         description="dV/dI Sweep starting from Origin DC AUX using MFLI_1.\n"
@@ -2976,7 +2979,7 @@ class Differential_Resistance_Gate_map_Zurich(Procedure):
         vals = [time.time() - t0] + list(temperature)
 
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
@@ -3008,7 +3011,7 @@ class Differential_Resistance_Gate_map_Zurich(Procedure):
         for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2)]:
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
-        vals.append(magnet.get_magnet_field_read() if self.use_magnet else math.nan)
+        vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
         return vals
 
     def smu_choice(self, Gate_name):
@@ -3175,7 +3178,8 @@ class Differential_Resistance_Gate_map_Zurich(Procedure):
 
         # In some frameworks, you might want to finalize the data file here
         log.info("Procedure shutdown finished.")
-proc_differential_resistance_gate_map_zurich = {"Differential Resistance Gate Map Zurich": dict(
+proc_differential_resistance_gate_map_zurich = {
+"Differential Resistance Gate Map Zurich": dict(
     cls=Differential_Resistance_Gate_map_Zurich,
     category="Differential Resistance",
     description="2D Gate vs Bias map. Sweeps Auxiliary voltage and performs a gate ramp "
@@ -3315,7 +3319,7 @@ class Differential_Resistance_AUX_map_gate_sweep_Zurich(Procedure):
         vals = [time.time() - t0] + list(temperature)
 
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
@@ -3347,7 +3351,7 @@ class Differential_Resistance_AUX_map_gate_sweep_Zurich(Procedure):
         for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2)]:
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
-        vals.append(magnet.get_magnet_field_read() if self.use_magnet else math.nan)
+        vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
         return vals
 
     def smu_choice(self, Gate_name):
@@ -3530,7 +3534,8 @@ class Differential_Resistance_AUX_map_gate_sweep_Zurich(Procedure):
 
         # In some frameworks, you might want to finalize the data file here
         log.info("Procedure shutdown finished.")
-proc_differential_resistance_aux_map_gate_zurich = {"Differential Resistance AUX Map Zurich": dict(
+proc_differential_resistance_aux_map_gate_zurich = {
+"Differential Resistance AUX Map Zurich": dict(
     cls=Differential_Resistance_AUX_map_gate_sweep_Zurich,
     category="Differential Resistance",
     description="2D Gate vs Bias map. Sweeps Gate voltage and performs a aux ramp "
@@ -3647,7 +3652,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
     def getmeas(self, t0):
         # 1. Magnet Write (Trigger)
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         # 2. Temperature & Time
         temperature = read_temperature()
@@ -3675,7 +3680,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
 
         # 6. Magnet Read (Last Column)
         if self.use_magnet:
-            vals.append(magnet.get_magnet_field_read())
+            vals.append(magnet.magnet_field_read_response())
         else:
             vals.append(math.nan)
 
@@ -3768,21 +3773,22 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
 
         log.info("starting to sweep field to %g Tesla", self.Target_field)
         # --- 1. Persistent Heater Logic ---
-        current_field = magnet.get_magnet_field()
-        persistent_heater_status = magnet.get_persistent_switch_heater()
+        current_field = magnet.magnet_field
+        persistent_heater_status = magnet.persistent_switch_heater
+
         print('Persistent switch heater mode: %s' % persistent_heater_status)
         # Test if the magnet heater is on, in case the persistent heater is off
         # turn it on and wait 10 min
         if persistent_heater_status == '0':
             log.info("Heater is OFF. Turning ON and waiting 600s...")
-            magnet.set_persistent_switch_heater('ON')
+            magnet.persistent_switch_heater = 'ON'
             time.sleep(600)
             log.info("Heater warm-up complete.")
 
         # --- 2. Setup Sweep ---
         #### magnetic field at beginning for progress
 
-        origin_field = magnet.get_magnet_field()
+        origin_field = magnet.magnet_field
         magnet.go_to_target_field(self.Target_field)
 
         total_sweep_range = abs(self.Target_field - origin_field)
@@ -3802,7 +3808,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
             time.sleep(self.acq_delay)
             if self.should_stop():
                 log.warning("Magnet sweep stopped by user.")
-                magnet.set_sweep_mode('PAUSE')
+                magnet.sweep_mode = 'PAUSE'
                 return
         log.info("Magnetic field Reached!")
 
@@ -3817,9 +3823,9 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
 
     def shutdown(self):
         if self.Type == 'RH' and self.use_magnet:
-            current_field = magnet.get_magnet_field()
+            current_field = magnet.magnet_field
             if abs(current_field-self.Target_field) > 0.003:
-                magnet.set_sweep_mode('PAUSE')
+                magnet.sweep_mode = 'PAUSE'
                 log.info("Measurement stopped before reaching target field")
         log.info("Finished measuring")
 proc_Rt_RV_RH_sequencer = {
@@ -3971,7 +3977,7 @@ class RV_dV_dI_sequencer_measurement(Procedure):
         vals = [time.time() - t0] + list(temperature)
 
         if self.use_magnet:
-            magnet.get_magnet_field_write()
+            magnet.magnet_field_write_query()
 
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
@@ -4003,7 +4009,7 @@ class RV_dV_dI_sequencer_measurement(Procedure):
         for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2)]:
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
 
-        vals.append(magnet.get_magnet_field_read() if self.use_magnet else math.nan)
+        vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
         return vals
 
     def smu_choice(self, Gate_name):
@@ -4126,7 +4132,7 @@ class RV_dV_dI_sequencer_measurement(Procedure):
     def shutdown(self):
         log.info("Finished measuring")
 proc_RV_dV_dI_sequencer = {
-    "RV dV_dI sequencer measurement": dict(
+"RV dV_dI sequencer measurement": dict(
         cls=RV_dV_dI_sequencer_measurement,
         category=["Differential Resistance","Gate Sweep", "Keithley 2450"],
         description="dV/dI Sweep starting from Origin DC AUX using MFLI_1.\n"
