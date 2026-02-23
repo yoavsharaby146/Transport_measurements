@@ -18,7 +18,12 @@ from pathlib import Path
 
 import pyvisa.errors
 from serial import SerialException
+import sys
+from pathlib import Path
 
+# Ensure parent directory is in sys.path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+  
 from Instruments.SR830_with_add_ons import SR830
 from Instruments.SR860_with_add_ons import SR860
 from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
@@ -26,6 +31,8 @@ from Instruments.keithley2450_with_add_ons import Keithley2450
 from Instruments.keithley2604B import Keithley2604B
 #from keithley2600 import Keithley2600
 from Instruments.MFLI import MFLIController
+
+
 
 # ---------------- configuration.py PATCH ----------------
 # Paste AT THE TOP of your existing configuration.py, replacing the hard-coded

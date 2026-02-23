@@ -12,7 +12,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from pymeasure.instruments.srs import SR830
-import visa
+import pyvisa
 
 # Placeholder for Keithley 2604B class
 class Keithley2604B:

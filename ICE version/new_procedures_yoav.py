@@ -1597,8 +1597,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
         gate_range_bwd = gate_range_fwd[::-1]
 
         # 2. Magnet Safety Check
-        if magnet.persistent_switch_heater
- == '0':
+        if magnet.persistent_switch_heater== '0':
             magnet.persistent_switch_heater = 'ON'
             log.info("Persistent switch heater turned ON. Delaying 10min.")
             time.sleep(600)
@@ -1895,8 +1894,7 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
         gate_2_list_bwd = gate_2_list_fwd[::-1]
 
         # --- 3. Initial Magnet Safety & Positioning ---
-        if magnet.persistent_switch_heater
- == '0':
+        if magnet.persistent_switch_heater== '0':
             magnet.persistent_switch_heater = 'ON'
             log.info("Magnet heater ON. Waiting 10min...")
             time.sleep(600)

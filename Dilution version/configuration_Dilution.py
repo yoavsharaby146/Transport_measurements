@@ -18,6 +18,11 @@ from pathlib import Path
 
 import pyvisa.errors
 from serial import SerialException
+import sys
+from pathlib import Path
+
+# Ensure parent directory is in sys.path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # dilution instrument class
 from dilution_connection import DilutionInstrument

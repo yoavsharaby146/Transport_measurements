@@ -20,8 +20,9 @@ pg.setConfigOption("useOpenGL", True)
 # from configuration import magnet, MFLI_1, SRS860, SRS830_1,SRS830_2,Dual_gate, Gate_1, Gate_2
 # from configuration import read_temperature, auto_range,auto_range_magnet
 
-import configuration as _cfg
-from configuration import read_temperature, read_dilution_field
+import configuration_Dilution as _cfg
+from configuration_Dilution import read_temperature
+#read_dilution_field
 
 # ,auto_range, auto_range_magnet
 
@@ -4541,7 +4542,7 @@ if __name__ == "__main__":
     import sys
     from importlib import reload
     from PyQt5 import QtWidgets
-    from config_prelaunch import run_and_optionally_launch  # the dialog we made
+    from config_prelaunch_Dilution import run_and_optionally_launch  # the dialog we made
 
     def _start_launcher():
         # 1) Reload configuration so it re-reads instrument_overrides.json
