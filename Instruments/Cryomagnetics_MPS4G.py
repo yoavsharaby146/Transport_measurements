@@ -1,437 +1,766 @@
-# This bit of code uses the Cyromagnetics_4GMPS  manual providing all the commands used from the computer interface Command summery
+# Cryomagnetics MPS 4G Magnet Power Supply Controller
+#
+# This module provides a Python interface for controlling the Cryromagnetics 4GMPS
+# magnet power supply via serial communication.
+#
+# Command reference: https://cryomagnetics.com/wp-content/uploads/2022/05/4G-Rev-9_3.pdf
+#
+# Key properties/methods for typical use:
+#   - magnet_field: Get/set the current magnetic field in Tesla
+#   - go_to_target_field(): Sweep to a target field value
+#   - sweep_mode: Set sweep direction (UP, DOWN, ZERO, FAST, SLOW)
+#   - persistent_switch_heater: Control the persistent switch heater (ON/OFF)
+#
+# Written by YOAV SHARABY
 
-# The commands are listed and explained in the magnet power supply manual
-
-# https://cryomagnetics.com/wp-content/uploads/2022/05/4G-Rev-9_3.pdf
-
-
-# The functions that are mostly used are the
-# get_magnet_field and go_to_target_field
-# all other functions are mainly for programming the power supply
-
-# Writen by YOAV SHARABY
-
-
-
-# Each set function in this file ends with a read command because of traces of previous commands
-# have been shown when quarry commands are used
-
-# necessary imports
 import serial
-
-# maybe not necessary
 import time
 
 
 class Cryomagnetics_MPS4G:
-    # connect to magnet with relevant comport, baudrate, timeout ...
+    """Controller for the Cryomagnetics MPS 4G magnet power supply.
+    
+    This class provides a high-level interface for controlling the magnet power supply,
+    including magnetic field control, sweep operations, and configuration settings.
+    
+    Attributes:
+        port: Serial port identifier (e.g., 'COM3' or '/dev/ttyUSB0')
+        baudrate: Communication baud rate
+        timeout: Serial read timeout in seconds
+    """
+    
     def __init__(self, port, baudrate, timeout):
+        """Initialize connection to the magnet power supply.
+        
+        Args:
+            port: Serial port identifier (e.g., 'COM3' or '/dev/ttyUSB0')
+            baudrate: Communication baud rate
+            timeout: Serial read timeout in seconds
+        """
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self.serial = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=self.timeout)
 
-
-    # utilaze the serial commands for open, close, write and read from instrument
+    # =========================================================================
+    # Serial Communication Methods
+    # =========================================================================
+    
     def open(self):
+        """Open the serial connection to the instrument."""
         if not self.serial.is_open:
             self.serial.open()
 
     def close(self):
+        """Close the serial connection to the instrument."""
         if self.serial.is_open:
             self.serial.close()
 
     def write(self, data):
+        """Write data to the instrument.
+        
+        Args:
+            data: Bytes or string to send
+        """
         self.serial.write(data)
 
     def read(self, bytes_to_read):
+        """Read data from the instrument.
+        
+        Args:
+            bytes_to_read: Number of bytes to read
+            
+        Returns:
+            Bytes read from the instrument
+        """
         return self.serial.read(bytes_to_read)
 
-    # set and get error response mode, (0 - disable error reporting, 1 - enable error reporting)
-    def set_error_response(self, error_code):
-        set_error_mode = f'ERROR {error_code}\n'
-        self.write(set_error_mode.encode('utf-8'))
-        response = self.read(1000)
-
-    def get_error_response(self):
-        get_error_mode = b'ERROR?\n'
-        self.write(get_error_mode)
+    # =========================================================================
+    # Error Response Property
+    # =========================================================================
+    
+    @property
+    def error_response(self):
+        """Get the current error response mode.
+        
+        Returns:
+            int: 0 if error reporting is disabled, 1 if enabled
+        """
+        self.write(b'ERROR?\n')
         time.sleep(0.1)
         response = self.read(2000)
         response_str = response.decode('utf-8', errors='ignore').strip()
-        error = int(response_str[8:])
-        return error
+        return int(response_str[8:])
+    
+    @error_response.setter
+    def error_response(self, error_code):
+        """Set the error response mode.
+        
+        Args:
+            error_code: 0 to disable error reporting, 1 to enable
+        """
+        set_error_mode = f'ERROR {error_code}\n'
+        self.write(set_error_mode.encode('utf-8'))
+        self.read(1000)
 
-    # get and set magnetic field values in Tesla(T)
-    # set_magnet_field is not used
-
-    def set_magnet_field(self, magnet_field):
+    # =========================================================================
+    # Magnetic Field Properties
+    # =========================================================================
+    
+    @property
+    def magnet_field(self):
+        """Get the current magnetic field in Tesla (T).
+        
+        The field is calculated from the magnet current using the calibration factor.
+        
+        Returns:
+            float: Current magnetic field in Tesla
+        """
+        self.write(b'IMAG?\n')
+        time.sleep(0.1)
+        response = self.read(512)
+        response_str = response.decode().strip()
+        current = float(response_str[7:-1])
+        return 0.96385 * current / 10
+    
+    @magnet_field.setter
+    def magnet_field(self, magnet_field):
+        """Set the magnet current based on the desired field in Tesla.
+        
+        Note: This sets the current directly. For sweeping to a target field,
+        use go_to_target_field() instead.
+        
+        Args:
+            magnet_field: Desired magnetic field in Tesla
+        """
         current = 1.0375 * magnet_field * 10
         set_magnet_current = f'IMAG {current}\n'
         self.write(set_magnet_current.encode('utf-8'))
-        response = self.read(1000)
+        self.read(1000)
 
-    def get_magnet_field(self):
-        get_magnet_current = b'IMAG?\n'
-        self.write(get_magnet_current)
-        time.sleep(0.1)
-        response = self.read(512)
-        response_str = response.decode().strip()
-        current = float(response_str[7:-1])
-        magnet_field = 0.96385 * current / 10
-        return magnet_field
-    
-    # Trying to separate the write and the read to two different functions
-    def get_magnet_field_write(self):
-        get_magnet_current = b'IMAG?\n'
-        self.write(get_magnet_current)
-
-    def get_magnet_field_read(self):
-        response = self.read(512)
-        response_str = response.decode().strip()
-        current = float(response_str[7:-1])
-        magnet_field = 0.96385 * current / 10
-        return magnet_field
-    
-    # get the output current from the power supply
-    def get_ps_output(self):
-        get_power_supply_current = b'IOUT?\n'
-        self.write(get_power_supply_current)
+    @property
+    def ps_output(self):
+        """Get the output current from the power supply in Amps.
+        
+        Returns:
+            float: Power supply output current in Amps
+        """
+        self.write(b'IOUT?\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = float(response_str[7:-1])
-        return answer
+        return float(response_str[7:-1])
 
-    # set and get the current limit for lower limit and upper limit
-    # when sweeping field Up goes to upper limit and down field goes to lower limit
-    def set_low_current_sweep_limit(self, magnet_field):
+    # =========================================================================
+    # Split Read/Write Methods for Advanced Use
+    # =========================================================================
+    
+    def magnet_field_write_query(self):
+        """Send the magnet field query command without reading response.
+        
+        Use magnet_field_read_response() to retrieve the result.
+        Useful for timing-sensitive operations.
+        """
+        self.write(b'IMAG?\n')
+
+    def magnet_field_read_response(self):
+        """Read the response from a previous magnet field query.
+        
+        Must be called after magnet_field_write_query().
+        
+        Returns:
+            float: Current magnetic field in Tesla
+        """
+        response = self.read(512)
+        response_str = response.decode().strip()
+        current = float(response_str[7:-1])
+        return 0.96385 * current / 10
+
+    # =========================================================================
+    # Sweep Limit Properties
+    # =========================================================================
+    
+    @property
+    def low_current_sweep_limit(self):
+        """Get the lower sweep current limit in Tesla equivalent.
+        
+        When sweeping DOWN, the magnet will sweep to this limit.
+        
+        Returns:
+            float: Lower sweep limit in Tesla
+        """
+        self.write(b'LLIM?\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[7:-1])
+    
+    @low_current_sweep_limit.setter
+    def low_current_sweep_limit(self, magnet_field):
+        """Set the lower sweep current limit.
+        
+        Args:
+            magnet_field: Lower sweep limit in Tesla
+        """
         current = 1.0375 * magnet_field * 10
         set_low_limit_sweep = f'LLIM {current}\n'
         self.write(set_low_limit_sweep.encode('utf-8'))
-        response = self.read(1000)
+        self.read(1000)
 
-    def get_low_current_sweep_limit(self):
-        get_low_limit_sweep = b'LLIM?\n'
-        self.write(get_low_limit_sweep)
+    @property
+    def high_current_sweep_limit(self):
+        """Get the upper sweep current limit in Tesla equivalent.
+        
+        When sweeping UP, the magnet will sweep to this limit.
+        
+        Returns:
+            float: Upper sweep limit in Tesla
+        """
+        self.write(b'ULIM?\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = float(response_str[7:-1])
-        return answer
-
-    def set_high_current_sweep_limit(self, magnet_field):
+        return float(response_str[7:-1])
+    
+    @high_current_sweep_limit.setter
+    def high_current_sweep_limit(self, magnet_field):
+        """Set the upper sweep current limit.
+        
+        Args:
+            magnet_field: Upper sweep limit in Tesla
+        """
         current = 1.0375 * magnet_field * 10
         set_upper_limit_sweep = f'ULIM {current}\n'
         self.write(set_upper_limit_sweep.encode('utf-8'))
-        response = self.read(1000)
+        self.read(1000)
 
-    def get_high_current_sweep_limit(self):
-        get_high_limit_sweep = b'ULIM?\n'
-        self.write(get_high_limit_sweep)
+    # =========================================================================
+    # Operating Mode Property
+    # =========================================================================
+    
+    @property
+    def operating_mode(self):
+        """Get the current operating mode.
+        
+        Returns:
+            str: Operating mode (e.g., 'Manual' or 'SHIM')
+        """
+        self.write(b'MODE?\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = float(response_str[7:-1])
-        return answer
+        return response_str[7:]
 
-    # get the operating mode that is selected (Manual or SHIM)
-    # SHIM is not used
-    def get_operating_mode(self):
-        get_mode = b'MODE?\n'
-        self.write(get_mode)
+    # =========================================================================
+    # Coil Name Property
+    # =========================================================================
+    
+    @property
+    def coil_name(self):
+        """Get the coil name identifier.
+        
+        Returns:
+            str: Name of the coil
+        """
+        self.write(b'NAME?\n')
         time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = response_str[7:]
-        return answer
-
-    # get and set the coil name
-    def set_coil_name(self, coil_name):
+        response = self.read(2000)
+        response_str = response.decode('utf-8', errors='ignore').strip()
+        return response_str[7:]
+    
+    @coil_name.setter
+    def coil_name(self, coil_name):
+        """Set the coil name identifier.
+        
+        Args:
+            coil_name: Name to assign to the coil
+        """
         change_name = f'NAME {coil_name}\n'
         self.write(change_name.encode('utf-8'))
-        response = self.read(1000)
+        self.read(1000)
 
-    def get_coil_name(self):
-        read_name = b'NAME?\n'
-        self.write(read_name)
+    # =========================================================================
+    # Persistent Switch Heater Property
+    # =========================================================================
+    
+    @property
+    def persistent_switch_heater(self):
+        """Get the persistent switch heater state.
+        
+        WARNING: The heater must be ON before using the magnet!
+        
+        Returns:
+            str: Heater state ('ON' or 'OFF')
+        """
+        self.write(b'PSHTR?\n')
         time.sleep(0.1)
         response = self.read(2000)
         response_str = response.decode('utf-8', errors='ignore').strip()
-        name = response_str[7:]
-        return name
+        return response_str[8:]
+    
+    @persistent_switch_heater.setter
+    def persistent_switch_heater(self, state):
+        """Set the persistent switch heater state.
+        
+        WARNING: The heater must be ON before using the magnet!
+        Normally the heater is always ON when magnet current is controlled.
+        
+        Args:
+            state: 'ON' or 'OFF'
+        """
+        set_heater = f'PSHTR {state}\n'
+        self.write(set_heater.encode('utf-8'))
+        self.read(1000)
 
-    # get and set the persistent heater state (ON or OFF)
-    # Normally the heater is always ON when magnet current is controlled
-    # The heater must be on before using the magnet !!!
-    def set_persistent_switch_heater(self, pshtr):
-        set_magnet_current = f'PSHTR {pshtr}\n'
-        self.write(set_magnet_current.encode('utf-8'))
-        response = self.read(1000)
-    def get_persistent_switch_heater(self):
-        heater_state = b'PSHTR?\n'
-        self.write(heater_state)
-        time.sleep(0.1)
-        response = self.read(2000)
-        response_str = response.decode('utf-8', errors='ignore').strip()
-        status = response_str[8:]
-        return status
-
-    # The QRESET command resets a power supply quench condition and returns the
-    # supply to STANDBY
+    # =========================================================================
+    # Quench Reset
+    # =========================================================================
+    
     def reset_quench_condition(self):
-        quench_reset = f'QRESET\n'
-        self.write(quench_reset.encode('utf-8'))
-        response = self.read(1000)
+        """Reset a power supply quench condition.
+        
+        After a quench event, this command returns the supply to STANDBY mode.
+        """
+        self.write(b'QRESET\n')
+        self.read(1000)
 
-    # set and get the upper limit for a charge rate range in amps.
-    # Range 0 starts at 0A and ends at the limit provided.
-    # Range 1 starts at the Range 0 limit and ends at the Range 1 limit.
-    # Range 2 starts at the Range 1 limit and ends at the Range 2 limit.
-    # Range 3 starts at the Range 2 limit and ends at the Range 3 limit.
-    # Range 4 starts at the Range 3 limit and ends at the supply output capacity
-    def set_current_range0(self, range0):
-        set_range0 = f'RANGE 0 {range0}\n'
-        self.write(set_range0.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_range1(self, range1):
-        set_range1 = f'RANGE 1 {range1}\n'
-        self.write(set_range1.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_range2(self, range2):
-        set_range2 = f'RANGE 2 {range2}\n'
-        self.write(set_range2.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_range3(self, range3):
-        set_range3 = f'RANGE 3 {range3}\n'
-        self.write(set_range3.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_range4(self, range4):
-        set_range4 = f'RANGE 4 {range4}\n'
-        self.write(set_range4.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def get_current_range0(self):
-        range0 = b'RANGE? 0\n'
-        self.write(range0)
+    # =========================================================================
+    # Current Range Properties (0-4)
+    # =========================================================================
+    
+    @property
+    def current_range0(self):
+        """Get the upper limit for charge rate Range 0 in Amps.
+        
+        Range 0 starts at 0A and ends at this limit.
+        
+        Returns:
+            float: Range 0 upper limit in Amps
+        """
+        self.write(b'RANGE? 0\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = float(response_str[10:])
-        return answer
-    def get_current_range1(self):
-        range1 = b'RANGE? 1\n'
-        self.write(range1)
+        return float(response_str[10:])
+    
+    @current_range0.setter
+    def current_range0(self, range0):
+        """Set the upper limit for charge rate Range 0.
+        
+        Args:
+            range0: Upper limit in Amps
+        """
+        self.write(f'RANGE 0 {range0}\n'.encode('utf-8'))
         time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[10:])
-        return answer
-    def get_current_range2(self):
-        range2 = b'RANGE? 2\n'
-        self.write(range2)
-        time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[10:])
-        return answer
-    def get_current_range3(self):
-        range3 = b'RANGE? 3\n'
-        self.write(range3)
-        time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[10:])
-        return answer
-    def get_current_range4(self):
-        range4 = b'RANGE? 4\n'
-        self.write(range4)
-        time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[10:])
-        return answer
+        self.read(1000)
 
-    # set and get  the charge rate in amps/second for a selected range.
-    # A range parameter of 0, 1, 2, 3, and 4 will select Range 1, 2, 3, 4, or 5 sweep
-    # rates as displayed in the Rates Menu.
-    # A range parameter of 5 selects the Fast mode sweep rate.
-    def set_current_rate0(self, rate0):
-        set_rate0 = f'RATE 0 {rate0}\n'
-        self.write(set_rate0.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_rate1(self, rate1):
-        set_rate1 = f'RATE 1 {rate1}\n'
-        self.write(set_rate1.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_rate2(self, rate2):
-        set_rate2 = f'RATE 2 {rate2}\n'
-        self.write(set_rate2.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_rate3(self, rate3):
-        set_rate3 = f'RATE 3 {rate3}\n'
-        self.write(set_rate3.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_rate4(self, rate4):
-        set_rate4 = f'RATE 4  {rate4}\n'
-        self.write(set_rate4.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def set_current_rate5(self, rate5):
-        set_rate5 = f'RATE 5  {rate5}\n'
-        self.write(set_rate5.encode('utf-8'))
-        time.sleep(0.1)
-        response = self.read(1000)
-    def get_current_rate0(self):
-        rate0 = b'RATE? 0\n'
-        self.write(rate0)
+    @property
+    def current_range1(self):
+        """Get the upper limit for charge rate Range 1 in Amps.
+        
+        Range 1 starts at Range 0 limit and ends at this limit.
+        
+        Returns:
+            float: Range 1 upper limit in Amps
+        """
+        self.write(b'RANGE? 1\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = float(response_str[9:])
-        return answer
-    def get_current_rate1(self):
-        rate1 = b'RATE? 1\n'
-        self.write(rate1)
+        return float(response_str[10:])
+    
+    @current_range1.setter
+    def current_range1(self, range1):
+        """Set the upper limit for charge rate Range 1.
+        
+        Args:
+            range1: Upper limit in Amps
+        """
+        self.write(f'RANGE 1 {range1}\n'.encode('utf-8'))
         time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[9:])
-        return answer
-    def get_current_rate2(self):
-        rate2 = b'RATE? 2\n'
-        self.write(rate2)
-        time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[9:])
-        return answer
-    def get_current_rate3(self):
-        rate3 = b'RATE? 3\n'
-        self.write(rate3)
-        time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[9:])
-        return answer
-    def get_current_rate4(self):
-        rate4 = b'RATE? 4\n'
-        self.write(rate4)
-        time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[9:])
-        return answer
-    def get_current_rate5(self):
-        rate5 = b'RATE? 5\n'
-        self.write(rate5)
-        time.sleep(0.1)
-        response = self.read(1000)
-        response_str = response.decode().strip()
-        answer = float(response_str[9:])
-        return answer
+        self.read(1000)
 
-    # set the device to remote mode disabling the buttons on the power supply (except LOCAL)
+    @property
+    def current_range2(self):
+        """Get the upper limit for charge rate Range 2 in Amps.
+        
+        Range 2 starts at Range 1 limit and ends at this limit.
+        
+        Returns:
+            float: Range 2 upper limit in Amps
+        """
+        self.write(b'RANGE? 2\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[10:])
+    
+    @current_range2.setter
+    def current_range2(self, range2):
+        """Set the upper limit for charge rate Range 2.
+        
+        Args:
+            range2: Upper limit in Amps
+        """
+        self.write(f'RANGE 2 {range2}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    @property
+    def current_range3(self):
+        """Get the upper limit for charge rate Range 3 in Amps.
+        
+        Range 3 starts at Range 2 limit and ends at this limit.
+        
+        Returns:
+            float: Range 3 upper limit in Amps
+        """
+        self.write(b'RANGE? 3\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[10:])
+    
+    @current_range3.setter
+    def current_range3(self, range3):
+        """Set the upper limit for charge rate Range 3.
+        
+        Args:
+            range3: Upper limit in Amps
+        """
+        self.write(f'RANGE 3 {range3}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    @property
+    def current_range4(self):
+        """Get the upper limit for charge rate Range 4 in Amps.
+        
+        Range 4 starts at Range 3 limit and ends at supply output capacity.
+        
+        Returns:
+            float: Range 4 upper limit in Amps
+        """
+        self.write(b'RANGE? 4\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[10:])
+    
+    @current_range4.setter
+    def current_range4(self, range4):
+        """Set the upper limit for charge rate Range 4.
+        
+        Args:
+            range4: Upper limit in Amps
+        """
+        self.write(f'RANGE 4 {range4}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    # =========================================================================
+    # Current Rate Properties (0-5)
+    # =========================================================================
+    
+    @property
+    def current_rate0(self):
+        """Get the charge rate for Range 0 in Amps/second.
+        
+        Returns:
+            float: Charge rate in A/s
+        """
+        self.write(b'RATE? 0\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[9:])
+    
+    @current_rate0.setter
+    def current_rate0(self, rate0):
+        """Set the charge rate for Range 0.
+        
+        Args:
+            rate0: Charge rate in Amps/second
+        """
+        self.write(f'RATE 0 {rate0}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    @property
+    def current_rate1(self):
+        """Get the charge rate for Range 1 in Amps/second.
+        
+        Returns:
+            float: Charge rate in A/s
+        """
+        self.write(b'RATE? 1\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[9:])
+    
+    @current_rate1.setter
+    def current_rate1(self, rate1):
+        """Set the charge rate for Range 1.
+        
+        Args:
+            rate1: Charge rate in Amps/second
+        """
+        self.write(f'RATE 1 {rate1}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    @property
+    def current_rate2(self):
+        """Get the charge rate for Range 2 in Amps/second.
+        
+        Returns:
+            float: Charge rate in A/s
+        """
+        self.write(b'RATE? 2\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[9:])
+    
+    @current_rate2.setter
+    def current_rate2(self, rate2):
+        """Set the charge rate for Range 2.
+        
+        Args:
+            rate2: Charge rate in Amps/second
+        """
+        self.write(f'RATE 2 {rate2}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    @property
+    def current_rate3(self):
+        """Get the charge rate for Range 3 in Amps/second.
+        
+        Returns:
+            float: Charge rate in A/s
+        """
+        self.write(b'RATE? 3\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[9:])
+    
+    @current_rate3.setter
+    def current_rate3(self, rate3):
+        """Set the charge rate for Range 3.
+        
+        Args:
+            rate3: Charge rate in Amps/second
+        """
+        self.write(f'RATE 3 {rate3}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    @property
+    def current_rate4(self):
+        """Get the charge rate for Range 4 in Amps/second.
+        
+        Returns:
+            float: Charge rate in A/s
+        """
+        self.write(b'RATE? 4\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[9:])
+    
+    @current_rate4.setter
+    def current_rate4(self, rate4):
+        """Set the charge rate for Range 4.
+        
+        Args:
+            rate4: Charge rate in Amps/second
+        """
+        self.write(f'RATE 4 {rate4}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    @property
+    def current_rate5(self):
+        """Get the charge rate for Fast mode in Amps/second.
+        
+        Range 5 corresponds to the Fast mode sweep rate.
+        
+        Returns:
+            float: Charge rate in A/s
+        """
+        self.write(b'RATE? 5\n')
+        time.sleep(0.1)
+        response = self.read(1000)
+        response_str = response.decode().strip()
+        return float(response_str[9:])
+    
+    @current_rate5.setter
+    def current_rate5(self, rate5):
+        """Set the charge rate for Fast mode.
+        
+        Args:
+            rate5: Charge rate in Amps/second
+        """
+        self.write(f'RATE 5 {rate5}\n'.encode('utf-8'))
+        time.sleep(0.1)
+        self.read(1000)
+
+    # =========================================================================
+    # Remote Mode
+    # =========================================================================
+    
     def remote(self):
-        remote = f'REMOTE\n'
-        self.write(remote.encode('utf-8'))
-        response = self.read(1000)
+        """Enable remote control mode.
+        
+        This disables buttons on the power supply front panel except LOCAL.
+        Required before sending sweep commands.
+        """
+        self.write(b'REMOTE\n')
+        self.read(1000)
 
-    # The SWEEP command causes the power supply to sweep the output current
-    # from the present current to the specified limit at the applicable charge rate set
-    # by the range and rate commands.
-    # If the FAST parameter is given, the fast mode rate will be used instead of a rate
-    # selected from the output current range.
-    # SLOW is required to change from fast sweep.
-    # SWEEP UP sweeps to the Upper limit, SWEEP DOWN sweeps to the Lower limit, and SWEEP ZERO
-    # discharges the supply.
-    # If in Shim Mode, SWEEP LIMIT sweeps to the shim target current.
-    def set_sweep_mode(self, sweep_mode):
-        set_sweep = f'SWEEP {sweep_mode}\n'
-        self.write(set_sweep.encode('utf-8'))
-        response = self.read(1000)
-    def get_sweep_mode(self):
-        get_sweep_mode = b'SWEEP?\n'
-        self.write(get_sweep_mode)
+    # =========================================================================
+    # Sweep Mode Property
+    # =========================================================================
+    
+    @property
+    def sweep_mode(self):
+        """Get the current sweep mode status.
+        
+        Returns:
+            str: Current sweep mode/status
+        """
+        self.write(b'SWEEP?\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = response_str[8:]
-        return answer
+        return response_str[8:]
+    
+    @sweep_mode.setter
+    def sweep_mode(self, sweep_mode):
+        """Set the sweep mode to control output current.
+        
+        The SWEEP command causes the power supply to sweep the output current
+        from the present current to the specified limit at the applicable charge rate.
+        
+        Valid modes:
+            - 'UP': Sweep to upper limit (ULIM)
+            - 'DOWN': Sweep to lower limit (LLIM)
+            - 'ZERO': Discharge the supply (sweep to zero)
+            - 'FAST': Use fast mode rate
+            - 'SLOW': Return to normal rate mode
+        
+        Args:
+            sweep_mode: Sweep direction/mode string
+        """
+        self.write(f'SWEEP {sweep_mode}\n'.encode('utf-8'))
+        self.read(1000)
 
-    # gets and set the units used in the power supply (A - Amps or G - Gauss)
-    # the convention is to use Amps at all times
-    def set_units(self, units):
-        set_units = f'UNITS {units}\n'
-        self.write(set_units.encode('utf-8'))
-        response = self.read(1000)
-    def get_units(self):
-        get_unit = b'UNITS?\n'
-        self.write(get_unit)
+    # =========================================================================
+    # Units Property
+    # =========================================================================
+    
+    @property
+    def units(self):
+        """Get the current units setting.
+        
+        Returns:
+            str: 'A' for Amps or 'G' for Gauss
+        """
+        self.write(b'UNITS?\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = response_str[8:]
-        return answer
+        return response_str[8:]
+    
+    @units.setter
+    def units(self, units):
+        """Set the units for the power supply.
+        
+        Convention is to use Amps ('A') at all times.
+        
+        Args:
+            units: 'A' for Amps or 'G' for Gauss
+        """
+        self.write(f'UNITS {units}\n'.encode('utf-8'))
+        self.read(1000)
 
-    # set and get the power supply output voltage limit to the voltage
-    # provided.
-    def set_voltage_limit(self, voltage_limit):
-        set_voltage_limit = f'VLIM {voltage_limit}\n'
-        self.write(set_voltage_limit.encode('utf-8'))
-        response = self.read(1000)
-    def get_voltage_limit(self):
-        get_voltage_limit = b'VLIM?\n'
-        self.write(get_voltage_limit)
+    # =========================================================================
+    # Voltage Properties
+    # =========================================================================
+    
+    @property
+    def voltage_limit(self):
+        """Get the power supply output voltage limit.
+        
+        Returns:
+            float: Voltage limit in Volts
+        """
+        self.write(b'VLIM?\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = float(response_str[7:-1])
-        return answer
+        return float(response_str[7:-1])
+    
+    @voltage_limit.setter
+    def voltage_limit(self, voltage_limit):
+        """Set the power supply output voltage limit.
+        
+        Args:
+            voltage_limit: Voltage limit in Volts
+        """
+        self.write(f'VLIM {voltage_limit}\n'.encode('utf-8'))
+        self.read(1000)
 
-    # get the present magnet voltage
-    def get_magnet_voltage(self):
-        get_magnet_voltage = b'VMAG?\n'
-        self.write(get_magnet_voltage)
+    @property
+    def magnet_voltage(self):
+        """Get the present magnet voltage.
+        
+        Returns:
+            float: Magnet voltage in Volts
+        """
+        self.write(b'VMAG?\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = float(response_str[7:-1])
-        return answer
+        return float(response_str[7:-1])
 
-    # get the present power supply output voltage
-    def get_output_voltage(self):
-        get_output_voltage = b'VOUT?\n'
-        self.write(get_output_voltage)
+    @property
+    def output_voltage(self):
+        """Get the present power supply output voltage.
+        
+        Returns:
+            float: Output voltage in Volts
+        """
+        self.write(b'VOUT?\n')
         time.sleep(0.1)
         response = self.read(1000)
         response_str = response.decode().strip()
-        answer = float(response_str[7:-1])
-        return answer
+        return float(response_str[7:-1])
 
-    # go_to_target_field gets as a variable the magnetic field the user wants to sweep to
-    # and compares with present magnetic field
-    # if zero, sweep is changed to ZERO
-    # if above present field, high limit is changed to target and SWEEP to UP
-    # if below present field, low limit is changed to target and SWEEP to DOWN
+    # =========================================================================
+    # High-Level Control Methods
+    # =========================================================================
+    
     def go_to_target_field(self, target_field):
-        current_field = self.get_magnet_field()
+        """Sweep the magnetic field to a target value.
+        
+        This method automatically determines the sweep direction based on the
+        current field and target field values, sets the appropriate limit,
+        and initiates the sweep.
+        
+        Args:
+            target_field: Target magnetic field in Tesla
+        """
+        current_field = self.magnet_field
 
         if target_field == 0:
-            self.set_sweep_mode("ZERO")
-
+            self.sweep_mode = "ZERO"
         elif target_field > current_field:
-            self.set_high_current_sweep_limit(target_field)
-            self.set_sweep_mode("UP")
-
+            self.high_current_sweep_limit = target_field
+            self.sweep_mode = "UP"
         elif target_field < current_field:
-            self.set_low_current_sweep_limit(target_field)
-            self.set_sweep_mode("DOWN")
+            self.low_current_sweep_limit = target_field
+            self.sweep_mode = "DOWN"
