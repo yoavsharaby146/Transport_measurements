@@ -57,7 +57,7 @@ class DilutionInstrument:
     # -------------------------------------------------------------------------
     # temperature control helpers (originally in TemperatureControl.py)
     # -------------------------------------------------------------------------
-    def get_temperature(self, thermometer_num: int) -> float:
+    def get_temperature(self, thermometer_num = 8 ) -> float:
         """Read the temperature from a channel.
 
         Returns ``0.0`` if the response is invalid (text, NOT_FOUN, etc.).
