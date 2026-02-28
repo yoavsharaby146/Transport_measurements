@@ -29,7 +29,7 @@ from dilution_connection import DilutionInstrument
 
 from Instruments.SR830_with_add_ons import SR830
 from Instruments.SR860_with_add_ons import SR860
-from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
+#from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
 from Instruments.keithley2450_with_add_ons import Keithley2450
 from Instruments.keithley2604B import Keithley2604B
 #from keithley2600 import Keithley2600
@@ -85,14 +85,17 @@ def _maybe(instrument_class, enabled=True, addr="", name="Instrument"):
 
 # External magnet supply is deprecated when using the dilution fridge.
 # The dilution instrument provides the magnetic field readings (Bx, By, Bz).
+
 # Keep a small shim object for compatibility so existing Procedures that
 # call `magnet.set_sweep_mode()` or `magnet.get_magnet_field_write()` do
 # not raise AttributeError. This shim performs no hardware activity and
 # returns NaN where a numeric field value would be expected.
+
 # External magnet supply is deprecated when using the dilution fridge.
 # The dilution instrument provides the magnetic field readings (Bx, By, Bz).
 # We intentionally do not create a legacy serial magnet here; keep `magnet`
 # set to None so code is encouraged to use the `dilution` instrument.
+
 magnet = None
 
 # Dilution instrument (created from prelaunch overrides when configured).
@@ -218,162 +221,163 @@ if overrides.get("use_mfli_3") and overrides.get("mfli_3_host") and overrides.ge
         print(f"[configuration] MFLI not opened: {e}")
         MFLI_3 = None
 
-def read_temperature(root=r"C:\\Users\\ICE\\Desktop\\ICElog\\Results",
-                     ext=".log",
-                     timeout=5.0,
-                     poll=0.25,
-                     encoding="utf-8") -> np.ndarray:
-    """
-    Return mixing-chamber temperature from the dilution refrigerator.
+# def read_temperature(root=r"C:\\Users\\ICE\\Desktop\\ICElog\\Results",
+#                      ext=".log",
+#                      timeout=5.0,
+#                      poll=0.25,
+#                      encoding="utf-8") -> np.ndarray:
+#     """
+#     Return mixing-chamber temperature from the dilution refrigerator.
 
-    This function returns the mixing-chamber temperature. If a
-    networked `dilution` instrument is configured and available this
-    will query it directly. Otherwise it falls back to parsing the
-    legacy local log file and returns the last mixing-chamber value.
-    """
-    if dilution is not None:
-        try:
-            return np.array([dilution.get_temperature(8)])
-        except Exception:
-            # If the instrument is present but a query fails, fall back
-            # to the log-file method below.
-            pass
-    # fallback log file path parsing
-    root = Path(root)
-    t0 = time.time()
+#     This function returns the mixing-chamber temperature. If a
+#     networked `dilution` instrument is configured and available this
+#     will query it directly. Otherwise it falls back to parsing the
+#     legacy local log file and returns the last mixing-chamber value.
+#     """
+#     if dilution is not None:
+#         try:
+#             return np.array([dilution.get_temperature(8)])
+#         except Exception:
+#             # If the instrument is present but a query fails, fall back
+#             # to the log-file method below.
+#             pass
+#     # fallback log file path parsing
+#     root = Path(root)
+#     t0 = time.time()
 
-    while True:
-        today = datetime.now().strftime("%Y-%m-%d")
-        file_path = root / today / f"{today}{ext}"
+#     while True:
+#         today = datetime.now().strftime("%Y-%m-%d")
+#         file_path = root / today / f"{today}{ext}"
 
-        if file_path.is_file():
-            break
+#         if file_path.is_file():
+#             break
 
-        if (time.time() - t0) > timeout:
-            raise FileNotFoundError(f"File not found within timeout: {file_path}")
-        time.sleep(poll)
+#         if (time.time() - t0) > timeout:
+#             raise FileNotFoundError(f"File not found within timeout: {file_path}")
+#         time.sleep(poll)
 
-    # Now file exists: try to read last complete line
-    t0 = time.time()
-    while True:
-        try:
-            with file_path.open("rb") as f:
-                f.seek(0, os.SEEK_END)
-                if f.tell() == 0:
-                    raise RuntimeError("Log file is empty")
+#     # Now file exists: try to read last complete line
+#     t0 = time.time()
+#     while True:
+#         try:
+#             with file_path.open("rb") as f:
+#                 f.seek(0, os.SEEK_END)
+#                 if f.tell() == 0:
+#                     raise RuntimeError("Log file is empty")
 
-                pos = f.tell() - 1
-                while pos >= 0:
-                    f.seek(pos)
-                    if f.read(1) not in (b"\n", b"\r"):
-                        break
-                    pos -= 1
-                if pos < 0:
-                    raise RuntimeError("File contains only newlines")
+#                 pos = f.tell() - 1
+#                 while pos >= 0:
+#                     f.seek(pos)
+#                     if f.read(1) not in (b"\n", b"\r"):
+#                         break
+#                     pos -= 1
+#                 if pos < 0:
+#                     raise RuntimeError("File contains only newlines")
 
-                while pos >= 0:
-                    f.seek(pos)
-                    if f.read(1) == b"\n":
-                        pos += 1
-                        break
-                    pos -= 1
+#                 while pos >= 0:
+#                     f.seek(pos)
+#                     if f.read(1) == b"\n":
+#                         pos += 1
+#                         break
+#                     pos -= 1
 
-                f.seek(max(pos, 0))
-                line = f.readline()
-        except PermissionError:
-            line = b""
+#                 f.seek(max(pos, 0))
+#                 line = f.readline()
+#         except PermissionError:
+#             line = b""
 
-        if line.endswith(b"\n") or (time.time() - t0) > timeout:
-            break
-        time.sleep(poll)
+#         if line.endswith(b"\n") or (time.time() - t0) > timeout:
+#             break
+#         time.sleep(poll)
 
-    raw = line.decode(encoding, errors="replace").rstrip("\r\n")
-    fields = next(csv.reader([raw]))
+#     raw = line.decode(encoding, errors="replace").rstrip("\r\n")
+#     fields = next(csv.reader([raw]))
 
-    try:
-        values = [float(fields[i]) for i in range(4, 8)]
-        # mixing chamber is the last entry
-        temp = values[-1]
-    except (IndexError, ValueError) as e:
-        raise RuntimeError(f"Cannot parse columns 5-8: {e}") from e
+#     try:
+#         values = [float(fields[i]) for i in range(4, 8)]
+#         # mixing chamber is the last entry
+#         temp = values[-1]
+#     except (IndexError, ValueError) as e:
+#         raise RuntimeError(f"Cannot parse columns 5-8: {e}") from e
 
-    return np.array([temp], dtype=float)
+#     return np.array([temp], dtype=float)
 
-#     # In case magnetic field is sweeping
-#     magnet_mode = magnet.get_sweep_mode()
-#     magnet.set_sweep_mode('Pause')
-#
-#     magnitude_srs860 = Lockin_srs860_5.snap("R")
-#     magnitude_srs830_2 = Lockin_srs830_6.snap("R")
-#     # magnitude_srs830_3 = self.lockin_3.snap("R")
-#     # magnitude_zurich = self.lockin_4.read_demod()
-#     while (magnitude_srs860[0] > 0.85 * Lockin_srs860_5.sensitivity or magnitude_srs860[
-#         0] < 0.15 * Lockin_srs860_5.sensitivity or
-#            magnitude_srs830_2[0] > 0.85 * Lockin_srs830_6.sensitivity or magnitude_srs830_2[
-#                0] < 0.15 * Lockin_srs830_6.sensitivity):
-#
-#         ######      SRS 860_1 block     ######
-#         new_sensitivity = magnitude_srs860[0]
-#         if magnitude_srs860[0] > 0.85 * Lockin_srs860_5.sensitivity:
-#             Lockin_srs860_5.write("SCAL %d" % (int(Lockin_srs860_5.ask("SCAL?")) - 1))
-#             new_sensitivity = 1.5 * magnitude_srs860[0]
-#         elif magnitude_srs860[0] < 0.15 * Lockin_srs860_5.sensitivity:
-#             Lockin_srs860_5.write("SCAL %d" % (int(Lockin_srs860_5.ask("SCAL?")) + 1))
-#             new_sensitivity = 0.3 * abs(magnitude_srs860[0])
-#         Lockin_srs860_5.write("*CLS")
-#         Lockin_srs860_5.sensitivity = new_sensitivity
-#
-#         ######      SRS 830_2 block     ######
-#         new_sensitivity = magnitude_srs830_2[0]
-#         if magnitude_srs830_2[0] > 0.85 * Lockin_srs830_6.sensitivity:
-#             Lockin_srs830_6.write("SENS%d" % (int(Lockin_srs830_6.ask("SENS?")) + 1))
-#             new_sensitivity = 1.5 * magnitude_srs830_2[0]
-#         elif magnitude_srs830_2[0] < 0.15 * Lockin_srs830_6.sensitivity:
-#             Lockin_srs830_6.write("SENS%d" % (int(Lockin_srs830_6.ask("SENS?")) - 1))
-#             new_sensitivity = 0.3 * abs(magnitude_srs830_2[0])
-#         Lockin_srs830_6.write("*CLS")
-#         Lockin_srs830_6.sensitivity = new_sensitivity
-#
-#         #######    SRS 830_3 block     ######
-#
-#         # new_sensitivity = magnitude_srs830_3[0]
-#         # if magnitude_srs830_3[0] > 0.85 * self.lockin_3.sensitivity:
-#         #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) + 1))
-#         #     new_sensitivity = 1.5 * magnitude_srs830_3[0]
-#         # elif magnitude_srs830_3[0] < 0.15 * self.lockin_3.sensitivity:
-#         #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) - 1))
-#         #     new_sensitivity = 0.3 * abs(magnitude_srs830_3)
-#         # self.lockin_3.write("*CLS")
-#         # self.lockin_3.sensitivity = new_sensitivity
-#
-#         #######     Zurich block     ######
-#
-#         # new_sensitivity = magnitude_zurich[0]
-#         # if magnitude_srs830_3[0] > 0.85 * self.lockin_3.sensitivity:
-#         #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) + 1))
-#         #     new_sensitivity = 1.5 * magnitude_srs830_3[0]
-#         # elif magnitude_srs830_3[0] < 0.15 * self.lockin_3.sensitivity:
-#         #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) - 1))
-#         #     new_sensitivity = 0.3 * abs(magnitude_srs830_3)
-#         # self.lockin_3.write("*CLS")
-#         # self.lockin_3.sensitivity = new_sensitivity
-#
-#         time_const = [Lockin_srs860_5.time_constant
-#             , Lockin_srs830_6.time_constant
-#                       # ,self.lockin_3.time_constant
-#                       # ,self.lockin_4.get_time_contastant()
-#                       ]
-#         time.sleep(7.0 * max(time_const))
-#         magnitude_srs860 = Lockin_srs860_5.snap("R")
-#         magnitude_srs830_2 = Lockin_srs830_6.snap("R")
-#         # magnitude_srs830_3 = self.lockin_3.snap("R")
-#         # magnitude_zurich = self.lockin_4.read_demod()
-#
-#     # Continue mangetic field sweeping
-#     magnet.set_sweep_mode(magnet_mode)
-#
 # def auto_range():
-#
+    # In case magnetic field is sweeping
+    magnet_mode = magnet.get_sweep_mode()
+    magnet.set_sweep_mode('Pause')
+
+    magnitude_srs860 = Lockin_srs860_5.snap("R")
+    magnitude_srs830_2 = Lockin_srs830_6.snap("R")
+    # magnitude_srs830_3 = self.lockin_3.snap("R")
+    # magnitude_zurich = self.lockin_4.read_demod()
+    while (magnitude_srs860[0] > 0.85 * Lockin_srs860_5.sensitivity or magnitude_srs860[
+        0] < 0.15 * Lockin_srs860_5.sensitivity or
+           magnitude_srs830_2[0] > 0.85 * Lockin_srs830_6.sensitivity or magnitude_srs830_2[
+               0] < 0.15 * Lockin_srs830_6.sensitivity):
+
+        ######      SRS 860_1 block     ######
+        new_sensitivity = magnitude_srs860[0]
+        if magnitude_srs860[0] > 0.85 * Lockin_srs860_5.sensitivity:
+            Lockin_srs860_5.write("SCAL %d" % (int(Lockin_srs860_5.ask("SCAL?")) - 1))
+            new_sensitivity = 1.5 * magnitude_srs860[0]
+        elif magnitude_srs860[0] < 0.15 * Lockin_srs860_5.sensitivity:
+            Lockin_srs860_5.write("SCAL %d" % (int(Lockin_srs860_5.ask("SCAL?")) + 1))
+            new_sensitivity = 0.3 * abs(magnitude_srs860[0])
+        Lockin_srs860_5.write("*CLS")
+        Lockin_srs860_5.sensitivity = new_sensitivity
+
+        ######      SRS 830_2 block     ######
+        new_sensitivity = magnitude_srs830_2[0]
+        if magnitude_srs830_2[0] > 0.85 * Lockin_srs830_6.sensitivity:
+            Lockin_srs830_6.write("SENS%d" % (int(Lockin_srs830_6.ask("SENS?")) + 1))
+            new_sensitivity = 1.5 * magnitude_srs830_2[0]
+        elif magnitude_srs830_2[0] < 0.15 * Lockin_srs830_6.sensitivity:
+            Lockin_srs830_6.write("SENS%d" % (int(Lockin_srs830_6.ask("SENS?")) - 1))
+            new_sensitivity = 0.3 * abs(magnitude_srs830_2[0])
+        Lockin_srs830_6.write("*CLS")
+        Lockin_srs830_6.sensitivity = new_sensitivity
+
+        #######    SRS 830_3 block     ######
+
+        # new_sensitivity = magnitude_srs830_3[0]
+        # if magnitude_srs830_3[0] > 0.85 * self.lockin_3.sensitivity:
+        #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) + 1))
+        #     new_sensitivity = 1.5 * magnitude_srs830_3[0]
+        # elif magnitude_srs830_3[0] < 0.15 * self.lockin_3.sensitivity:
+        #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) - 1))
+        #     new_sensitivity = 0.3 * abs(magnitude_srs830_3)
+        # self.lockin_3.write("*CLS")
+        # self.lockin_3.sensitivity = new_sensitivity
+
+        #######     Zurich block     ######
+
+        # new_sensitivity = magnitude_zurich[0]
+        # if magnitude_srs830_3[0] > 0.85 * self.lockin_3.sensitivity:
+        #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) + 1))
+        #     new_sensitivity = 1.5 * magnitude_srs830_3[0]
+        # elif magnitude_srs830_3[0] < 0.15 * self.lockin_3.sensitivity:
+        #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) - 1))
+        #     new_sensitivity = 0.3 * abs(magnitude_srs830_3)
+        # self.lockin_3.write("*CLS")
+        # self.lockin_3.sensitivity = new_sensitivity
+
+        time_const = [Lockin_srs860_5.time_constant
+            , Lockin_srs830_6.time_constant
+                      # ,self.lockin_3.time_constant
+                      # ,self.lockin_4.get_time_contastant()
+                      ]
+        time.sleep(7.0 * max(time_const))
+        magnitude_srs860 = Lockin_srs860_5.snap("R")
+        magnitude_srs830_2 = Lockin_srs830_6.snap("R")
+        # magnitude_srs830_3 = self.lockin_3.snap("R")
+        # magnitude_zurich = self.lockin_4.read_demod()
+
+    # Continue mangetic field sweeping
+    magnet.set_sweep_mode(magnet_mode)
+
+# def auto_range_legacy():
+
 #     magnitude_srs860 = Lockin_srs860_5.snap("R")
 #     magnitude_srs830_2 = Lockin_srs830_6.snap("R")
 #     # magnitude_srs830_3 = self.lockin_3.snap("R")
@@ -382,7 +386,7 @@ def read_temperature(root=r"C:\\Users\\ICE\\Desktop\\ICElog\\Results",
 #         0] < 0.15 * Lockin_srs860_5.sensitivity or
 #            magnitude_srs830_2[0] > 0.85 * Lockin_srs830_6.sensitivity or magnitude_srs830_2[
 #                0] < 0.15 * Lockin_srs830_6.sensitivity):
-#
+
 #         ######      SRS 860_1 block     ######
 #         new_sensitivity = magnitude_srs860[0]
 #         if magnitude_srs860[0] > 0.85 * Lockin_srs860_5.sensitivity:
@@ -393,7 +397,7 @@ def read_temperature(root=r"C:\\Users\\ICE\\Desktop\\ICElog\\Results",
 #             new_sensitivity = 0.3 * abs(magnitude_srs860[0])
 #         Lockin_srs860_5.write("*CLS")
 #         Lockin_srs860_5.sensitivity = new_sensitivity
-#
+
 #         ######      SRS 830_2 block     ######
 #         new_sensitivity = magnitude_srs830_2[0]
 #         if magnitude_srs830_2[0] > 0.85 * Lockin_srs830_6.sensitivity:
@@ -404,9 +408,9 @@ def read_temperature(root=r"C:\\Users\\ICE\\Desktop\\ICElog\\Results",
 #             new_sensitivity = 0.3 * abs(magnitude_srs830_2[0])
 #         Lockin_srs830_6.write("*CLS")
 #         Lockin_srs830_6.sensitivity = new_sensitivity
-#
+
 #         #######    SRS 830_3 block     ######
-#
+
 #         # new_sensitivity = magnitude_srs830_3[0]
 #         # if magnitude_srs830_3[0] > 0.85 * self.lockin_3.sensitivity:
 #         #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) + 1))
@@ -416,9 +420,9 @@ def read_temperature(root=r"C:\\Users\\ICE\\Desktop\\ICElog\\Results",
 #         #     new_sensitivity = 0.3 * abs(magnitude_srs830_3)
 #         # self.lockin_3.write("*CLS")
 #         # self.lockin_3.sensitivity = new_sensitivity
-#
+
 #         #######     Zurich block     ######
-#
+
 #         # new_sensitivity = magnitude_zurich[0]
 #         # if magnitude_srs830_3[0] > 0.85 * self.lockin_3.sensitivity:
 #         #     self.lockin_3.write("SENS%d" % (int(self.lockin_3.ask("SENS?")) + 1))
@@ -428,7 +432,7 @@ def read_temperature(root=r"C:\\Users\\ICE\\Desktop\\ICElog\\Results",
 #         #     new_sensitivity = 0.3 * abs(magnitude_srs830_3)
 #         # self.lockin_3.write("*CLS")
 #         # self.lockin_3.sensitivity = new_sensitivity
-#
+
 #         time_const = [Lockin_srs860_5.time_constant
 #             , Lockin_srs830_6.time_constant
 #                       # ,self.lockin_3.time_constant
