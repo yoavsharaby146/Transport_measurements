@@ -128,7 +128,6 @@ class Resistance_magnet_sweep_measurement(Procedure):
                 log.info("Measurement stopped before reaching target field")
         log.info("Finished measuring")
 
-
 proc_resistance_magnet = {
     "Resistance magnet sweep measurement": dict(
         cls=Resistance_magnet_sweep_measurement,

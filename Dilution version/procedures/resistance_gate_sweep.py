@@ -157,7 +157,7 @@ class Resistance_gate_sweep_measurement(Procedure):
 proc_resistance_gate = {
     "Resistance gate sweep measurement": dict(
         cls=Resistance_gate_sweep_measurement,
-        category=["Gate Sweep", "Keithley 2450"],
+        category=["Gate Sweep"],
         description="Sweeps a Gate Voltage while measuring Resistance (via Lock-ins).\n"
                     "Supports Keithley 2450 and Dual Gate SMUs (Keithley 2604B).",
         inputs=[

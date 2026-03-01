@@ -158,7 +158,6 @@ class Differential_Resistance_Zurich(Procedure):
     def shutdown(self):
         log.info("Finished measuring")
 
-
 proc_differential_resistance_Zurich = {
     "Differential Resistance Zurich": dict(
         cls=Differential_Resistance_Zurich,

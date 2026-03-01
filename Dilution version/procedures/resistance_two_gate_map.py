@@ -202,7 +202,7 @@ class Resistance_two_gate_mapping_measurement(Procedure):
 proc_resistance_two_gate_map = {
     "Resistance two gate mapping measurement": dict(
         cls=Resistance_two_gate_mapping_measurement,
-        category=["2D Mapping", "Gate Sweep", "Keithley 2450"],
+        category=["2D Mapping", "Gate Sweep"],
         description="2D Resistance Map with Selectable Scan Mode.\n"
                     "1. Snake: Alternates direction every row. Fastest.\n"
                     "2. Forward/Backward: Sweeps both directions at every row. Use for hysteresis.\n",

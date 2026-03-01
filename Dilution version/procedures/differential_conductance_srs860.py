@@ -4,17 +4,8 @@ Differential conductance measurement using SRS860.
 
 from .base import *
 
-# Additional columns for differential measurements
+# Additional column for differential measurements
 DC_COLUMNS = ['DC_offset(V)']
-LOCKIN_CURRENT_COLUMNS = [
-    'Lockin_Current_SRS860_X(A)', 'Lockin_Current_SRS860_Y(A)',
-    'MFLI_Lockin_1_Current_X(A)', 'MFLI_Lockin_1_Current_Y(A)',
-    'MFLI_Lockin_2_Current_X(A)', 'MFLI_Lockin_2_Current_Y(A)',
-    'MFLI_Lockin_3_Current_X(A)', 'MFLI_Lockin_3_Current_Y(A)',
-    'Lockin_Current_SRS830_1_X(A)', 'Lockin_Current_SRS830_1_Y(A)',
-    'Lockin_Current_SRS830_2_X(A)', 'Lockin_Current_SRS830_2_Y(A)',
-]
-
 
 class Differential_conductance_SRS860(Procedure):
     Title = Parameter('dI/dV measurement', default='Rt')

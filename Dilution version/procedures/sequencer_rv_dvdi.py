@@ -231,7 +231,7 @@ class RV_dV_dI_sequencer_measurement(Procedure):
 proc_RV_dV_dI_sequencer = {
     "RV dV_dI sequencer measurement": dict(
         cls=RV_dV_dI_sequencer_measurement,
-        category=["Differential Resistance", "Gate Sweep", "Keithley 2450"],
+        category=["Differential Resistance", "Gate Sweep"],
         description="dV/dI Sweep starting from Origin DC AUX using MFLI_1.\n"
                     "1. Sweep to Setpoint: Measures from [Origin] -> [Target]. Leaves voltage at Target.\n"
                     "2. Sweep and Return: Measures from [Origin] -> [Target] -> [Origin]. Returns voltage to start.\n"

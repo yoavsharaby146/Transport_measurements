@@ -56,7 +56,6 @@ CATAGORIES = {
     "2D Mapping": "#EABEF9",
     "Tunneling junction": "#F9BEC2",
     "Differential Resistance": "#F9E3BE",
-    "Keithley 2450": "#FCBBD5"
 }
 
 __all__ = [

@@ -161,7 +161,6 @@ class Resistance_two_gate_scan_sweep_measurement(Procedure):
     def shutdown(self):
         log.info("Finished measuring two gate sweep")
 
-
 proc_resistance_two_gate_sweep = {
     "Resistance two gate sweep measurement": dict(
         cls=Resistance_two_gate_scan_sweep_measurement,

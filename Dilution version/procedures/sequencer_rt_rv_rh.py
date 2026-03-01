@@ -215,7 +215,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
 proc_Rt_RV_RH_sequencer = {
     "Rt_RV_RH sequencer measurement": dict(
         cls=Rt_RV_RH_sequencer_measurement,
-        category=["Magnetic Field", "Gate Sweep", "Keithley 2450", "Time-based"],
+        category=["Magnetic Field", "Gate Sweep", "Time-based"],
         description="Procedure in order to sequence between Rt, RV and RH.\n"
                     "The user can choose measurement type and the relevant parameter will pop up.\n"
                     "Rt -> acquisition length is required.\n"

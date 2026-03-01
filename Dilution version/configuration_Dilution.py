@@ -29,12 +29,14 @@ from dilution_connection import DilutionInstrument
 
 from Instruments.SR830_with_add_ons import SR830
 from Instruments.SR860_with_add_ons import SR860
-#from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
+
 from Instruments.keithley2450_with_add_ons import Keithley2450
 from Instruments.keithley2604B import Keithley2604B
-#from keithley2600 import Keithley2600
+
 from Instruments.MFLI import MFLIController
 
+#from keithley2600 import Keithley2600
+#from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
 # ---------------- configuration.py PATCH ----------------
 # Paste AT THE TOP of your existing configuration.py, replacing the hard-coded
 # instrument creation. This keeps the *same names* used by your Procedures.

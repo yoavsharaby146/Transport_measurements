@@ -207,7 +207,6 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
     def shutdown(self):
         log.info("Finished measuring")
 
-
 proc_resistance_magnet_2gate_map = {
     "Resistance Magnet and 2-Gate Map": dict(
         cls=Resistance_magnet_and_2gate_mapping_measurement,

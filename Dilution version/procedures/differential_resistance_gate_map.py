@@ -252,7 +252,6 @@ class Differential_Resistance_Gate_map_Zurich(Procedure):
         log.info("Measurement complete. Instruments are being held at final setpoints.")
         log.info("Procedure shutdown finished.")
 
-
 proc_differential_resistance_gate_map_zurich = {
     "Differential Resistance Gate Map Zurich": dict(
         cls=Differential_Resistance_Gate_map_Zurich,

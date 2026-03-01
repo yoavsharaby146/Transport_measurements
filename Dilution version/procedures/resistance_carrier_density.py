@@ -168,7 +168,6 @@ class Resistance_carrier_density_farward_backward_measurement(Procedure):
     def shutdown(self):
         log.info("Finished measuring")
 
-
 proc_resistance_carrier_density = {
     "Resistance carrier density sweep measurement": dict(
         cls=Resistance_carrier_density_farward_backward_measurement,
