@@ -749,8 +749,7 @@ class KeithleyControllerApp:
 
         # --- GUI Layout ---
         self._build_connection_frame()
-        self._build_device_notebook()
-        self._build_console_log()
+        self._build_main_paned_window()  # Creates paned window container
 
         # Auto-scan on startup
         self.scan_instruments()
@@ -773,10 +772,18 @@ class KeithleyControllerApp:
         self.btn_add = ttk.Button(frame, text="Add Device", command=self.add_device)
         self.btn_add.pack(side="left", padx=5)
 
-    def _build_device_notebook(self):
-        """Build the notebook that will hold device tabs"""
-        self.device_notebook = ttk.Notebook(self.root)
-        self.device_notebook.pack(fill="both", expand=True, padx=10, pady=5)
+    def _build_main_paned_window(self):
+        """Create a vertical PanedWindow for resizable notebook and log areas"""
+        # Main paned window container
+        self.main_paned = ttk.PanedWindow(self.root, orient="vertical")
+        self.main_paned.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Top pane: Device notebook
+        self.notebook_frame = ttk.Frame(self.main_paned)
+        self.main_paned.add(self.notebook_frame, weight=1)
+        
+        self.device_notebook = ttk.Notebook(self.notebook_frame)
+        self.device_notebook.pack(fill="both", expand=True)
 
         # Add a placeholder tab when no devices are connected
         self.placeholder_frame = ttk.Frame(self.device_notebook)
@@ -790,10 +797,11 @@ class KeithleyControllerApp:
         )
         placeholder_label.pack(expand=True)
 
-    def _build_console_log(self):
-        frame = ttk.LabelFrame(self.root, text="System Log")
-        frame.pack(fill="x", padx=10, pady=5, side="bottom")
-        self.console = scrolledtext.ScrolledText(frame, height=8, state='disabled', font=("Consolas", 9))
+        # Bottom pane: Console log (resizable by dragging the divider)
+        self.log_frame = ttk.LabelFrame(self.main_paned, text="System Log")
+        self.main_paned.add(self.log_frame, weight=0)
+
+        self.console = scrolledtext.ScrolledText(self.log_frame, height=8, state='disabled', font=("Consolas", 9))
         self.console.pack(fill="both", expand=True, padx=5, pady=5)
 
     def log_message(self, message):
