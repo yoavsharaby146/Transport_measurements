@@ -23,6 +23,7 @@ from .resistance_magnet_2gate_map import Resistance_magnet_and_2gate_mapping_mea
 from .differential_conductance_srs860 import Differential_conductance_SRS860, proc_differential_conductance_SRS860
 from .differential_conductance_zurich import Differential_conductance_Zurich, proc_differential_conductance_Zurich
 from .differential_resistance_zurich import Differential_Resistance_Zurich, proc_differential_resistance_Zurich
+from .differential_resistance_zurich_AUX_map import Differential_Resistance_Zurich_AUX_map, proc_differential_resistance_Zurich_AUX_map
 from .sequencer_rt_rv_rh import Rt_RV_RH_sequencer_measurement, proc_Rt_RV_RH_sequencer
 from .sequencer_rv_dvdi import RV_dV_dI_sequencer_measurement, proc_RV_dV_dI_sequencer
 
@@ -49,6 +50,7 @@ PROCEDURES.update(proc_resistance_magnet_2gate_map)
 PROCEDURES.update(proc_differential_conductance_SRS860)
 PROCEDURES.update(proc_differential_conductance_Zurich)
 PROCEDURES.update(proc_differential_resistance_Zurich)
+PROCEDURES.update(proc_differential_resistance_Zurich_AUX_map)
 PROCEDURES.update(proc_Rt_RV_RH_sequencer)
 PROCEDURES.update(proc_RV_dV_dI_sequencer)
 
@@ -71,6 +73,7 @@ __all__ = [
     'Differential_conductance_SRS860',
     'Differential_conductance_Zurich',
     'Differential_Resistance_Zurich',
+    'Differential_Resistance_Zurich_AUX_map',
     'Rt_RV_RH_sequencer_measurement',
     'RV_dV_dI_sequencer_measurement',
     # Registration dicts
@@ -84,6 +87,7 @@ __all__ = [
     'proc_differential_conductance_SRS860',
     'proc_differential_conductance_Zurich',
     'proc_differential_resistance_Zurich',
+    'proc_differential_resistance_Zurich_AUX_map',
     'proc_Rt_RV_RH_sequencer',
     'proc_RV_dV_dI_sequencer',
     # Aggregates
