@@ -4,7 +4,7 @@ matplotlib.use("TkAgg")
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
-import pandas as pd
+import polars as pl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -470,7 +470,7 @@ class InteractivePlotter:
                 header_line = 0
                 for i, line in enumerate(lines[:50]):
                     if 'time(s)' in line.lower(): header_line = i; break
-                df = pd.read_csv(filepath, header=header_line)
+                df = pl.read_csv(filepath, skip_rows=header_line)
                 filename = filepath.split('/')[-1]
                 self.datasets[filename] = df
             except Exception as e:
@@ -514,14 +514,14 @@ class InteractivePlotter:
         columns = []
         if self.merge_cols_var.get():
             unique_cols = set()
-            for df in self.datasets.values(): unique_cols.update(df.columns.tolist())
+            for df in self.datasets.values(): unique_cols.update(df.columns)
             columns = sorted(list(unique_cols))
             if self.datasets: self.current_dataset_key = list(self.datasets.keys())[0]
         else:
             key = self.axis_ref_combo.get()
             if key in self.datasets:
                 self.current_dataset_key = key;
-                columns = self.datasets[key].columns.tolist()
+                columns = self.datasets[key].columns
         self.x_combo['values'] = columns;
         self.z_combo['values'] = columns;
         self.y_listbox.delete(0, tk.END)
@@ -722,7 +722,7 @@ class InteractivePlotter:
             if self.use_ref_x_var.get():
                 ref = self.axis_ref_combo.get()
                 if ref in self.datasets and xcol in self.datasets[ref].columns:
-                    X_master = self.datasets[ref][xcol].values / xf
+                    X_master = self.datasets[ref][xcol].to_numpy() / xf
 
             axes_list = []
             if ptype == "Broken Y-Axis":
@@ -749,10 +749,10 @@ class InteractivePlotter:
 
                     if X_master is not None:
                         X_plot = X_master[:min(len(X_master), len(df))]
-                        Y_plot = (df[yc].values / curr_yf)[:len(X_plot)]
+                        Y_plot = (df[yc].to_numpy() / curr_yf)[:len(X_plot)]
                     elif xcol in df.columns:
-                        X_plot = df[xcol].values / xf
-                        Y_plot = df[yc].values / curr_yf
+                        X_plot = df[xcol].to_numpy() / xf
+                        Y_plot = df[yc].to_numpy() / curr_yf
                     else:
                         continue
 
@@ -780,9 +780,9 @@ class InteractivePlotter:
                 # ... (Existing Color Map Logic) ...
                 if len(sel_ds) != 1 or len(ycols) != 1: raise ValueError("Color Map: 1 File, 1 Y.")
                 df = sel_ds[0][1]
-                X = df[xcol].values / xf;
-                Y = df[ycols[0]].values / yf;
-                Z = df[self.z_combo.get()].values / zf
+                X = df[xcol].to_numpy() / xf;
+                Y = df[ycols[0]].to_numpy() / yf;
+                Z = df[self.z_combo.get()].to_numpy() / zf
                 xi, yi = np.meshgrid(np.linspace(X.min(), X.max(), 300), np.linspace(Y.min(), Y.max(), 300))
                 zi = griddata((X, Y), Z, (xi, yi), method='cubic')
                 im = self.ax.imshow(zi, extent=(X.min(), X.max(), Y.min(), Y.max()), origin='lower', aspect='auto',
