@@ -6,10 +6,10 @@ from .base import (
     log, time, math, np,
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
-    read_temperature,
+    read_temperature, BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS,
 )
 from . import base
-base.magnet = magnet
+
 
 
 class Rt_RV_RH_sequencer_measurement(Procedure):
@@ -49,15 +49,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
     MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
 
-    DATA_COLUMNS = ['time(s)', '50K_plate(K)', '4K_plate(K)', 'VTI_temp(K)', 'probe_temp(K)',
-        'SMUa(V)', 'SMUa_Leakage(A)', 'SMUb(V)', 'SMUb_Leakage(A)',
-        'Gate_1_voltage(V)', 'Gate_1_Leakage(A)', 'Gate_2_voltage(V)', 'Gate_2_Leakage(A)',
-        'Lockin_Voltage_SRS860_X(V)', 'Lockin_Voltage_SRS860_Y(V)',
-        'MFLI_Lockin_1_Voltage_X(V)', 'MFLI_Lockin_1_Voltage_Y(V)',
-        'MFLI_Lockin_2_Voltage_X(V)', 'MFLI_Lockin_2_Voltage_Y(V)',
-        'MFLI_Lockin_3_Voltage_X(V)', 'MFLI_Lockin_3_Voltage_Y(V)',
-        'Lockin_Voltage_SRS830_1_X(V)', 'Lockin_Voltage_SRS830_1_Y(V)',
-        'Lockin_Voltage_SRS830_2_X(V)', 'Lockin_Voltage_SRS830_2_Y(V)', 'field(T)']
+    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
 
     def startup(self):
         if self.use_srs860:
@@ -80,6 +72,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
+        magnet = base.magnet
         if self.use_magnet:
             magnet.magnet_field_write_query()
         temperature = read_temperature()
@@ -159,6 +152,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
             Gate.output_off()
 
     def run_RH(self):
+        magnet = base.magnet
         time_0 = time.time()
         if self.use_magnet == False:
             log.info("Forgot to choose magnet in magnetic field measurement")
@@ -188,6 +182,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
         log.info("Magnetic field Reached!")
 
     def execute(self):
+        magnet = base.magnet
         if self.Type == 'RH':
             self.run_RH()
         elif self.Type == 'RV':
@@ -196,6 +191,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
             self.run_Rt()
 
     def shutdown(self):
+        magnet = base.magnet
         if self.Type == 'RH' and self.use_magnet:
             current_field = magnet.magnet_field
             if abs(current_field - self.Target_field) > 0.003:

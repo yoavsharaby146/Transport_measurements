@@ -4,7 +4,7 @@ Resistance two gate sweep measurement procedure.
 
 from .base import *
 from . import base
-base.magnet = magnet
+
 
 
 class Resistance_two_gate_scan_sweep_measurement(Procedure):
@@ -84,6 +84,7 @@ class Resistance_two_gate_scan_sweep_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
+        magnet = base.magnet
         if self.use_magnet:
             magnet.magnet_field_write_query()
 
@@ -131,6 +132,7 @@ class Resistance_two_gate_scan_sweep_measurement(Procedure):
             Gate.output_on()
 
     def execute(self):
+        magnet = base.magnet
         time_0 = time.time()
         top_gate = self.smu_choice(self.smu_1)
         bottom_gate = self.smu_choice(self.smu_2)
