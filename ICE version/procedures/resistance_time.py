@@ -3,6 +3,8 @@ Resistance time measurement procedure.
 """
 
 from .base import *
+from . import base
+base.magnet = magnet
 
 
 class Resistance_time_measurement(Procedure):

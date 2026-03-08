@@ -3,6 +3,8 @@ Resistance two gate mapping measurement procedure.
 """
 
 from .base import *
+from . import base
+base.magnet = magnet
 
 
 class Resistance_two_gate_mapping_measurement(Procedure):

@@ -3,6 +3,8 @@ Resistance magnet sweep measurement procedure.
 """
 
 from .base import *
+from . import base
+base.magnet = magnet
 
 
 class Resistance_magnet_sweep_measurement(Procedure):

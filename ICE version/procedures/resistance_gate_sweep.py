@@ -3,7 +3,8 @@ Resistance gate sweep measurement procedure.
 """
 
 from .base import *
-
+from . import base
+base.magnet = magnet
 
 class Resistance_gate_sweep_measurement(Procedure):
     Title = Parameter(' RV gate sweep ', default='RV')

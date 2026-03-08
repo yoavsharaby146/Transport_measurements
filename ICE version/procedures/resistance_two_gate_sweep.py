@@ -3,6 +3,8 @@ Resistance two gate sweep measurement procedure.
 """
 
 from .base import *
+from . import base
+base.magnet = magnet
 
 
 class Resistance_two_gate_scan_sweep_measurement(Procedure):

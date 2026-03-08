@@ -11,6 +11,8 @@ from .base import (
     read_temperature,
     BASE_DATA_COLUMNS,
 )
+from . import base
+base.magnet = magnet
 
 
 class Resistance_magnet_and_gate_mapping_measurement(Procedure):

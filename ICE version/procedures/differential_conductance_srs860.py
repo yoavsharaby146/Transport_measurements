@@ -11,7 +11,8 @@ from .base import (
     read_temperature,
     BASE_DATA_COLUMNS,
 )
-
+from . import base
+base.magnet = magnet
 
 class Differential_conductance_SRS860(Procedure):
     # --- Parameters ---

@@ -8,6 +8,8 @@ from .base import (
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
 )
+from . import base
+base.magnet = magnet
 
 
 class RV_dV_dI_sequencer_measurement(Procedure):
