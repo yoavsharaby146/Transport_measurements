@@ -81,7 +81,7 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
     source_enabled = Instrument.measurement(
         "OUTPUT?",
         """ Reads a boolean value that is True if the source is enabled. """,
-        cast=bool
+        cast=lambda x: str(x).strip() in ('1', 'ON', 'True', 'true')
     )
 
     ###############
