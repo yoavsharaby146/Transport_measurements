@@ -697,7 +697,51 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
         # Ensure we landed exactly on target (linspace handles this, but good safety)
         self.write(f":SOUR:VOLT {target_volt}")
 
+    def current_ramping_with_monitor(self, target_curr, step, time_step, callback=None):
+        """
+        Ramps current using np.linspace for precision.
+        Measures voltage at each step.
+        Checks callback to allow user abort.
+        """
+        # 1. Get starting point
+        try:
+            origin = self.source_current
+        except:
+            origin = 0.0
+
+        # 2. Calculate Number of Points (Fencepost logic)
+        if step == 0: step = 1e-9  # Safety (1 nA minimum step)
+        points = int(abs(target_curr - origin) / abs(step)) + 1
+
+        # 3. Generate the array (Safe from floating point drift)
+        ramp_array = np.linspace(origin, target_curr, points)
+
+        # 4. Iterate
+        for curr in ramp_array:
+            self.write(f":SOUR:CURR {curr:.6e}")
+
+            # --- MONITOR & STOP LOGIC ---
+            if callback:
+                try:
+                    # Measure real values
+                    meas_i = curr
+                    meas_v = float(self.ask(":MEAS:VOLT?"))
+
+                    # Call GUI function. If it returns True -> STOP
+                    if callback(meas_v, meas_i):
+                        print("Ramp Aborted by User.")
+                        return  # Exit the function immediately
+                except:
+                    pass
+            # ----------------------------
+
+            time.sleep(time_step)
+
+        # Ensure we landed exactly on target
+        self.write(f":SOUR:CURR {target_curr:.6e}")
+
     def configure_voltage_source(self, nplc=1, current=1e-6, auto_range=False, compliance_current=1.05e-8):
+ 
         self.apply_voltage()
         self.measure_current(nplc, current, auto_range)
         self.compliance_current = compliance_current
