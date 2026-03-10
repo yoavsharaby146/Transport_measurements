@@ -603,8 +603,14 @@ class DeviceTab:
         try:
             with self.lock:
                 self.inst.enable_source()
-                
-            self.inst.voltage_ramping_with_monitor(target, step, time_step, callback=self._ramp_callback)
+            
+            # Choose the appropriate ramping method based on source mode
+            mode = self.source_mode_var.get()
+            if mode == "voltage":
+                self.inst.voltage_ramping_with_monitor(target, step, time_step, callback=self._ramp_callback)
+            else:  # mode == "current"
+                self.inst.current_ramping_with_monitor(target, step, time_step, callback=self._ramp_callback)
+            
             self.log_message("Ramp Completed.")
         except Exception as e:
             self.log_message(f"Ramp Error: {e}")
@@ -614,6 +620,7 @@ class DeviceTab:
             self.frame.after(1, lambda: self.btn_start_ramp.config(state="normal"))
             
     def cleanup(self):
+
         """Clean up resources when tab is closed"""
         self.stop_event.set()
         self.disconnect_instrument()
