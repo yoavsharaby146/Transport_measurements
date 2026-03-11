@@ -9,9 +9,9 @@ from .base import (
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
-    BASE_DATA_COLUMNS,
+    BASE_DATA_COLUMNS, LOCKIN_CURRENT_COLUMNS, MAGNET_COLUMNS
 )
-
+from . import base
 
 class Differential_conductance_SRS860(Procedure):
     # --- Parameters ---
@@ -55,20 +55,8 @@ class Differential_conductance_SRS860(Procedure):
     MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
 
-    DATA_COLUMNS = [
-        'time(s)',
-        '50K_plate(K)', '4K_plate(K)', 'VTI_temp(K)', 'probe_temp(K)',
-        'SMUa(V)', 'SMUa_Leakage(A)', 'SMUb(V)', 'SMUb_Leakage(A)',
-        'Gate_1_voltage(V)', 'Gate_1_Leakage(A)', 'Gate_2_voltage(V)', 'Gate_2_Leakage(A)',
-        'DC_offset(V)',
-        'Lockin_Current_SRS860_X(A)', 'Lockin_Current_SRS860_Y(A)',
-        'MFLI_Lockin_1_Current_X(A)', 'MFLI_Lockin_1_Current_Y(A)',
-        'MFLI_Lockin_2_Current_X(A)', 'MFLI_Lockin_2_Current_Y(A)',
-        'MFLI_Lockin_3_Current_X(A)', 'MFLI_Lockin_3_Current_Y(A)',
-        'Lockin_Current_SRS830_1_X(A)', 'Lockin_Current_SRS830_1_Y(A)',
-        'Lockin_Current_SRS830_2_X(A)', 'Lockin_Current_SRS830_2_Y(A)',
-        'field(T)',
-    ]
+    DATA_COLUMNS = BASE_DATA_COLUMNS +['DC_offset(V)'] + LOCKIN_CURRENT_COLUMNS + MAGNET_COLUMNS
+        
 
     def startup(self):
         if self.use_srs860:
@@ -92,6 +80,7 @@ class Differential_conductance_SRS860(Procedure):
 
     def getmeas(self, t0):
         temperature = read_temperature()
+        magnet = base.magnet
         vals = [time.time() - t0] + list(temperature)
 
         if self.use_magnet:
@@ -128,6 +117,7 @@ class Differential_conductance_SRS860(Procedure):
         return np.linspace(start, end, num_points)
 
     def execute(self):
+        magnet = base.magnet
         time_0 = time.time()
 
         start_v = SRS860.dc_offset

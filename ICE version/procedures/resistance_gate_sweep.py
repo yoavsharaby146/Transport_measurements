@@ -3,6 +3,7 @@ Resistance gate sweep measurement procedure.
 """
 
 from .base import *
+from . import base
 
 
 class Resistance_gate_sweep_measurement(Procedure):
@@ -66,6 +67,7 @@ class Resistance_gate_sweep_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
+        magnet = base.magnet
         if self.use_magnet:
             magnet.magnet_field_write_query()
 
@@ -105,6 +107,7 @@ class Resistance_gate_sweep_measurement(Procedure):
         raise ValueError("Invalid SMU selected")
 
     def execute(self):
+        magnet = base.magnet
         #### Begin of measurement
         log.info(f"starting voltage sweep to {self.target_voltage} V")
         time_0 = time.time()

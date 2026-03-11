@@ -9,8 +9,10 @@ from .base import (
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
-    BASE_DATA_COLUMNS,
+    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
 )
+from . import base
+
 
 
 class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
@@ -79,7 +81,7 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
     MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
 
-    DATA_COLUMNS = BASE_DATA_COLUMNS + ['field(T)']
+    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
 
     def startup(self):
         if self.use_srs860:
@@ -102,6 +104,7 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
+        magnet = base.magnet
         if self.use_magnet:
             magnet.magnet_field_write_query()
 
@@ -155,6 +158,7 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
         return np.linspace(start, end, num_points)
 
     def execute(self):
+        magnet = base.magnet
         time_0 = time.time()
         log.info("Starting Magnet + 2-Gate Map")
 
@@ -241,6 +245,7 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
                         return
 
     def shutdown(self):
+        magnet = base.magnet
         magnet.sweep_mode = 'PAUSE'
         log.info("Finished measuring")
 
@@ -272,6 +277,6 @@ proc_resistance_magnet_2gate_map = {
             'smu_1', 'smu_2', 'smu_points'
         ],
         x='time(s)',
-        y=['probe_temp(K)', 'field(T)', 'SMUa(V)']
+        y=['field(T)', 'SMUa(V)']
     ),
 }

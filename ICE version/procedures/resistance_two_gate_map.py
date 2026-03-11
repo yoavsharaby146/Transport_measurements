@@ -3,6 +3,8 @@ Resistance two gate mapping measurement procedure.
 """
 
 from .base import *
+from . import base
+
 
 
 class Resistance_two_gate_mapping_measurement(Procedure):
@@ -83,6 +85,7 @@ class Resistance_two_gate_mapping_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
+        magnet = base.magnet
         if self.use_magnet:
             magnet.magnet_field_write_query()
 
@@ -135,6 +138,7 @@ class Resistance_two_gate_mapping_measurement(Procedure):
         return np.linspace(start, end, num_points)
 
     def execute(self):
+        magnet = base.magnet
         time_0 = time.time()
         slow_gate = self.smu_choice(self.slow_smu)
         fast_gate = self.smu_choice(self.fast_smu)
@@ -171,13 +175,13 @@ class Resistance_two_gate_mapping_measurement(Procedure):
         time.sleep(self.long_delay)
 
         for i, slow_v in enumerate(slow_range):
-            slow_gate.ramp_voltage(slow_v, steps=5, delay=0.01)
+            slow_gate.ramp_voltage(slow_v, 5, 0.01)
             time.sleep(self.short_delay)
 
             if self.scan_mode == 'Snake':
                 current_range = fast_range_forward if i % 2 == 0 else fast_range_backward
                 for fast_v in current_range:
-                    fast_gate.ramp_voltage(fast_v, steps=5, delay=0.05)
+                    fast_gate.ramp_voltage(fast_v, 5, 0.05)
                     time.sleep(self.short_delay)
                     data = self.getmeas(time_0)
                     self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
@@ -189,7 +193,7 @@ class Resistance_two_gate_mapping_measurement(Procedure):
 
             elif self.scan_mode == 'Forward/Backward':
                 for fast_v in fast_range_forward:
-                    fast_gate.ramp_voltage(fast_v, steps=5, delay=0.05)
+                    fast_gate.ramp_voltage(fast_v, 5, 0.05)
                     time.sleep(self.short_delay)
                     data = self.getmeas(time_0)
                     self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
@@ -200,7 +204,7 @@ class Resistance_two_gate_mapping_measurement(Procedure):
                         return
 
                 for fast_v in fast_range_backward:
-                    fast_gate.ramp_voltage(fast_v, steps=2, delay=0.005)
+                    fast_gate.ramp_voltage(fast_v, 2, 0.005)
                     time.sleep(self.short_delay)
                     data = self.getmeas(time_0)
                     self.emit('results', dict(zip(self.DATA_COLUMNS, data)))

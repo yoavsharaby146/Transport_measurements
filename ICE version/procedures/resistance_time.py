@@ -3,6 +3,8 @@ Resistance time measurement procedure.
 """
 
 from .base import *
+from . import base
+
 
 
 class Resistance_time_measurement(Procedure):
@@ -76,6 +78,7 @@ class Resistance_time_measurement(Procedure):
 
     def getmeas(self, t0):
         temperature = read_temperature()
+        magnet = base.magnet
         vals = [time.time() - t0]+ list(temperature)
 
         if self.use_magnet:

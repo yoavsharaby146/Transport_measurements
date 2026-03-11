@@ -3,6 +3,8 @@ Resistance magnet sweep measurement procedure.
 """
 
 from .base import *
+from . import base
+
 
 
 class Resistance_magnet_sweep_measurement(Procedure):
@@ -65,6 +67,7 @@ class Resistance_magnet_sweep_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
+        magnet = base.magnet
         # 1. Magnet Write (Trigger)
         if self.use_magnet:
             magnet.magnet_field_write_query()
@@ -102,6 +105,7 @@ class Resistance_magnet_sweep_measurement(Procedure):
         return vals
 
     def execute(self):
+        magnet = base.magnet
         if self.use_magnet == False:
             log.warning("Magnet was not chosen measurement aborted")
             return
@@ -143,6 +147,7 @@ class Resistance_magnet_sweep_measurement(Procedure):
         log.info("Magnetic field Reached!")
 
     def shutdown(self):
+        magnet = base.magnet
         if self.use_magnet == True:
             current_field = magnet.magnet_field
             if abs(current_field-self.Target_field) > 0.003:

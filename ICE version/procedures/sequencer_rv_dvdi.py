@@ -7,7 +7,10 @@ from .base import (
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
+    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
 )
+from . import base
+
 
 
 class RV_dV_dI_sequencer_measurement(Procedure):
@@ -58,16 +61,8 @@ class RV_dV_dI_sequencer_measurement(Procedure):
     MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
 
-    DATA_COLUMNS = ['time(s)', '50K_plate(K)', '4K_plate(K)', 'VTI_temp(K)', 'probe_temp(K)',
-        'SMUa(V)', 'SMUa_Leakage(A)', 'SMUb(V)', 'SMUb_Leakage(A)',
-        'Gate_1_voltage(V)', 'Gate_1_Leakage(A)', 'Gate_2_voltage(V)', 'Gate_2_Leakage(A)',
-        'Lockin_Voltage_SRS860_X(V)', 'Lockin_Voltage_SRS860_Y(V)', 'AUX_DC_offset(V)',
-        'MFLI_Lockin_1_Voltage_X(V)', 'MFLI_Lockin_1_Voltage_Y(V)',
-        'MFLI_Lockin_2_Voltage_X(V)', 'MFLI_Lockin_2_Voltage_Y(V)',
-        'MFLI_Lockin_3_Voltage_X(V)', 'MFLI_Lockin_3_Voltage_Y(V)',
-        'Lockin_Voltage_SRS830_1_X(V)', 'Lockin_Voltage_SRS830_1_Y(V)',
-        'Lockin_Voltage_SRS830_2_X(V)', 'Lockin_Voltage_SRS830_2_Y(V)', 'field(T)']
-
+    DATA_COLUMNS = BASE_DATA_COLUMNS + ['AUX_DC_offset(V)'] + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
+    
     def startup(self):
         if self.use_srs860:
             self.srs860_sine_voltage = SRS860.sine_voltage
@@ -89,7 +84,9 @@ class RV_dV_dI_sequencer_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
+        
         temperature = read_temperature()
+        magnet = base.magnet
         vals = [time.time() - t0] + list(temperature)
         if self.use_magnet:
             magnet.magnet_field_write_query()
@@ -100,20 +97,30 @@ class RV_dV_dI_sequencer_measurement(Procedure):
             vals += [math.nan] * 4
         vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
         vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
+
+        if self.use_MFLI_1:
+            auxout = MFLI_1.get_auxout(self.aux_signal)
+            vals += [auxout] 
+        else:
+            vals += [math.nan]
+            
         if self.use_srs860:
             x, y = SRS860.snap("X", "Y")
             vals += [x, y]
         else:
             vals += [math.nan, math.nan]
         if self.use_MFLI_1:
-            auxout = MFLI_1.get_auxout(self.aux_signal)
-            vals += [auxout] + list(MFLI_1.read_demod())
+
+            vals += list(MFLI_1.read_demod())
         else:
-            vals += [math.nan] * 3
+            vals += [math.nan] * 2
+            
         for use, inst in [(self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
             vals += list(inst.read_demod()) if use else [math.nan] * 2
+            
         for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2)]:
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
+            
         vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
         return vals
 
@@ -140,6 +147,7 @@ class RV_dV_dI_sequencer_measurement(Procedure):
         return np.linspace(start, end, num_points)
 
     def run_RV(self):
+        magnet = base.magnet
         time_0 = time.time()
         log.info(f"starting voltage sweep to {self.Target_voltage} V")
         Gate = self.smu_choice(self.smu)
@@ -164,7 +172,9 @@ class RV_dV_dI_sequencer_measurement(Procedure):
             Gate.output_off()
 
     def run_dV_dI(self):
+        magnet = base.magnet
         time_0 = time.time()
+        
         MFLI_1.set_auxout(self.aux_signal, self.aux_select, self.aux_demod)
         aux_origin = MFLI_1.get_auxout(self.aux_signal)
         target_aux = self.aux_Target
@@ -200,6 +210,7 @@ class RV_dV_dI_sequencer_measurement(Procedure):
                     return
 
     def execute(self):
+        magnet = base.magnet
         if self.Type == 'RV':
             self.run_RV()
         elif self.Type == 'dV_dI':
