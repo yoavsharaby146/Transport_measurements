@@ -9,9 +9,10 @@ from .base import (
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_CURRENT_COLUMNS, MAGNET_COLUMNS
+    BASE_DATA_COLUMNS, LOCKIN_CURRENT_COLUMNS, MAGNET_COLUMNS,
 )
 from . import base
+
 
 class Differential_conductance_SRS860(Procedure):
     # --- Parameters ---
@@ -55,8 +56,8 @@ class Differential_conductance_SRS860(Procedure):
     MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
 
-    DATA_COLUMNS = BASE_DATA_COLUMNS +['DC_offset(V)'] + LOCKIN_CURRENT_COLUMNS + MAGNET_COLUMNS
-        
+    DATA_COLUMNS = BASE_DATA_COLUMNS + ['DC_offset(V)'] + LOCKIN_CURRENT_COLUMNS + MAGNET_COLUMNS 
+       
 
     def startup(self):
         if self.use_srs860:
@@ -79,8 +80,8 @@ class Differential_conductance_SRS860(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
-        temperature = read_temperature()
         magnet = base.magnet
+        temperature = read_temperature()
         vals = [time.time() - t0] + list(temperature)
 
         if self.use_magnet:

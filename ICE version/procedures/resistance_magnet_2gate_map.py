@@ -9,7 +9,7 @@ from .base import (
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
+    BASE_DATA_COLUMNS,LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS,
 )
 from . import base
 

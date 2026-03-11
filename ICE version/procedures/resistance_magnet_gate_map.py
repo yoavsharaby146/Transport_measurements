@@ -9,7 +9,7 @@ from .base import (
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
+    BASE_DATA_COLUMNS,LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS,
 )
 from . import base
 
@@ -69,7 +69,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
     MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
 
-    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS +MAGNET_COLUMNS
+    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
 
     def startup(self):
         if self.use_srs860:
@@ -97,13 +97,11 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
         vals = [time.time() - t0, temperature[0], temperature[1], temperature[2], temperature[3]]
         if self.use_magnet:
             magnet.magnet_field_write_query()
-            
         if self.use_dual_gate:
             vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
                      Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
         else:
             vals += [math.nan, math.nan, math.nan, math.nan]
-            
         if self.use_keithley_1:
             vals += [Gate_1.measure__voltage(), Gate_1.measure__current()]
         else:
@@ -112,13 +110,11 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
             vals += [Gate_2.measure__voltage(), Gate_2.measure__current()]
         else:
             vals += [math.nan, math.nan]
-            
         if self.use_srs860:
             r, th = SRS860.snap("X", "Y")
             vals += [r, th]
         else:
             vals += [math.nan, math.nan]
-            
         if self.use_MFLI_1:
             x, y = MFLI_1.read_demod()
             vals += [x, y]
@@ -134,7 +130,6 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
             vals += [x, y]
         else:
             vals += [math.nan, math.nan]
-            
         if self.use_srs830_1:
             r, th = SRS830_1.snap("X", "Y")
             vals += [r, th]
@@ -232,7 +227,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
             if self.scan_mode == 'Snake':
                 current_gate_range = gate_range_fwd if i % 2 == 0 else gate_range_bwd
                 for g_volt in current_gate_range:
-                    gate.ramp_voltage(g_volt, 5, 0.01)
+                    gate.ramp_voltage(g_volt, steps=5, delay=0.01)
                     time.sleep(self.acq_delay)
                     self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
                     self.emit('progress', 100 * iteration / total_steps)
@@ -246,7 +241,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
                 log.info("Forward/Backward scanning")
                 # Part A: Forward
                 for g_volt in gate_range_fwd:
-                    gate.ramp_voltage(g_volt, 5, 0.01)
+                    gate.ramp_voltage(g_volt, steps=5, delay=0.01)
                     time.sleep(self.acq_delay)
                     self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
                     self.emit('progress', 100 * iteration / total_steps)
@@ -256,7 +251,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
                         return
                 # Part B: Backward
                 for g_volt in gate_range_bwd:
-                    gate.ramp_voltage(g_volt, 5, 0.01)
+                    gate.ramp_voltage(g_volt, steps=5, delay=0.01)
                     time.sleep(self.acq_delay)
                     self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
                     self.emit('progress', 100 * iteration / total_steps)

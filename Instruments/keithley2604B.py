@@ -67,7 +67,7 @@ class SMUChannel:
         self._w(f"source.limiti = {current_limit}")
         self.instrument.write(f"display.{self.label}.measure.func = display.MEASURE_DCAMPS")
 
-    def sense_mode(self, mode: "LOCAL"):
+    def sense_mode (self, mode: str):
         self._w(self.label +" = "+self.label+".SENSE_"+mode)
 
     def configure_current_source(self, current: float, voltage_limit: float = 10.0):

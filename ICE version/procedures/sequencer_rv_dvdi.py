@@ -6,8 +6,7 @@ from .base import (
     log, time, math, np,
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
-    read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
+    read_temperature, BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS,
 )
 from . import base
 
@@ -60,9 +59,9 @@ class RV_dV_dI_sequencer_measurement(Procedure):
     MFLI_2_frequency = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
     MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
-
-    DATA_COLUMNS = BASE_DATA_COLUMNS + ['AUX_DC_offset(V)'] + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
     
+    DATA_COLUMNS = BASE_DATA_COLUMNS + ['AUX_DC_offset(V)'] + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
+
     def startup(self):
         if self.use_srs860:
             self.srs860_sine_voltage = SRS860.sine_voltage
@@ -84,9 +83,8 @@ class RV_dV_dI_sequencer_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
-        
-        temperature = read_temperature()
         magnet = base.magnet
+        temperature = read_temperature()
         vals = [time.time() - t0] + list(temperature)
         if self.use_magnet:
             magnet.magnet_field_write_query()
@@ -97,30 +95,20 @@ class RV_dV_dI_sequencer_measurement(Procedure):
             vals += [math.nan] * 4
         vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
         vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
-
-        if self.use_MFLI_1:
-            auxout = MFLI_1.get_auxout(self.aux_signal)
-            vals += [auxout] 
-        else:
-            vals += [math.nan]
-            
         if self.use_srs860:
             x, y = SRS860.snap("X", "Y")
             vals += [x, y]
         else:
             vals += [math.nan, math.nan]
         if self.use_MFLI_1:
-
-            vals += list(MFLI_1.read_demod())
+            auxout = MFLI_1.get_auxout(self.aux_signal)
+            vals += [auxout] + list(MFLI_1.read_demod())
         else:
-            vals += [math.nan] * 2
-            
+            vals += [math.nan] * 3
         for use, inst in [(self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
             vals += list(inst.read_demod()) if use else [math.nan] * 2
-            
         for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2)]:
             vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
-            
         vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
         return vals
 
@@ -147,7 +135,6 @@ class RV_dV_dI_sequencer_measurement(Procedure):
         return np.linspace(start, end, num_points)
 
     def run_RV(self):
-        magnet = base.magnet
         time_0 = time.time()
         log.info(f"starting voltage sweep to {self.Target_voltage} V")
         Gate = self.smu_choice(self.smu)
@@ -172,9 +159,7 @@ class RV_dV_dI_sequencer_measurement(Procedure):
             Gate.output_off()
 
     def run_dV_dI(self):
-        magnet = base.magnet
         time_0 = time.time()
-        
         MFLI_1.set_auxout(self.aux_signal, self.aux_select, self.aux_demod)
         aux_origin = MFLI_1.get_auxout(self.aux_signal)
         target_aux = self.aux_Target

@@ -1,4 +1,4 @@
-import pandas as pd
+import polars as pl
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -48,7 +48,7 @@ class ScanOrganizer:
             return
 
         try:
-            df = pd.read_csv(file_path)
+            df = pl.read_csv(file_path)
 
             # Route to correct logic
             if "Smart Split" in mode:
@@ -68,7 +68,7 @@ class ScanOrganizer:
     # =========================================================
     def process_smart_vb_sweep(self, df, file_path):
         # 1. Ask User to identify the Voltage Column
-        columns = list(df.columns)
+        columns = df.columns
         if not columns:
             messagebox.showerror("Error", "CSV appears to be empty or has no headers.")
             return
@@ -104,12 +104,16 @@ class ScanOrganizer:
         if threshold is None: return
 
         # 3. Analyze Data
-        # Calculate absolute change between rows
-        df['matches_prev'] = df[v_col].diff().abs() < threshold
-
+        # Calculate absolute change between rows using Polars expressions
+        df = df.with_columns([
+            (pl.col(v_col).diff().abs() < threshold).alias("matches_prev")
+        ])
+        
         # Identify "Segments" of consecutive True/False
         # This creates a unique ID for each contiguous block of behavior
-        df['segment_id'] = (df['matches_prev'] != df['matches_prev'].shift()).cumsum()
+        df = df.with_columns([
+            (pl.col("matches_prev") != pl.col("matches_prev").shift(1)).cum_sum().alias("segment_id")
+        ])
 
         # Lists to hold the 4 categories
         fwd_voltage = []  # Voltage Sweep (Low -> High)
@@ -123,17 +127,17 @@ class ScanOrganizer:
         midpoint_v = (global_max_v + global_min_v) / 2
 
         # 4. Loop through Segments and Classify
-        grouped = df.groupby('segment_id')
+        grouped = df.group_by('segment_id')
 
-        for _, segment in grouped:
+        for seg_id, segment in grouped:
             # Skip noise (very short segments, e.g. < 3 rows)
             if len(segment) < 3:
                 continue
 
             # Check behavior of this segment
             # Is Voltage Changing? (We check the boolean flag we created)
-            # The flag 'matches_prev' might be mixed in the first row of a group, so we take the mode or mean
-            is_constant = segment['matches_prev'].mode()[0]
+            # The flag 'matches_prev' might be mixed in the first row of a group, so we take the mode
+            is_constant = segment["matches_prev"].mode()[0]
 
             if is_constant:
                 # --- Magnetic Sweep (Voltage is Constant) ---
@@ -144,8 +148,8 @@ class ScanOrganizer:
                     mag_at_sp1.append(segment)  # Low Voltage (SP1)
             else:
                 # --- Voltage Sweep (Voltage is Changing) ---
-                start_v = segment[v_col].iloc[0]
-                end_v = segment[v_col].iloc[-1]
+                start_v = segment[v_col][0]
+                end_v = segment[v_col][-1]
 
                 if end_v > start_v:
                     fwd_voltage.append(segment)  # Low -> High
@@ -154,9 +158,8 @@ class ScanOrganizer:
 
         # 5. Clean up columns before saving
         for lst in [fwd_voltage, bwd_voltage, mag_at_sp1, mag_at_sp2]:
-            for chunk in lst:
-                if 'matches_prev' in chunk.columns: del chunk['matches_prev']
-                if 'segment_id' in chunk.columns: del chunk['segment_id']
+            for i, chunk in enumerate(lst):
+                lst[i] = chunk.drop(['matches_prev', 'segment_id'])
 
         # 6. Save Files
         self.save_files_smart(file_path, fwd_voltage, bwd_voltage, mag_at_sp1, mag_at_sp2)
@@ -165,17 +168,17 @@ class ScanOrganizer:
         directory = os.path.dirname(original_path)
         name = os.path.splitext(os.path.basename(original_path))[0]
 
-        # Concatenate lists
-        df_fwd = pd.concat(fwd, ignore_index=True) if fwd else pd.DataFrame()
-        df_bwd = pd.concat(bwd, ignore_index=True) if bwd else pd.DataFrame()
-        df_sp1 = pd.concat(mag1, ignore_index=True) if mag1 else pd.DataFrame()
-        df_sp2 = pd.concat(mag2, ignore_index=True) if mag2 else pd.DataFrame()
+        # Concatenate lists using Polars
+        df_fwd = pl.concat(fwd) if fwd else pl.DataFrame()
+        df_bwd = pl.concat(bwd) if bwd else pl.DataFrame()
+        df_sp1 = pl.concat(mag1) if mag1 else pl.DataFrame()
+        df_sp2 = pl.concat(mag2) if mag2 else pl.DataFrame()
 
         # Save
-        df_fwd.to_csv(os.path.join(directory, f"{name}_Volt_Fwd.csv"), index=False)
-        df_bwd.to_csv(os.path.join(directory, f"{name}_Volt_Bwd.csv"), index=False)
-        df_sp1.to_csv(os.path.join(directory, f"{name}_Mag_at_SP1.csv"), index=False)
-        df_sp2.to_csv(os.path.join(directory, f"{name}_Mag_at_SP2.csv"), index=False)
+        df_fwd.write_csv(os.path.join(directory, f"{name}_Volt_Fwd.csv"))
+        df_bwd.write_csv(os.path.join(directory, f"{name}_Volt_Bwd.csv"))
+        df_sp1.write_csv(os.path.join(directory, f"{name}_Mag_at_SP1.csv"))
+        df_sp2.write_csv(os.path.join(directory, f"{name}_Mag_at_SP2.csv"))
 
         msg = (f"Processing Complete!\n\n"
                f"1. Fwd Voltage Rows: {len(df_fwd)}\n"
@@ -198,10 +201,10 @@ class ScanOrganizer:
 
         fwd, bwd = [], []
         for i in range(0, len(df), block_size):
-            block = df.iloc[i:i + block_size].reset_index(drop=True)
+            block = df.slice(i, block_size)
             if len(block) < block_size: break
-            fwd.extend([block.iloc[0:s1], block.iloc[s2:block_size]])
-            bwd.append(block.iloc[s1:s2])
+            fwd.extend([block.slice(0, s1), block.slice(s2, block_size)])
+            bwd.append(block.slice(s1, s2))
         self.save_simple(file_path, fwd, bwd, "Hysteresis")
 
     def process_standard_loop(self, df, file_path):
@@ -210,10 +213,10 @@ class ScanOrganizer:
         split = simpledialog.askinteger("Config", "Split Index:", initialvalue=cycle_len // 2, parent=self.root)
         fwd, bwd = [], []
         for i in range(0, len(df), cycle_len):
-            block = df.iloc[i:i + cycle_len].reset_index(drop=True)
+            block = df.slice(i, cycle_len)
             if len(block) < cycle_len: break
-            fwd.append(block.iloc[0:split])
-            bwd.append(block.iloc[split:cycle_len])
+            fwd.append(block.slice(0, split))
+            bwd.append(block.slice(split, cycle_len))
         self.save_simple(file_path, fwd, bwd, "StandardLoop")
 
     def process_snake(self, df, file_path):
@@ -222,7 +225,7 @@ class ScanOrganizer:
         fwd, bwd = [], []
         cnt = 0
         for i in range(0, len(df), sweep_len):
-            block = df.iloc[i:i + sweep_len].reset_index(drop=True)
+            block = df.slice(i, sweep_len)
             if len(block) < sweep_len: break
             if cnt % 2 == 0:
                 fwd.append(block)
@@ -233,12 +236,12 @@ class ScanOrganizer:
 
     def save_simple(self, path, fwd, bwd, suffix):
         # Basic saver for the old modes
-        df_f = pd.concat(fwd, ignore_index=True) if fwd else pd.DataFrame()
-        df_b = pd.concat(bwd, ignore_index=True) if bwd else pd.DataFrame()
+        df_f = pl.concat(fwd) if fwd else pl.DataFrame()
+        df_b = pl.concat(bwd) if bwd else pl.DataFrame()
         d = os.path.dirname(path)
         n = os.path.splitext(os.path.basename(path))[0]
-        if not df_f.empty: df_f.to_csv(os.path.join(d, f"{n}_{suffix}_Fwd.csv"), index=False)
-        if not df_b.empty: df_b.to_csv(os.path.join(d, f"{n}_{suffix}_Bwd.csv"), index=False)
+        if len(df_f) > 0: df_f.write_csv(os.path.join(d, f"{n}_{suffix}_Fwd.csv"))
+        if len(df_b) > 0: df_b.write_csv(os.path.join(d, f"{n}_{suffix}_Bwd.csv"))
         messagebox.showinfo("Success", "Files Saved!")
         self.root.quit()
 

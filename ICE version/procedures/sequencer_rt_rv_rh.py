@@ -6,8 +6,7 @@ from .base import (
     log, time, math, np,
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
-    read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
+    read_temperature, BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS,
 )
 from . import base
 
@@ -116,7 +115,6 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
 
     def run_Rt(self):
         time_0 = time.time()
-        magnet = base.magnet
         log.info("starting to measure for %d seconds", self.acq_length)
         current_time = 0.0
         while current_time < self.acq_length:
@@ -131,7 +129,6 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
 
     def run_RV(self):
         time_0 = time.time()
-        magnet = base.magnet
         log.info(f"starting voltage sweep to {self.Target_voltage} V")
         Gate = self.smu_choice(self.smu)
         if not Gate.is_output_on():
@@ -155,8 +152,8 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
             Gate.output_off()
 
     def run_RH(self):
-        time_0 = time.time()
         magnet = base.magnet
+        time_0 = time.time()
         if self.use_magnet == False:
             log.info("Forgot to choose magnet in magnetic field measurement")
             return
