@@ -1,0 +1,2 @@
+[console_scripts]
+sr860 = srsinst.sr860.__main__:main
