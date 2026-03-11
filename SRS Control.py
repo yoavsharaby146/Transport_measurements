@@ -281,6 +281,65 @@ class SR860_Direct:
     def input_shield(self, val):
         if val in self.IGND_MAP: self.write(f"IGND {self.IGND_MAP[val]}")
 
+    # --- AUXILIARY OUTPUT/INPUT COMMANDS ---
+    def get_aux_out(self, channel):
+        """Get auxiliary output voltage (channel 1-4)"""
+        return float(self.query(f"AUXV? {channel}"))
+
+    def set_aux_out(self, channel, value):
+        """Set auxiliary output voltage (channel 1-4, range -10.5 to 10.5V)"""
+        value = max(-10.5, min(10.5, value))  # Clamp to valid range
+        self.write(f"AUXV {channel},{value:.4f}")
+
+    def get_aux_in(self, channel):
+        """Get auxiliary input voltage (channel 1-4)"""
+        return float(self.query(f"OAUX? {channel}"))
+
+    # Convenience properties for each channel
+    @property
+    def aux_out_1(self):
+        return self.get_aux_out(1)
+    @aux_out_1.setter
+    def aux_out_1(self, val):
+        self.set_aux_out(1, val)
+
+    @property
+    def aux_out_2(self):
+        return self.get_aux_out(2)
+    @aux_out_2.setter
+    def aux_out_2(self, val):
+        self.set_aux_out(2, val)
+
+    @property
+    def aux_out_3(self):
+        return self.get_aux_out(3)
+    @aux_out_3.setter
+    def aux_out_3(self, val):
+        self.set_aux_out(3, val)
+
+    @property
+    def aux_out_4(self):
+        return self.get_aux_out(4)
+    @aux_out_4.setter
+    def aux_out_4(self, val):
+        self.set_aux_out(4, val)
+
+    @property
+    def aux_in_1(self):
+        return self.get_aux_in(1)
+
+    @property
+    def aux_in_2(self):
+        return self.get_aux_in(2)
+
+    @property
+    def aux_in_3(self):
+        return self.get_aux_in(3)
+
+    @property
+    def aux_in_4(self):
+        return self.get_aux_in(4)
+
 
 class Utility:
     @staticmethod
@@ -360,9 +419,123 @@ class InstrumentPanel(ttk.Frame):
         else:
             self.build_sr860_layout(self.controls_frame)
 
+    # --- AUXILIARY SECTION (Shared) ---
+    def build_auxiliary_section(self, parent, row):
+        """Build auxiliary output/input controls. Returns the frame."""
+        aux_frame = ttk.LabelFrame(parent, text="Auxiliary")
+        aux_frame.grid(row=row, column=0, columnspan=3, sticky="nsew", padx=2, pady=5)
+        
+        # Configure columns for even spacing
+        for i in range(8):
+            aux_frame.columnconfigure(i, weight=1)
+
+        # Variables for auxiliary inputs (read-only display)
+        self.vars_aux_in = {
+            1: tk.StringVar(value="--"),
+            2: tk.StringVar(value="--"),
+            3: tk.StringVar(value="--"),
+            4: tk.StringVar(value="--")
+        }
+        
+        # Variables for auxiliary outputs
+        self.vars_aux_out = {
+            1: tk.StringVar(value="0.000"),
+            2: tk.StringVar(value="0.000"),
+            3: tk.StringVar(value="0.000"),
+            4: tk.StringVar(value="0.000")
+        }
+
+        # Header row
+        ttk.Label(aux_frame, text="Outputs", font=('Arial', 9, 'bold')).grid(row=0, column=0, columnspan=4, pady=2)
+        ttk.Label(aux_frame, text="Inputs (Read)", font=('Arial', 9, 'bold')).grid(row=0, column=4, columnspan=4, pady=2)
+
+        # Store set handlers for reuse
+        self._aux_set_handlers = {}
+
+        # Row 1: Aux 1 and 2
+        for ch in [1, 2]:
+            col_offset = (ch - 1) * 2
+            # Output control
+            ttk.Label(aux_frame, text=f"Out {ch}:").grid(row=1, column=col_offset, sticky="e", padx=2)
+            entry = ttk.Entry(aux_frame, textvariable=self.vars_aux_out[ch], width=8)
+            entry.grid(row=1, column=col_offset + 1, padx=2)
+            
+            def make_set_handler(channel):
+                def set_aux():
+                    try:
+                        val = float(self.vars_aux_out[channel].get())
+                        val = max(-10.5, min(10.5, val))  # Clamp to valid range
+                        if self.is_SR830:
+                            setattr(self.inst, f'aux_out_{channel}', val)
+                        else:
+                            self.inst.set_aux_out(channel, val)
+                        time.sleep(0.05)
+                        # Read back
+                        if self.is_SR830:
+                            new_val = getattr(self.inst, f'aux_out_{channel}')
+                        else:
+                            new_val = self.inst.get_aux_out(channel)
+                        self.vars_aux_out[channel].set(f"{new_val:.4f}")
+                    except Exception as e:
+                        messagebox.showerror("Error", str(e))
+                return set_aux
+            
+            self._aux_set_handlers[ch] = make_set_handler(ch)
+            btn = ttk.Button(aux_frame, text="Set", command=self._aux_set_handlers[ch], width=4)
+            btn.grid(row=2, column=col_offset, columnspan=2, pady=2)
+            
+            # Input display
+            ttk.Label(aux_frame, text=f"In {ch}:").grid(row=1, column=4 + col_offset, sticky="e", padx=2)
+            lbl = ttk.Label(aux_frame, textvariable=self.vars_aux_in[ch], width=10, 
+                           font=('Arial', 10), foreground="#0066cc")
+            lbl.grid(row=1, column=5 + col_offset, padx=2, sticky="w")
+
+        # Row 2: Aux 3 and 4
+        for ch in [3, 4]:
+            col_offset = (ch - 3) * 2
+            # Output control
+            ttk.Label(aux_frame, text=f"Out {ch}:").grid(row=3, column=col_offset, sticky="e", padx=2)
+            entry = ttk.Entry(aux_frame, textvariable=self.vars_aux_out[ch], width=8)
+            entry.grid(row=3, column=col_offset + 1, padx=2)
+            
+            self._aux_set_handlers[ch] = make_set_handler(ch)
+            btn = ttk.Button(aux_frame, text="Set", command=self._aux_set_handlers[ch], width=4)
+            btn.grid(row=4, column=col_offset, columnspan=2, pady=2)
+            
+            # Input display
+            ttk.Label(aux_frame, text=f"In {ch}:").grid(row=3, column=4 + col_offset, sticky="e", padx=2)
+            lbl = ttk.Label(aux_frame, textvariable=self.vars_aux_in[ch], width=10,
+                           font=('Arial', 10), foreground="#0066cc")
+            lbl.grid(row=3, column=5 + col_offset, padx=2, sticky="w")
+
+        return aux_frame
+
+    def read_aux_inputs(self):
+        """Read all auxiliary inputs and update display (SR830 only)"""
+        if not self.is_SR830:
+            return  # Skip for SR860 to improve performance
+        try:
+            for ch in [1, 2, 3, 4]:
+                val = getattr(self.inst, f'aux_in_{ch}')
+                self.vars_aux_in[ch].set(f"{val:.4f} V")
+        except:
+            pass
+
+    def load_aux_outputs(self):
+        """Load current auxiliary output values into the entry fields"""
+        try:
+            for ch in [1, 2, 3, 4]:
+                if self.is_SR830:
+                    val = getattr(self.inst, f'aux_out_{ch}')
+                else:
+                    val = self.inst.get_aux_out(ch)
+                self.vars_aux_out[ch].set(f"{val:.4f}")
+        except:
+            pass
+
     def build_sr860_layout(self, parent):
-        parent.columnconfigure(0, weight=1);
-        parent.columnconfigure(1, weight=1);
+        parent.columnconfigure(0, weight=1)
+        parent.columnconfigure(1, weight=1)
         parent.columnconfigure(2, weight=1)
 
         f1 = ttk.LabelFrame(parent, text="Source")
@@ -397,6 +570,9 @@ class InstrumentPanel(ttk.Frame):
         self.add_combo(f3, "Sensitivity", "sensitivity", [], 0, unit="V")
         self.add_combo(f3, "Time Const", "time_constant", list(SR860_Direct.TC_MAP.keys()), 1, unit="s")
         self.add_combo(f3, "Slope (dB)", "filter_slope", list(SR860_Direct.SLOPE_MAP.keys()), 2)
+
+        # Add auxiliary section in row 1
+        self.build_auxiliary_section(parent, 1)
 
     def on_sr860_mode_change(self, event):
         mode = self.combo_mode.get()
@@ -441,9 +617,10 @@ class InstrumentPanel(ttk.Frame):
 
     # --- SR830 LAYOUT ---
     def build_sr830_layout(self, parent):
-        parent.columnconfigure(0, weight=1);
-        parent.columnconfigure(1, weight=1);
+        parent.columnconfigure(0, weight=1)
+        parent.columnconfigure(1, weight=1)
         parent.columnconfigure(2, weight=1)
+        
         f1 = ttk.LabelFrame(parent, text="Source")
         f1.grid(row=0, column=0, sticky="nsew", padx=2)
         self.add_combo(f1, "Ref Src", "reference_source", self.inst.REFERENCE_SOURCES, 0)
@@ -466,6 +643,9 @@ class InstrumentPanel(ttk.Frame):
         self.add_combo(f3, "TC", "time_constant", self.inst.TIME_CONSTANTS, 1, unit="s")
         self.add_combo(f3, "Slope", "filter_slope", self.inst.FILTER_SLOPES, 2)
         self.add_combo(f3, "Reserve", "reserve", self.inst.RESERVE_VALUES, 3)
+
+        # Add auxiliary section in row 1
+        self.build_auxiliary_section(parent, 1)
 
     # --- HELPERS ---
     def add_entry(self, parent, label, attr, row, is_int=False):
@@ -511,7 +691,7 @@ class InstrumentPanel(ttk.Frame):
                     raw_val = None
                     for k_val, idx in self.active_sens_map.items():
                         if Utility.format_eng(k_val, self.active_meas_unit) == key:
-                            raw_val = idx;
+                            raw_val = idx
                             break
 
                     if raw_val is not None:
@@ -547,13 +727,16 @@ class InstrumentPanel(ttk.Frame):
                     if "I" in ctrl['widget'].get(): is_curr = True
 
             if is_curr:
-                new_map = SR830_CURR_MAP; unit = "A"
+                new_map = SR830_CURR_MAP
+                unit = "A"
             else:
-                new_map = SR830_VOLT_MAP; unit = "V"
+                new_map = SR830_VOLT_MAP
+                unit = "V"
         else:
             mode = self.combo_mode.get()
             if mode == "Voltage":
-                new_map = SR860_VOLT_MAP; unit = "V"
+                new_map = SR860_VOLT_MAP
+                unit = "V"
             else:
                 unit = "A"
                 cfg = self.combo_cfg.get()
@@ -592,7 +775,9 @@ class InstrumentPanel(ttk.Frame):
                     # Now find which Key in our NEW MAP maps to this Index
                     found_val = None
                     for k, idx in new_map.items():
-                        if idx == target_idx: found_val = k; break
+                        if idx == target_idx:
+                            found_val = k
+                            break
 
                     if found_val is not None:
                         ctrl['widget'].set(Utility.format_eng(found_val, unit))
@@ -622,6 +807,9 @@ class InstrumentPanel(ttk.Frame):
                 self.vars_meas["Y"].set(Utility.format_eng(val_y, unit))
                 self.vars_meas["R"].set(Utility.format_eng(val_r, unit))
                 self.vars_meas["Theta"].set(f"{val_t:.2f} °")
+            
+            # Also read auxiliary inputs
+            self.read_aux_inputs()
         except:
             self.vars_meas["X"].set("Err")
 
@@ -630,7 +818,8 @@ class InstrumentPanel(ttk.Frame):
 
     def startup_sequence(self):
         time.sleep(0.1)
-        if not self.is_SR830: self.after(0, self.update_sr860_ui_from_inst)
+        if not self.is_SR830:
+            self.after(0, self.update_sr860_ui_from_inst)
         time.sleep(0.1)
         self.after(0, self.update_sensitivity_list)
         time.sleep(0.2)
@@ -654,13 +843,21 @@ class InstrumentPanel(ttk.Frame):
                         for k, v in d_map.items():
                             try:
                                 diff = abs(v - val)
-                                if diff < min_diff: min_diff = diff; match = k
+                                if diff < min_diff:
+                                    min_diff = diff
+                                    match = k
                             except:
                                 pass
                     self.after(0, lambda w=ctrl['widget'], m=match: w.set(m))
                 time.sleep(0.02)
             except:
                 pass
+        
+        # Load auxiliary values
+        time.sleep(0.1)
+        self.after(0, self.load_aux_outputs)
+        self.after(0, self.read_aux_inputs)
+        
         self.initialization_complete = True
 
     def monitor_loop(self):
@@ -687,7 +884,7 @@ class MainApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("SRS Lock-in Controller")
-        self.geometry("1000x600")
+        self.geometry("1000x650")
 
         c_frame = ttk.LabelFrame(self, text="Connection")
         c_frame.pack(fill="x", padx=10, pady=5)
@@ -712,17 +909,20 @@ class MainApp(tk.Tk):
             rm = pyvisa.ResourceManager()
             ports = list(rm.list_resources())
             self.addr_combo['values'] = ports if ports else ["No VISA devices found"]
-            if ports: self.addr_combo.current(0)
+            if ports:
+                self.addr_combo.current(0)
         except:
             self.addr_combo['values'] = ["VISA Error"]
 
     def connect(self):
         addr = self.addr_combo.get()
         model = self.model_combo.get()
-        if "found" in addr or "Error" in addr: return
+        if "found" in addr or "Error" in addr:
+            return
         try:
             if model == "SR830":
-                if SR830 is None: raise Exception("SR830 Driver missing")
+                if SR830 is None:
+                    raise Exception("SR830 Driver missing")
                 inst = SR830(addr)
             else:
                 inst = SR860_Direct(addr)
