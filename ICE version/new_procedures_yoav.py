@@ -36,6 +36,7 @@ from procedures import (
     Differential_conductance_SRS860,
     Differential_conductance_Zurich,
     Differential_Resistance_Zurich,
+    Differential_Resistance_Zurich_AUX_map,
     Rt_RV_RH_sequencer_measurement,
     RV_dV_dI_sequencer_measurement,
     # Registration dicts
@@ -49,6 +50,7 @@ from procedures import (
     proc_differential_conductance_SRS860,
     proc_differential_conductance_Zurich,
     proc_differential_resistance_Zurich,
+    proc_differential_resistance_Zurich_AUX_map,
     proc_Rt_RV_RH_sequencer,
     proc_RV_dV_dI_sequencer,
     # Aggregates
