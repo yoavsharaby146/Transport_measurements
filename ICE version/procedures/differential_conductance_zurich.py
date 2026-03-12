@@ -9,10 +9,9 @@ from .base import (
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_CURRENT_COLUMNS, MAGNET_COLUMNS,
+    BASE_DATA_COLUMNS, LOCKIN_CURRENT_COLUMNS, MAGNET_COLUMNS
 )
 from . import base
-
 
 class Differential_conductance_Zurich(Procedure):
     # --- Parameters ---
@@ -56,7 +55,7 @@ class Differential_conductance_Zurich(Procedure):
     MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
 
-    DATA_COLUMNS = BASE_DATA_COLUMNS + ['DC_offset(V)'] + LOCKIN_CURRENT_COLUMNS + MAGNET_COLUMNS 
+    DATA_COLUMNS = BASE_DATA_COLUMNS + ['DC_offset(V)'] + LOCKIN_CURRENT_COLUMNS + MAGNET_COLUMNS
 
     def startup(self):
         if self.use_srs860:
@@ -95,6 +94,13 @@ class Differential_conductance_Zurich(Procedure):
         vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
         vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
 
+        if self.use_MFLI_1:
+            dc_offset = MFLI_1.dc_offset
+            vals += [dc_offset]
+
+        else:
+            vals += [math.nan]
+            
         if self.use_srs860:
             r, th = SRS860.snap("X", "Y")
             vals += [r, th]
@@ -102,11 +108,9 @@ class Differential_conductance_Zurich(Procedure):
             vals += [math.nan, math.nan]
 
         if self.use_MFLI_1:
-            dc_offset = MFLI_1.dc_offset
-            vals += [dc_offset]
             vals += list(MFLI_1.read_demod())
         else:
-            vals += [math.nan] * 3
+            vals += [math.nan] * 2
 
         for use, inst in [(self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
             vals += list(inst.read_demod()) if use else [math.nan] * 2
