@@ -11,7 +11,7 @@ from .base import (
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
     read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS,
+    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
 )
 from . import base
 
@@ -92,8 +92,7 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
     srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
     srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
 
-    DATA_COLUMNS = BASE_DATA_COLUMNS + ['AUX_DC_offset(V)'] + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS 
-
+    DATA_COLUMNS = BASE_DATA_COLUMNS +['AUX_DC_offset(V)'] + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS 
 
     def startup(self):
         """Record instrument metadata at startup."""
@@ -137,6 +136,12 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
         vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
         vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
 
+        if self.use_MFLI_1:
+            auxout = MFLI_1.get_auxout(self.aux_signal)
+            vals += [auxout]
+        else:
+            vals += [math.nan]
+        
         # Lock-in measurements
         if self.use_srs860:
             x, y = SRS860.snap("X", "Y")
@@ -145,11 +150,9 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
             vals += [math.nan, math.nan]
 
         if self.use_MFLI_1:
-            auxout = MFLI_1.get_auxout(self.aux_signal)
-            vals += [auxout]
             vals += list(MFLI_1.read_demod())
         else:
-            vals += [math.nan] * 3
+            vals += [math.nan] * 2
 
         for use, inst in [(self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
             vals += list(inst.read_demod()) if use else [math.nan] * 2
@@ -230,7 +233,7 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
             else:
                 next_voltage = max(current_voltage - step_size_v, target_voltage)
             
-            gate.ramp_voltage(next_voltage, steps=1, delay=0.01)
+            gate.ramp_voltage(next_voltage, 5, 0.01)
             time.sleep(delay)
             current_voltage = gate.measure__voltage()
         
@@ -295,7 +298,7 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
         for i, gate_volt in enumerate(gate_range):
             # Move to next gate position (skip first since we're already there)
             if i > 0:
-                gate.ramp_voltage(gate_volt, steps=5, delay=0.01)
+                gate.ramp_voltage(gate_volt, 5, 0.01)
                 time.sleep(self.gate_delay)
             
             if self.should_stop():

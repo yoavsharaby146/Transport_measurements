@@ -77,8 +77,8 @@ class Resistance_time_measurement(Procedure):
             self.srs830_2_frequency = SRS830_2.frequency
 
     def getmeas(self, t0):
-        magnet = base.magnet
         temperature = read_temperature()
+        magnet = base.magnet
         vals = [time.time() - t0]+ list(temperature)
 
         if self.use_magnet:
@@ -127,7 +127,6 @@ class Resistance_time_measurement(Procedure):
         return vals
 
     def execute(self):
-        magnet = base.magnet
         time_0 = time.time()
         log.info("starting to measure for %d seconds", self.acq_length)
 
