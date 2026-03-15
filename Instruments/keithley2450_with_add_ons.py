@@ -835,8 +835,52 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
         self.write(create_buffer_cmd)
         self.buffer_size = voltages.size
 
-    def run_clist_sweep(self, delay = 0.0):
-        sweep_run_cmd = ':SOUR:SWE:VOLT:LIST 1, ' + str(delay) + ', 1, ON, "sweepBuffer", "sourceVclist"'
+    def create_hysteresis_current_sweep_config_list(self, Sp1=1e-6, Sp2=-1e-6, step=1e-7, volt_range=20e-3):
+        # Creates a current source configuration list for full hysteresis measurements. Values are in Amps.
+        self.reset()
+        # Delete and recreate configuration list
+        #self.write(':SOUR:CONF:LIST:DEL "sourceIclist"')
+        self.write(':SOUR:CONF:LIST:CRE "sourceIclist"')
+        # Set to source current and measure voltage at a constant voltage measure range
+        self.source_mode = 'current'
+        self.measure_voltage(1, volt_range, False)
+        # Enable/disable 4-wire sensing
+        self.disable_source()  # Make sure source is off
+        if getattr(self, 'wires', 2) == 4:
+            self.write(":SYST:RSEN ON")  # 4-wire
+        else:
+            self.write(":SYST:RSEN OFF")  # 2-wire
+
+        # Build the currents array (values in Amps)
+        # Calculate number of points for each direction
+        points1 = int(abs(Sp1 - 0) / step) + 1
+        points2 = int(abs(Sp2 - Sp1) / step) + 1
+        points3 = int(abs(0 - Sp2) / step) + 1
+        # Create sweep arrays
+        part1 = np.linspace(0, Sp1, points1)
+        part2 = np.linspace(Sp1, Sp2, points2)
+        part3 = np.linspace(Sp2, 0, points3)
+        # without duplicate points
+        # 0 to Sp1 to Sp2 to 0
+        currents = np.concatenate((part1, part2[1:], part3[1:]))
+        # With duplicate points
+        # 0 to Sp1, Sp1 to Sp_2, Sp2 to 0
+        currents = np.concatenate((part1, part2, part3))
+
+        for current in currents:
+            self.source_current = current
+            self.write(':SOUR:CONF:LIST:STORE "sourceIclist";')
+        create_buffer_cmd = 'TRAC:MAKE "sweepBuffer", ' + str(currents.size) + ";"
+        self.write(create_buffer_cmd)
+        self.buffer_size = currents.size
+
+    def run_clist_sweep(self, delay=0.0, sweep_type='voltage'):
+        if sweep_type == 'voltage':
+            sweep_run_cmd = ':SOUR:SWE:VOLT:LIST 1, ' + str(delay) + ', 1, ON, "sweepBuffer", "sourceVclist"'
+        elif sweep_type == 'current':
+            sweep_run_cmd = ':SOUR:SWE:CURR:LIST 1, ' + str(delay) + ', 1, ON, "sweepBuffer", "sourceIclist"'
+        else:
+            raise ValueError("sweep_type must be 'voltage' or 'current'")
         self.write(sweep_run_cmd)
         self.timeout = 20000
         self.write('INIT')
