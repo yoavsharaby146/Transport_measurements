@@ -465,12 +465,55 @@ class InteractivePlotter:
         if not filenames: return
         for filepath in filenames:
             try:
-                with open(filepath, 'r') as f:
+                with open(filepath, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
                 header_line = 0
                 for i, line in enumerate(lines[:50]):
                     if 'time(s)' in line.lower(): header_line = i; break
-                df = pl.read_csv(filepath, skip_rows=header_line)
+                
+                # Count how many trailing lines to skip (metadata, comments, empty lines)
+                skip_footer = 0
+                header_cols = len(lines[header_line].split(','))
+                
+                # Check from the end of file for problematic lines
+                for i in range(len(lines) - 1, header_line, -1):
+                    line = lines[i].strip()
+                    # Skip empty lines
+                    if not line:
+                        skip_footer += 1
+                        continue
+                    # Skip comment/metadata lines starting with ; or #
+                    if line.startswith(';') or line.startswith('#'):
+                        skip_footer += 1
+                        continue
+                    # Skip lines with different column count
+                    line_cols = len(line.split(','))
+                    if line_cols != header_cols:
+                        skip_footer += 1
+                        continue
+                    # Found a valid data line, stop checking
+                    break
+                
+                # Read CSV, skipping footer if metadata detected
+                # Use truncate_ragged_lines=True to handle inconsistent column counts
+                # Use ignore_errors=True to skip rows with parsing issues
+                if skip_footer > 0:
+                    # Read all data except trailing problematic lines
+                    df = pl.read_csv(
+                        filepath, 
+                        skip_rows=header_line, 
+                        n_rows=len(lines) - header_line - skip_footer,
+                        truncate_ragged_lines=True,
+                        ignore_errors=True
+                    )
+                else:
+                    df = pl.read_csv(
+                        filepath, 
+                        skip_rows=header_line,
+                        truncate_ragged_lines=True,
+                        ignore_errors=True
+                    )
+                
                 filename = filepath.split('/')[-1]
                 self.datasets[filename] = df
             except Exception as e:
