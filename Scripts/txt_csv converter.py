@@ -47,10 +47,30 @@ def main():
     # 4. Auto-generate the output name (swap .txt for .csv)
     # This splits the path into everything before the extension, and the extension itself
     base_name, _ = os.path.splitext(input_filepath)
-    output_filepath = base_name + '.csv'
+    auto_output_filepath = base_name + '.csv'
 
-    # 5. Run the conversion
-    print(f"Converting: {input_filepath} ...")
+    # 5. Ask user if they want to choose their own filename
+    print(f"\nAuto-generated output name: {auto_output_filepath}")
+    choice = input("Do you want to save with a custom name? (y/n): ").strip().lower()
+
+    if choice == 'y':
+        # Open save as dialog for custom filename
+        root.attributes('-topmost', True)  # Ensure dialog appears on top
+        output_filepath = filedialog.asksaveasfilename(
+            title="Save CSV File As",
+            initialfile=os.path.basename(auto_output_filepath),
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        
+        if not output_filepath:
+            print("No save location selected. Using auto-generated name.")
+            output_filepath = auto_output_filepath
+    else:
+        output_filepath = auto_output_filepath
+
+    # 6. Run the conversion
+    print(f"\nConverting: {input_filepath} ...")
     convert_txt_to_csv(input_filepath, output_filepath)
 
 if __name__ == "__main__":
