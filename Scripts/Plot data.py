@@ -13,6 +13,9 @@ import matplotlib.gridspec as gridspec
 import numpy as np
 from scipy.interpolate import griddata
 import sys
+import json
+import os
+from datetime import datetime
 
 # Import colormaps for the gradient feature
 from matplotlib import cm
@@ -47,7 +50,32 @@ class InteractivePlotter:
         # --- COLOR SETTINGS (NEW) ---
         self.v_color_mode = tk.StringVar(value="Cycle")  # "Cycle" or "Gradient"
         self.v_cmap_name = tk.StringVar(value="viridis")
-        self.available_cmaps = ['viridis', 'plasma', 'inferno', 'magma', 'jet', 'coolwarm', 'tab10', 'Set1']
+        self.available_cmaps = [
+                                'viridis', 'plasma', 'inferno', 'magma', 'cividis',
+                                
+                                'Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
+                                'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
+                                'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn',
+
+                                'binary', 'gist_yarg', 'gist_gray', 'gray', 'bone',
+                                'pink', 'spring', 'summer', 'autumn', 'winter', 'cool',
+                                'Wistia', 'hot', 'afmhot', 'gist_heat', 'copper',
+
+                                'PiYG', 'PRGn', 'BrBG', 'PuOr', 'RdGy', 'RdBu', 'RdYlBu',
+                                'RdYlGn', 'Spectral', 'coolwarm', 'bwr', 'seismic',
+                                'berlin', 'managua', 'vanimo',
+
+                                'twilight', 'twilight_shifted', 'hsv',
+
+                                'Pastel1', 'Pastel2', 'Paired', 'Accent', 'Dark2',
+                                'Set1', 'Set2', 'Set3', 'tab10', 'tab20', 'tab20b',
+                                'tab20c',
+
+                                'flag', 'prism', 'ocean', 'gist_earth', 'terrain',
+                                'gist_stern', 'gnuplot', 'gnuplot2', 'CMRmap',
+                                'cubehelix', 'brg', 'gist_rainbow', 'rainbow', 'jet',
+                                'turbo', 'nipy_spectral', 'gist_ncar'
+                                ]
 
         # --- DATA VARIABLES ---
         self.v_x_div = tk.StringVar(value="1")
@@ -115,6 +143,9 @@ class InteractivePlotter:
         self.x_log = tk.BooleanVar()
         self.y_log = tk.BooleanVar()
 
+        # --- CACHE SETTINGS ---
+        self.cache_folder = None  # User-selected folder for cache files
+
         self.setup_ui()
 
     def setup_ui(self):
@@ -162,6 +193,17 @@ class InteractivePlotter:
         ttk.Button(control_frame, text="Unload Selected", command=self.unload_files).grid(row=row, column=0,
                                                                                           columnspan=4, sticky='ew',
                                                                                           pady=2)
+        row += 1
+
+        # --- SESSION CACHE BUTTONS ---
+        cache_frame = ttk.Frame(control_frame)
+        cache_frame.grid(row=row, column=0, columnspan=4, sticky='ew', pady=5)
+        ttk.Button(cache_frame, text="Save Session", command=self.save_session).pack(side='left', expand=True, fill='x', padx=2)
+        ttk.Button(cache_frame, text="Load Session", command=self.load_session).pack(side='left', expand=True, fill='x', padx=2)
+        row += 1
+        ttk.Button(control_frame, text="Set Cache Folder", command=self.set_cache_folder).grid(row=row, column=0,
+                                                                                               columnspan=4, sticky='ew',
+                                                                                               pady=2)
         row += 1
 
         ttk.Label(control_frame, text="Axis Ref. File:").grid(row=row, column=0, columnspan=2, sticky='w')
@@ -593,6 +635,7 @@ class InteractivePlotter:
         ttk.Label(fr, text="Color").grid(row=0, column=1, padx=5, pady=5)
         ttk.Label(fr, text="Width").grid(row=0, column=2, padx=5, pady=5)
         ttk.Label(fr, text="Type").grid(row=0, column=3, padx=5, pady=5)
+        ttk.Label(fr, text="Legend").grid(row=0, column=4, padx=5, pady=5)
         r = 1
 
         def pick_c(btn, k):
@@ -614,6 +657,10 @@ class InteractivePlotter:
             if k not in self.styles: self.styles[k] = {}
             self.styles[k]['linestyle'] = v
 
+        def up_leg(v, k):
+            if k not in self.styles: self.styles[k] = {}
+            self.styles[k]['legend'] = v.get()
+
         for fk, yc in pairs_to_style:
             k = (fk, yc);
             st = self.styles.get(k, {})
@@ -631,6 +678,11 @@ class InteractivePlotter:
             lsb.set(ls);
             lsb.bind("<<ComboboxSelected>>", lambda e, b=lsb, k=k: up_ls(b.get(), k))
             lsb.grid(row=r, column=3);
+            # Legend entry field
+            leg_val = tk.StringVar(value=st.get('legend', ''))
+            leg_entry = ttk.Entry(fr, textvariable=leg_val, width=15)
+            leg_entry.grid(row=r, column=4, padx=5)
+            leg_val.trace("w", lambda n, i, m, v=leg_val, k=k: up_leg(v, k))
             r += 1
         ttk.Button(d, text="Apply", command=lambda: [self.update_plot(), d.destroy()]).pack(pady=10)
 
@@ -761,7 +813,14 @@ class InteractivePlotter:
                     c = st.get('color', generated_colors[c_idx])
                     w = st.get('width', 2.0 if "Scatter" not in ptype else 20.0)
                     ls = st.get('linestyle', '-')
-                    lbl = cust_legs[c_idx] if c_idx < len(cust_legs) else f"{fk}: {yc}"
+                    # Use per-series legend from styles, fallback to csv legend, then default
+                    style_leg = st.get('legend', '').strip()
+                    if style_leg:
+                        lbl = style_leg
+                    elif c_idx < len(cust_legs) and cust_legs[c_idx]:
+                        lbl = cust_legs[c_idx]
+                    else:
+                        lbl = f"{fk}: {yc}"
 
                     target_axes = axes_list if ptype == "Broken Y-Axis" else [axes_list[ax_idx]]
 
@@ -851,7 +910,22 @@ class InteractivePlotter:
                 kw.update(transform=axes_list[1].transAxes)
                 axes_list[1].plot((-d, +d), (1 - d, 1 + d), **kw);
                 axes_list[1].plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
-            elif ptype != "Dual Y-Axis" and ptype != "Color Map":
+            elif ptype == "Dual Y-Axis":
+                # Set Y1 (left axis) label
+                y1_label = self.v_ylabel.get() or (ycols[0] if ycols else "Y1")
+                self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                                   color=self.ylabel_color)
+                # Set Y2 (right axis) label
+                y2_label = self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2")
+                axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                                        color=self.ylabel_color)
+                # Set Y1 axis range
+                if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
+                if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
+                # Set Y2 axis range
+                if val(self.v_y2_min): axes_list[1].set_ylim(bottom=val(self.v_y2_min))
+                if val(self.v_y2_max): axes_list[1].set_ylim(top=val(self.v_y2_max))
+            elif ptype != "Color Map":
                 self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color)
                 if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
@@ -886,6 +960,128 @@ class InteractivePlotter:
                                                                                               f"Plot saved to {filepath}")
             except Exception as e:
                 messagebox.showerror("Error", str(e))
+
+    # --- SESSION CACHE METHODS ---
+    def set_cache_folder(self):
+        """Let user choose a folder for saving/loading cache files."""
+        folder = filedialog.askdirectory(title="Select Cache Folder")
+        if folder:
+            self.cache_folder = folder
+            messagebox.showinfo("Cache Folder Set", f"Cache files will be saved to:\n{folder}")
+
+    def save_session(self):
+        """Save current session (datasets + styles) to a JSON cache file."""
+        if not self.datasets:
+            messagebox.showwarning("No Data", "No datasets loaded to save.")
+            return
+        
+        # Determine where to save
+        if self.cache_folder:
+            initial_dir = self.cache_folder
+        else:
+            # Ask user to select folder first if not set
+            folder = filedialog.askdirectory(title="Select Folder to Save Cache")
+            if not folder:
+                return
+            self.cache_folder = folder
+            initial_dir = folder
+        
+        # Generate default filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"session_{timestamp}"
+        
+        filepath = filedialog.asksaveasfilename(
+            initialdir=initial_dir,
+            initialfile=default_name,
+            defaultextension=".json",
+            filetypes=[("JSON Cache", "*.json"), ("All files", "*.*")],
+            title="Save Session Cache"
+        )
+        
+        if not filepath:
+            return
+        
+        try:
+            # Prepare session data
+            session_data = {
+                "timestamp": datetime.now().isoformat(),
+                "datasets": {},
+                "styles": {}
+            }
+            
+            # Convert datasets to JSON-serializable format
+            for filename, df in self.datasets.items():
+                session_data["datasets"][filename] = {
+                    "columns": df.columns,
+                    "data": df.to_numpy().tolist()
+                }
+            
+            # Convert styles (tuple keys need to be strings)
+            for k, v in self.styles.items():
+                str_key = f"{k[0]}|||{k[1]}"  # Use separator that won't appear in filenames
+                session_data["styles"][str_key] = v
+            
+            # Save to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(session_data, f, indent=2)
+            
+            messagebox.showinfo("Session Saved", f"Session saved successfully to:\n{filepath}\n\nDatasets: {len(self.datasets)}\nStyles: {len(self.styles)}")
+            
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save session:\n{str(e)}")
+
+    def load_session(self):
+        """Load a session from a JSON cache file."""
+        # Determine where to look
+        initial_dir = self.cache_folder if self.cache_folder else "."
+        
+        filepath = filedialog.askopenfilename(
+            initialdir=initial_dir,
+            filetypes=[("JSON Cache", "*.json"), ("All files", "*.*")],
+            title="Load Session Cache"
+        )
+        
+        if not filepath:
+            return
+        
+        # Update cache folder to the directory of the loaded file
+        self.cache_folder = os.path.dirname(filepath)
+        
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                session_data = json.load(f)
+            
+            # Clear current data
+            self.datasets = {}
+            self.styles = {}
+            
+            # Restore datasets
+            for filename, df_data in session_data.get("datasets", {}).items():
+                columns = df_data["columns"]
+                data = df_data["data"]
+                df = pl.DataFrame(data, schema=columns, orient="row")
+                self.datasets[filename] = df
+            
+            # Restore styles (convert string keys back to tuples)
+            for str_key, style_val in session_data.get("styles", {}).items():
+                parts = str_key.split("|||")
+                if len(parts) == 2:
+                    tuple_key = (parts[0], parts[1])
+                    self.styles[tuple_key] = style_val
+            
+            # Refresh UI
+            self.refresh_dataset_list(new_load=True)
+            
+            # Show info
+            timestamp = session_data.get("timestamp", "Unknown")
+            messagebox.showinfo("Session Loaded", 
+                f"Session loaded successfully!\n\n"
+                f"Saved on: {timestamp}\n"
+                f"Datasets: {len(self.datasets)}\n"
+                f"Styles: {len(self.styles)}")
+            
+        except Exception as e:
+            messagebox.showerror("Load Error", f"Failed to load session:\n{str(e)}")
 
 
 if __name__ == "__main__":
