@@ -102,6 +102,11 @@ class InteractivePlotter:
         self.v_legend = tk.StringVar()
         self.show_legend = tk.BooleanVar(value=True)
         self.show_grid = tk.BooleanVar(value=True)
+        
+        # --- LEGEND SETTINGS ---
+        self.legend_columns = tk.StringVar(value="1")
+        self.legend_draggable = tk.BooleanVar(value=True)
+        self.legend_position = tk.StringVar(value="Best")
 
         self.v_x_pad = tk.StringVar(value="4.0")
         self.v_y_pad = tk.StringVar(value="4.0")
@@ -145,6 +150,16 @@ class InteractivePlotter:
 
         # --- CACHE SETTINGS ---
         self.cache_folder = None  # User-selected folder for cache files
+        
+        # --- LEGEND ORDER ---
+        self.legend_order = []  # List of (filename, column) tuples in desired order - persists across selections
+        
+        # --- LINE VISIBILITY STATE ---
+        self.line_visibility = {}  # (filename, column) -> bool for toggling lines via legend
+        self.current_lines = []  # Store current plot lines for legend toggle
+        
+        # --- DATASET WINDOW ---
+        self.dataset_window = None
 
         self.setup_ui()
 
@@ -179,20 +194,23 @@ class InteractivePlotter:
                                                                                          pady=5)
         row += 1
 
+        # Compact dataset list with button to open separate window
         ds_frame = ttk.Frame(control_frame)
         ds_frame.grid(row=row, column=0, columnspan=4, sticky='ew', pady=5)
         ds_sb = ttk.Scrollbar(ds_frame, orient='vertical')
-        self.dataset_listbox = tk.Listbox(ds_frame, selectmode='extended', height=5, yscrollcommand=ds_sb.set,
+        self.dataset_listbox = tk.Listbox(ds_frame, selectmode='extended', height=3, yscrollcommand=ds_sb.set,
                                           exportselection=False)
         ds_sb.config(command=self.dataset_listbox.yview)
         self.dataset_listbox.pack(side='left', fill='both', expand=True)
         ds_sb.pack(side='right', fill='y')
         self.dataset_listbox.bind('<<ListboxSelect>>', self.on_dataset_selection_change)
         row += 1
-
-        ttk.Button(control_frame, text="Unload Selected", command=self.unload_files).grid(row=row, column=0,
-                                                                                          columnspan=4, sticky='ew',
-                                                                                          pady=2)
+        
+        # Button frame for dataset management
+        ds_btn_frame = ttk.Frame(control_frame)
+        ds_btn_frame.grid(row=row, column=0, columnspan=4, sticky='ew', pady=2)
+        ttk.Button(ds_btn_frame, text="Unload", command=self.unload_files, width=10).pack(side='left', padx=2)
+        ttk.Button(ds_btn_frame, text="Dataset Manager", command=self.open_dataset_window, width=16).pack(side='left', padx=2)
         row += 1
 
         # --- SESSION CACHE BUTTONS ---
@@ -310,6 +328,9 @@ class InteractivePlotter:
                                                                                          pady=2, sticky='ew')
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
+        
+        # Legend Order button
+        ttk.Button(btn_frame, text="Legend Order", command=self.open_legend_order_dialog).grid(row=2, column=0, columnspan=2, padx=2, pady=2, sticky='ew')
 
         ttk.Separator(control_frame, orient='horizontal').grid(row=row, column=0, columnspan=4, sticky='ew', pady=10)
         row += 1
@@ -381,7 +402,7 @@ class InteractivePlotter:
     def open_labels_dialog(self):
         d = tk.Toplevel(self.root)
         d.title("Labels, Titles & Colors")
-        d.geometry("450x750")
+        d.geometry("450x850")
         d.transient(self.root)
         frame = ttk.Frame(d, padding=10)
         frame.pack(fill='both', expand=True)
@@ -433,6 +454,34 @@ class InteractivePlotter:
         add_col("Z Label Color:", "zlabel_color", self.zlabel_color)
         add_col("X Tick Color:", "xtick_color", self.xtick_color)
         add_col("Y Tick Color:", "ytick_color", self.ytick_color)
+        
+        # --- LEGEND SETTINGS ---
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(frame, text="Legend Settings", font=('Arial', 10, 'bold')).pack(pady=5)
+        
+        # Legend columns
+        col_frame = ttk.Frame(frame)
+        col_frame.pack(fill='x', pady=2)
+        ttk.Label(col_frame, text="Legend Columns:", width=15).pack(side='left')
+        col_combo = ttk.Combobox(col_frame, textvariable=self.legend_columns, 
+                                  values=["1", "2", "3", "4", "5", "6", "7", "8"], width=10, state='readonly')
+        col_combo.pack(side='right')
+        
+        # Legend position
+        pos_frame = ttk.Frame(frame)
+        pos_frame.pack(fill='x', pady=2)
+        ttk.Label(pos_frame, text="Position:", width=15).pack(side='left')
+        pos_combo = ttk.Combobox(pos_frame, textvariable=self.legend_position,
+                                  values=["Best", "Upper Right", "Upper Left", "Lower Right", "Lower Left",
+                                          "Center Left", "Center Right", "Lower Center", "Upper Center", "Center",
+                                          "Outside Right", "Outside Bottom"],
+                                  width=18, state='readonly')
+        pos_combo.pack(side='right')
+        
+        # Draggable checkbox
+        ttk.Checkbutton(frame, text="Draggable Legend (click & drag to reposition)", 
+                        variable=self.legend_draggable).pack(pady=5)
+        
         ttk.Button(frame, text="Update Plot", command=self.update_plot).pack(pady=10)
 
     def open_ticks_dialog(self):
@@ -663,7 +712,7 @@ class InteractivePlotter:
 
         d = tk.Toplevel(self.root);
         d.title("Style Config");
-        d.geometry("600x400");
+        d.geometry("700x400");
         d.transient(self.root)
         cv = tk.Canvas(d);
         sb = ttk.Scrollbar(d, orient="vertical", command=cv.yview)
@@ -729,6 +778,191 @@ class InteractivePlotter:
             r += 1
         ttk.Button(d, text="Apply", command=lambda: [self.update_plot(), d.destroy()]).pack(pady=10)
 
+    def open_legend_order_dialog(self):
+        """Open dialog to adjust legend order."""
+        sel_ds = self.get_selected_datasets()
+        ptype = self.plot_type.get()
+        if not sel_ds: 
+            return messagebox.showinfo("Info", "Select data first.")
+        
+        # Build list of series keys (same logic as update_plot)
+        pairs_to_order = []
+        if ptype == "Dual Y-Axis":
+            y1, y2 = self.y1_combo.get(), self.y2_combo.get()
+            if len(sel_ds) > 1:
+                if y1: pairs_to_order.append((sel_ds[0][0], y1))
+                if y2: pairs_to_order.append((sel_ds[1][0], y2))
+            elif len(sel_ds) == 1:
+                if y1: pairs_to_order.append((sel_ds[0][0], y1))
+                if y2: pairs_to_order.append((sel_ds[0][0], y2))
+        else:
+            y_idxs = self.y_listbox.curselection()
+            y_cols = [self.y_listbox.get(i) for i in y_idxs]
+            for fk, _ in sel_ds:
+                for yc in y_cols:
+                    pairs_to_order.append((fk, yc))
+        
+        if not pairs_to_order:
+            return messagebox.showinfo("Info", "Select Y axes first.")
+        
+        # If legend_order is set and has valid items, use it; otherwise use default order
+        # Filter legend_order to only include items that are currently in pairs_to_order
+        current_order = []
+        for item in self.legend_order:
+            if item in pairs_to_order and item not in current_order:
+                current_order.append(item)
+        # Add any new items that weren't in legend_order
+        for item in pairs_to_order:
+            if item not in current_order:
+                current_order.append(item)
+        
+        # Create dialog
+        d = tk.Toplevel(self.root)
+        d.title("Legend Order")
+        d.geometry("400x450")
+        d.transient(self.root)
+        frame = ttk.Frame(d, padding=10)
+        frame.pack(fill='both', expand=True)
+        
+        ttk.Label(frame, text="Adjust the order of legend entries.\nTop item appears first in legend.", 
+                  font=('Arial', 10)).pack(pady=(0, 10))
+        
+        # Listbox with scrollbar
+        list_frame = ttk.Frame(frame)
+        list_frame.pack(fill='both', expand=True)
+        
+        sb = ttk.Scrollbar(list_frame, orient='vertical')
+        listbox = tk.Listbox(list_frame, yscrollcommand=sb.set, selectmode='single', height=10)
+        sb.config(command=listbox.yview)
+        listbox.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        
+        # Populate listbox - show legend name if available, otherwise show key
+        def get_display_text(key):
+            st = self.styles.get(key, {})
+            leg = st.get('legend', '').strip()
+            if leg:
+                return f"{leg} ({key[0]}: {key[1]})"
+            return f"{key[0]}: {key[1]}"
+        
+        def refresh_listbox():
+            listbox.delete(0, tk.END)
+            for key in current_order:
+                listbox.insert(tk.END, get_display_text(key))
+        
+        refresh_listbox()
+        
+        # Movement functions
+        def move_up():
+            sel_idx = listbox.curselection()
+            if not sel_idx:
+                return
+            idx = sel_idx[0]
+            if idx > 0:
+                # Swap in current_order
+                current_order[idx], current_order[idx-1] = current_order[idx-1], current_order[idx]
+                refresh_listbox()
+                listbox.selection_set(idx - 1)
+        
+        def move_down():
+            sel_idx = listbox.curselection()
+            if not sel_idx:
+                return
+            idx = sel_idx[0]
+            if idx < len(current_order) - 1:
+                # Swap in current_order
+                current_order[idx], current_order[idx+1] = current_order[idx+1], current_order[idx]
+                refresh_listbox()
+                listbox.selection_set(idx + 1)
+        
+        def move_to_top():
+            sel_idx = listbox.curselection()
+            if not sel_idx:
+                return
+            idx = sel_idx[0]
+            if idx > 0:
+                item = current_order.pop(idx)
+                current_order.insert(0, item)
+                refresh_listbox()
+                listbox.selection_set(0)
+        
+        def move_to_bottom():
+            sel_idx = listbox.curselection()
+            if not sel_idx:
+                return
+            idx = sel_idx[0]
+            if idx < len(current_order) - 1:
+                item = current_order.pop(idx)
+                current_order.append(item)
+                refresh_listbox()
+                listbox.selection_set(len(current_order) - 1)
+        
+        def reset_order():
+            nonlocal current_order
+            current_order = pairs_to_order.copy()
+            refresh_listbox()
+        
+        # Button frame
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', pady=10)
+        
+        ttk.Button(btn_frame, text="↑ Top", command=move_to_top, width=8).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="↑ Up", command=move_up, width=8).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="↓ Down", command=move_down, width=8).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="↓ Bottom", command=move_to_bottom, width=8).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="Reset", command=reset_order, width=8).pack(side='right', padx=2)
+        
+        # Apply/Cancel buttons
+        bottom_frame = ttk.Frame(frame)
+        bottom_frame.pack(fill='x', pady=(10, 0))
+        
+        def apply_order():
+            # Merge current_order with existing legend_order
+            # Preserve existing order for items not in current selection
+            # Update order for items in current selection (keeping their relative positions)
+            new_order = []
+            added_keys = set()
+            
+            # First, preserve items from existing legend_order that aren't in current selection
+            for key in self.legend_order:
+                if key not in pairs_to_order:
+                    new_order.append(key)
+                    added_keys.add(key)
+            
+            # Then, add items from current_order (which has the user's desired order for current selection)
+            for key in current_order:
+                if key not in added_keys:
+                    new_order.append(key)
+                    added_keys.add(key)
+            
+            self.legend_order = new_order
+            self.update_plot()
+            d.destroy()
+        
+        def apply_and_keep():
+            # Merge current_order with existing legend_order
+            new_order = []
+            added_keys = set()
+            
+            # First, preserve items from existing legend_order that aren't in current selection
+            for key in self.legend_order:
+                if key not in pairs_to_order:
+                    new_order.append(key)
+                    added_keys.add(key)
+            
+            # Then, add items from current_order
+            for key in current_order:
+                if key not in added_keys:
+                    new_order.append(key)
+                    added_keys.add(key)
+            
+            self.legend_order = new_order
+            self.update_plot()
+        
+        ttk.Button(bottom_frame, text="Apply", command=apply_order).pack(side='left', expand=True, fill='x', padx=2)
+        ttk.Button(bottom_frame, text="Apply & Keep Open", command=apply_and_keep).pack(side='left', expand=True, fill='x', padx=2)
+        ttk.Button(bottom_frame, text="Cancel", command=d.destroy).pack(side='left', expand=True, fill='x', padx=2)
+
     def update_plot(self):
         sel_ds = self.get_selected_datasets()
         if not sel_ds or self.current_dataset_key is None: return
@@ -788,7 +1022,7 @@ class InteractivePlotter:
             l_txt = self.v_legend.get().strip()
             cust_legs = [l.strip() for l in l_txt.split(',')] if l_txt else []
 
-            # --- COLOR LOGIC: GRADIENT vs CYCLE ---
+            # --- BUILD SERIES LIST ---
             series_to_plot = []
             for fk, df in sel_ds:
                 if ptype == "Dual Y-Axis":
@@ -803,6 +1037,34 @@ class InteractivePlotter:
                     for yc in ycols:
                         if yc in df.columns: series_to_plot.append((fk, yc, 0))
 
+            # --- APPLY LEGEND ORDER TO PLOTTING ORDER ---
+            # This ensures gradient colors are assigned in the correct order
+            if self.legend_order:
+                # Build a dict mapping (filename, column) to the full tuple (including ax_idx)
+                series_dict = {}
+                for item in series_to_plot:
+                    key = (item[0], item[1])  # (filename, column)
+                    if key not in series_dict:  # Keep first occurrence
+                        series_dict[key] = item
+                
+                # Reorder series_to_plot according to legend_order
+                ordered_series = []
+                used_keys = set()
+                for key in self.legend_order:
+                    if key in series_dict and key not in used_keys:
+                        ordered_series.append(series_dict[key])
+                        used_keys.add(key)
+                # Add any remaining items not in legend_order
+                for item in series_to_plot:
+                    key = (item[0], item[1])
+                    if key not in used_keys:
+                        ordered_series.append(item)
+                        used_keys.add(key)
+                
+                if ordered_series:
+                    series_to_plot = ordered_series
+
+            # --- COLOR LOGIC: GRADIENT vs CYCLE ---
             total_lines = len(series_to_plot)
             generated_colors = []
             if self.v_color_mode.get() == "Gradient" and total_lines > 0:
@@ -975,8 +1237,80 @@ class InteractivePlotter:
                 if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
 
             if self.show_legend.get() and ptype != "Color Map":
-                (axes_list[0] if ptype == "Broken Y-Axis" else self.ax).legend(lines, labels, loc='best',
-                                                                               prop={'size': leg_sz, 'family': font})
+                # Apply legend order if set
+                if self.legend_order:
+                    # Build a mapping from series keys to their lines and labels
+                    series_keys = [(fk, yc) for (fk, yc, _) in series_to_plot]
+                    key_to_line_label = {}
+                    for i, key in enumerate(series_keys):
+                        if i < len(lines) and i < len(labels):
+                            key_to_line_label[key] = (lines[i], labels[i])
+                    
+                    # Reorder lines and labels according to legend_order
+                    ordered_lines = []
+                    ordered_labels = []
+                    used_keys = set()
+                    
+                    # First add items in legend_order
+                    for key in self.legend_order:
+                        if key in key_to_line_label and key not in used_keys:
+                            ordered_lines.append(key_to_line_label[key][0])
+                            ordered_labels.append(key_to_line_label[key][1])
+                            used_keys.add(key)
+                    
+                    # Then add any remaining items not in legend_order
+                    for i, key in enumerate(series_keys):
+                        if key not in used_keys and i < len(lines) and i < len(labels):
+                            ordered_lines.append(lines[i])
+                            ordered_labels.append(labels[i])
+                    
+                    if ordered_lines:
+                        lines, labels = ordered_lines, ordered_labels
+                
+                # Get legend settings
+                ncol = int(self.legend_columns.get())
+                position = self.legend_position.get()
+                
+                # Map position string to matplotlib loc and bbox_to_anchor
+                loc_map = {
+                    "Best": "best",
+                    "Upper Right": "upper right",
+                    "Upper Left": "upper left",
+                    "Lower Right": "lower right",
+                    "Lower Left": "lower left",
+                    "Center Left": "center left",
+                    "Center Right": "center right",
+                    "Lower Center": "lower center",
+                    "Upper Center": "upper center",
+                    "Center": "center",
+                    "Outside Right": "center left",
+                    "Outside Bottom": "upper center"
+                }
+                
+                loc = loc_map.get(position, "best")
+                bbox_to_anchor = None
+                
+                if position == "Outside Right":
+                    bbox_to_anchor = (1.02, 0.5)
+                elif position == "Outside Bottom":
+                    bbox_to_anchor = (0.5, -0.15)
+                
+                # Store lines for legend toggle functionality
+                self.current_lines = lines
+                
+                # Create legend
+                legend_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
+                legend = legend_ax.legend(lines, labels, loc=loc, ncol=ncol,
+                                          bbox_to_anchor=bbox_to_anchor,
+                                          prop={'size': leg_sz, 'family': font})
+                
+                # Make legend draggable if enabled
+                if self.legend_draggable.get():
+                    legend.set_draggable(True)
+                
+                # Connect pick event for legend toggle (click on legend to hide/show lines)
+                self.canvas.mpl_connect('pick_event', self.on_legend_pick)
+                legend.set_picker(10)  # Set pick radius for legend
 
             if self.show_grid.get():
                 for a in axes_list: a.grid(True, alpha=0.3)
@@ -1013,7 +1347,7 @@ class InteractivePlotter:
             messagebox.showinfo("Cache Folder Set", f"Cache files will be saved to:\n{folder}")
 
     def save_session(self):
-        """Save current session (datasets + styles) to a JSON cache file."""
+        """Save current session (datasets + all settings) to a JSON cache file."""
         if not self.datasets:
             messagebox.showwarning("No Data", "No datasets loaded to save.")
             return
@@ -1048,30 +1382,275 @@ class InteractivePlotter:
             # Prepare session data
             session_data = {
                 "timestamp": datetime.now().isoformat(),
-                "datasets": {},
-                "styles": {}
+                "version": "2.0",  # Version for future compatibility
             }
             
-            # Convert datasets to JSON-serializable format
+            # === DATASETS ===
+            session_data["datasets"] = {}
             for filename, df in self.datasets.items():
                 session_data["datasets"][filename] = {
                     "columns": df.columns,
                     "data": df.to_numpy().tolist()
                 }
             
-            # Convert styles (tuple keys need to be strings)
+            # === STYLES (per-series) ===
+            session_data["styles"] = {}
             for k, v in self.styles.items():
-                str_key = f"{k[0]}|||{k[1]}"  # Use separator that won't appear in filenames
+                str_key = f"{k[0]}|||{k[1]}"
                 session_data["styles"][str_key] = v
+            
+            # === LEGEND ORDER ===
+            session_data["legend_order"] = [f"{k[0]}|||{k[1]}" for k in self.legend_order]
+            
+            # === LEGEND SETTINGS ===
+            session_data["legend_settings"] = {
+                "columns": self.legend_columns.get(),
+                "position": self.legend_position.get(),
+                "draggable": self.legend_draggable.get(),
+                "show_legend": self.show_legend.get(),
+                "legend_size": self.v_leg_size.get(),
+                "legend_csv": self.v_legend.get(),
+            }
+            
+            # === TITLES & LABELS ===
+            session_data["titles_labels"] = {
+                "title": self.v_title.get(),
+                "xlabel": self.v_xlabel.get(),
+                "ylabel": self.v_ylabel.get(),
+                "y2label": self.v_y2label.get(),
+                "zlabel": self.v_zlabel.get(),
+                "title_color": self.title_color,
+                "xlabel_color": self.xlabel_color,
+                "ylabel_color": self.ylabel_color,
+                "zlabel_color": self.zlabel_color,
+                "xtick_color": self.xtick_color,
+                "ytick_color": self.ytick_color,
+            }
+            
+            # === DATA TRANSFORMATION ===
+            session_data["data_transformation"] = {
+                "x_div": self.v_x_div.get(),
+                "y_div": self.v_y_div.get(),
+                "y2_div": self.v_y2_div.get(),
+                "z_div": self.v_z_div.get(),
+            }
+            
+            # === AXIS RANGES ===
+            session_data["axis_ranges"] = {
+                "x_min": self.v_x_min.get(),
+                "x_max": self.v_x_max.get(),
+                "y_min": self.v_y_min.get(),
+                "y_max": self.v_y_max.get(),
+                "y2_min": self.v_y2_min.get(),
+                "y2_max": self.v_y2_max.get(),
+                "z_min": self.v_z_min.get(),
+                "z_max": self.v_z_max.get(),
+                "break_start": self.v_break_start.get(),
+                "break_end": self.v_break_end.get(),
+            }
+            
+            # === PADDING ===
+            session_data["padding"] = {
+                "x_pad": self.v_x_pad.get(),
+                "y_pad": self.v_y_pad.get(),
+                "y_broken_offset": self.v_y_broken_offset.get(),
+                "z_pad": self.v_z_pad.get(),
+            }
+            
+            # === TICK SETTINGS ===
+            session_data["tick_settings"] = {
+                "x_maj": self.v_x_maj.get(),
+                "x_min_div": self.v_x_min_div.get(),
+                "x_tick_pad": self.v_x_tick_pad.get(),
+                "y_maj": self.v_y_maj.get(),
+                "y_min_div": self.v_y_min_div.get(),
+                "y_tick_pad": self.v_y_tick_pad.get(),
+                "y1_maj": self.v_y1_maj.get(),
+                "y1_min_div": self.v_y1_min_div.get(),
+                "y1_pad": self.v_y1_pad.get(),
+                "y2_maj": self.v_y2_maj.get(),
+                "y2_min_div": self.v_y2_min_div.get(),
+                "y2_pad": self.v_y2_pad.get(),
+                "z_maj": self.v_z_maj.get(),
+                "z_min_div": self.v_z_min_div.get(),
+                "z_tick_pad": self.v_z_tick_pad.get(),
+            }
+            
+            # === FONT SETTINGS ===
+            session_data["font_settings"] = {
+                "font_family": self.v_font_fam.get(),
+                "title_size": self.v_t_size.get(),
+                "label_size": self.v_l_size.get(),
+                "xtick_size": self.v_xtick_size.get(),
+                "ytick_size": self.v_ytick_size.get(),
+                "x_notation": self.v_x_not.get(),
+                "y_notation": self.v_y_not.get(),
+            }
+            
+            # === PLOT SETTINGS ===
+            session_data["plot_settings"] = {
+                "plot_type": self.plot_type.get(),
+                "color_mode": self.v_color_mode.get(),
+                "colormap": self.v_cmap_name.get(),
+                "show_grid": self.show_grid.get(),
+                "x_log": self.x_log.get(),
+                "y_log": self.y_log.get(),
+            }
+            
+            # === AXIS SELECTIONS ===
+            session_data["axis_selections"] = {
+                "axis_ref_file": self.axis_ref_combo.get(),
+                "x_column": self.x_combo.get(),
+                "z_column": self.z_combo.get(),
+                "y1_column": self.y1_combo.get(),
+                "y2_column": self.y2_combo.get(),
+                "merge_cols": self.merge_cols_var.get(),
+                "use_ref_x": self.use_ref_x_var.get(),
+            }
+            
+            # === UI STATE ===
+            # Save selected datasets
+            selected_indices = list(self.dataset_listbox.curselection())
+            session_data["ui_state"] = {
+                "selected_datasets": selected_indices,
+            }
             
             # Save to file
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(session_data, f, indent=2)
             
-            messagebox.showinfo("Session Saved", f"Session saved successfully to:\n{filepath}\n\nDatasets: {len(self.datasets)}\nStyles: {len(self.styles)}")
+            # Count saved items for info message
+            saved_items = [
+                "Datasets", "Styles", "Legend Order", "Legend Settings",
+                "Titles & Labels", "Data Transformation", "Axis Ranges",
+                "Tick Settings", "Font Settings", "Plot Settings", "Axis Selections"
+            ]
+            
+            messagebox.showinfo("Session Saved", 
+                f"Session saved successfully to:\n{filepath}\n\n"
+                f"Saved {len(self.datasets)} datasets\n"
+                f"Saved settings: {', '.join(saved_items)}")
             
         except Exception as e:
             messagebox.showerror("Save Error", f"Failed to save session:\n{str(e)}")
+
+    def open_dataset_window(self):
+        """Open a separate window for managing datasets with better visibility."""
+        if self.dataset_window is not None and self.dataset_window.winfo_exists():
+            self.dataset_window.lift()
+            return
+        
+        self.dataset_window = tk.Toplevel(self.root)
+        self.dataset_window.title("Dataset Manager")
+        self.dataset_window.geometry("500x600")
+        self.dataset_window.transient(self.root)
+        
+        frame = ttk.Frame(self.dataset_window, padding=10)
+        frame.pack(fill='both', expand=True)
+        
+        # Load buttons at top
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', pady=(0, 10))
+        ttk.Button(btn_frame, text="Load CSV File(s)", command=self.load_files).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="Unload Selected", command=self.unload_files).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="Refresh", command=lambda: self.refresh_dataset_window_list()).pack(side='left', padx=2)
+        
+        # Main listbox with scrollbar
+        list_frame = ttk.Frame(frame)
+        list_frame.pack(fill='both', expand=True)
+        
+        sb = ttk.Scrollbar(list_frame, orient='vertical')
+        self.ds_window_listbox = tk.Listbox(list_frame, selectmode='extended', 
+                                             yscrollcommand=sb.set, exportselection=False,
+                                             font=('Consolas', 10))
+        sb.config(command=self.ds_window_listbox.yview)
+        self.ds_window_listbox.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+        
+        # Bind selection event to sync with main listbox
+        self.ds_window_listbox.bind('<<ListboxSelect>>', self.on_ds_window_selection_change)
+        
+        # Info label
+        self.ds_info_label = ttk.Label(frame, text="", font=('Arial', 9))
+        self.ds_info_label.pack(fill='x', pady=(10, 5))
+        
+        # Populate listbox
+        self.refresh_dataset_window_list()
+        
+        # Handle window close
+        self.dataset_window.protocol("WM_DELETE_WINDOW", self.on_ds_window_close)
+    
+    def refresh_dataset_window_list(self):
+        """Refresh the dataset list in the separate window."""
+        if self.dataset_window is None or not self.dataset_window.winfo_exists():
+            return
+        
+        self.ds_window_listbox.delete(0, tk.END)
+        for k in self.datasets.keys():
+            df = self.datasets[k]
+            cols = len(df.columns)
+            rows = len(df)
+            self.ds_window_listbox.insert(tk.END, f"{k}  ({rows} rows, {cols} cols)")
+        
+        # Sync selection with main listbox
+        main_sel = list(self.dataset_listbox.curselection())
+        self.ds_window_listbox.selection_clear(0, tk.END)
+        for idx in main_sel:
+            if idx < self.ds_window_listbox.size():
+                self.ds_window_listbox.selection_set(idx)
+        
+        # Update info
+        total_rows = sum(len(df) for df in self.datasets.values())
+        self.ds_info_label.config(text=f"Total: {len(self.datasets)} datasets, {total_rows} rows")
+    
+    def on_ds_window_selection_change(self, event):
+        """Sync selection from window listbox to main listbox."""
+        sel_idxs = list(self.ds_window_listbox.curselection())
+        self.dataset_listbox.selection_clear(0, tk.END)
+        for idx in sel_idxs:
+            if idx < self.dataset_listbox.size():
+                self.dataset_listbox.selection_set(idx)
+        self.update_plot()
+    
+    def on_ds_window_close(self):
+        """Handle dataset window close."""
+        if self.dataset_window:
+            self.dataset_window.destroy()
+        self.dataset_window = None
+
+    def on_legend_pick(self, event):
+        """Handle click on legend to toggle line visibility."""
+        if event.artist is None:
+            return
+        
+        # Find which legend entry was clicked
+        legend = event.artist
+        if not hasattr(legend, 'get_texts'):
+            return
+        
+        # Get the clicked label index
+        mouseevent = event.mouseevent
+        if mouseevent is None:
+            return
+        
+        # Find clicked legend item
+        for i, text in enumerate(legend.get_texts()):
+            bbox = text.get_window_extent()
+            if bbox.contains(mouseevent.x, mouseevent.y):
+                # Toggle visibility of corresponding line
+                if i < len(self.current_lines):
+                    line = self.current_lines[i]
+                    visible = line.get_visible()
+                    line.set_visible(not visible)
+                    
+                    # Fade/unfade legend text
+                    if visible:
+                        text.set_alpha(0.3)
+                    else:
+                        text.set_alpha(1.0)
+                    
+                    self.canvas.draw()
+                break
 
     def load_session(self):
         """Load a session from a JSON cache file."""
@@ -1098,30 +1677,194 @@ class InteractivePlotter:
             self.datasets = {}
             self.styles = {}
             
-            # Restore datasets
+            # === RESTORE DATASETS ===
             for filename, df_data in session_data.get("datasets", {}).items():
                 columns = df_data["columns"]
                 data = df_data["data"]
                 df = pl.DataFrame(data, schema=columns, orient="row")
                 self.datasets[filename] = df
             
-            # Restore styles (convert string keys back to tuples)
+            # === RESTORE STYLES ===
             for str_key, style_val in session_data.get("styles", {}).items():
                 parts = str_key.split("|||")
                 if len(parts) == 2:
                     tuple_key = (parts[0], parts[1])
                     self.styles[tuple_key] = style_val
             
-            # Refresh UI
+            # === RESTORE LEGEND ORDER ===
+            self.legend_order = []
+            for str_key in session_data.get("legend_order", []):
+                parts = str_key.split("|||")
+                if len(parts) == 2:
+                    self.legend_order.append((parts[0], parts[1]))
+            
+            # === RESTORE LEGEND SETTINGS ===
+            legend_settings = session_data.get("legend_settings", {})
+            if legend_settings:
+                self.legend_columns.set(legend_settings.get("columns", "1"))
+                self.legend_position.set(legend_settings.get("position", "Best"))
+                self.legend_draggable.set(legend_settings.get("draggable", True))
+                self.show_legend.set(legend_settings.get("show_legend", True))
+                self.v_leg_size.set(legend_settings.get("legend_size", "10"))
+                self.v_legend.set(legend_settings.get("legend_csv", ""))
+            
+            # === RESTORE TITLES & LABELS ===
+            titles_labels = session_data.get("titles_labels", {})
+            if titles_labels:
+                self.v_title.set(titles_labels.get("title", "My Plot"))
+                self.v_xlabel.set(titles_labels.get("xlabel", ""))
+                self.v_ylabel.set(titles_labels.get("ylabel", ""))
+                self.v_y2label.set(titles_labels.get("y2label", ""))
+                self.v_zlabel.set(titles_labels.get("zlabel", ""))
+                self.title_color = titles_labels.get("title_color", "black")
+                self.xlabel_color = titles_labels.get("xlabel_color", "black")
+                self.ylabel_color = titles_labels.get("ylabel_color", "black")
+                self.zlabel_color = titles_labels.get("zlabel_color", "black")
+                self.xtick_color = titles_labels.get("xtick_color", "black")
+                self.ytick_color = titles_labels.get("ytick_color", "black")
+            
+            # === RESTORE DATA TRANSFORMATION ===
+            data_transformation = session_data.get("data_transformation", {})
+            if data_transformation:
+                self.v_x_div.set(data_transformation.get("x_div", "1"))
+                self.v_y_div.set(data_transformation.get("y_div", "1"))
+                self.v_y2_div.set(data_transformation.get("y2_div", "1"))
+                self.v_z_div.set(data_transformation.get("z_div", "1"))
+            
+            # === RESTORE AXIS RANGES ===
+            axis_ranges = session_data.get("axis_ranges", {})
+            if axis_ranges:
+                self.v_x_min.set(axis_ranges.get("x_min", ""))
+                self.v_x_max.set(axis_ranges.get("x_max", ""))
+                self.v_y_min.set(axis_ranges.get("y_min", ""))
+                self.v_y_max.set(axis_ranges.get("y_max", ""))
+                self.v_y2_min.set(axis_ranges.get("y2_min", ""))
+                self.v_y2_max.set(axis_ranges.get("y2_max", ""))
+                self.v_z_min.set(axis_ranges.get("z_min", ""))
+                self.v_z_max.set(axis_ranges.get("z_max", ""))
+                self.v_break_start.set(axis_ranges.get("break_start", ""))
+                self.v_break_end.set(axis_ranges.get("break_end", ""))
+            
+            # === RESTORE PADDING ===
+            padding = session_data.get("padding", {})
+            if padding:
+                self.v_x_pad.set(padding.get("x_pad", "4.0"))
+                self.v_y_pad.set(padding.get("y_pad", "4.0"))
+                self.v_y_broken_offset.set(padding.get("y_broken_offset", "-0.15"))
+                self.v_z_pad.set(padding.get("z_pad", "10.0"))
+            
+            # === RESTORE TICK SETTINGS ===
+            tick_settings = session_data.get("tick_settings", {})
+            if tick_settings:
+                self.v_x_maj.set(tick_settings.get("x_maj", ""))
+                self.v_x_min_div.set(tick_settings.get("x_min_div", ""))
+                self.v_x_tick_pad.set(tick_settings.get("x_tick_pad", "3.5"))
+                self.v_y_maj.set(tick_settings.get("y_maj", ""))
+                self.v_y_min_div.set(tick_settings.get("y_min_div", ""))
+                self.v_y_tick_pad.set(tick_settings.get("y_tick_pad", "3.5"))
+                self.v_y1_maj.set(tick_settings.get("y1_maj", ""))
+                self.v_y1_min_div.set(tick_settings.get("y1_min_div", ""))
+                self.v_y1_pad.set(tick_settings.get("y1_pad", "3.5"))
+                self.v_y2_maj.set(tick_settings.get("y2_maj", ""))
+                self.v_y2_min_div.set(tick_settings.get("y2_min_div", ""))
+                self.v_y2_pad.set(tick_settings.get("y2_pad", "3.5"))
+                self.v_z_maj.set(tick_settings.get("z_maj", ""))
+                self.v_z_min_div.set(tick_settings.get("z_min_div", ""))
+                self.v_z_tick_pad.set(tick_settings.get("z_tick_pad", "3.5"))
+            
+            # === RESTORE FONT SETTINGS ===
+            font_settings = session_data.get("font_settings", {})
+            if font_settings:
+                self.v_font_fam.set(font_settings.get("font_family", "Arial"))
+                self.v_t_size.set(font_settings.get("title_size", "14"))
+                self.v_l_size.set(font_settings.get("label_size", "12"))
+                self.v_xtick_size.set(font_settings.get("xtick_size", "10"))
+                self.v_ytick_size.set(font_settings.get("ytick_size", "10"))
+                self.v_x_not.set(font_settings.get("x_notation", "Scientific"))
+                self.v_y_not.set(font_settings.get("y_notation", "Scientific"))
+            
+            # === RESTORE PLOT SETTINGS ===
+            plot_settings = session_data.get("plot_settings", {})
+            if plot_settings:
+                plot_type = plot_settings.get("plot_type", "Line")
+                if plot_type in ["Line", "Scatter", "Broken Y-Axis", "Color Map", "Dual Y-Axis"]:
+                    self.plot_type.set(plot_type)
+                self.v_color_mode.set(plot_settings.get("color_mode", "Cycle"))
+                self.v_cmap_name.set(plot_settings.get("colormap", "viridis"))
+                self.show_grid.set(plot_settings.get("show_grid", True))
+                self.x_log.set(plot_settings.get("x_log", False))
+                self.y_log.set(plot_settings.get("y_log", False))
+            
+            # === RESTORE AXIS SELECTIONS ===
+            axis_selections = session_data.get("axis_selections", {})
+            if axis_selections:
+                self.merge_cols_var.set(axis_selections.get("merge_cols", False))
+                self.use_ref_x_var.set(axis_selections.get("use_ref_x", False))
+                # Note: axis_ref_file, x_column, z_column, y1_column, y2_column 
+                # will be restored after refresh_dataset_list populates the combos
+            
+            # Refresh UI to populate combos
             self.refresh_dataset_list(new_load=True)
+            
+            # === RESTORE AXIS SELECTIONS (after combos populated) ===
+            if axis_selections:
+                ref_file = axis_selections.get("axis_ref_file", "")
+                if ref_file and ref_file in self.datasets:
+                    self.axis_ref_combo.set(ref_file)
+                    self.populate_column_selectors(None)
+                
+                x_col = axis_selections.get("x_column", "")
+                if x_col and x_col in self.x_combo['values']:
+                    self.x_combo.set(x_col)
+                
+                z_col = axis_selections.get("z_column", "")
+                if z_col and z_col in self.z_combo['values']:
+                    self.z_combo.set(z_col)
+                
+                y1_col = axis_selections.get("y1_column", "")
+                if y1_col and y1_col in self.y1_combo['values']:
+                    self.y1_combo.set(y1_col)
+                
+                y2_col = axis_selections.get("y2_column", "")
+                if y2_col and y2_col in self.y2_combo['values']:
+                    self.y2_combo.set(y2_col)
+            
+            # === RESTORE UI STATE ===
+            ui_state = session_data.get("ui_state", {})
+            if ui_state:
+                selected_indices = ui_state.get("selected_datasets", [])
+                self.dataset_listbox.selection_clear(0, tk.END)
+                for idx in selected_indices:
+                    if idx < self.dataset_listbox.size():
+                        self.dataset_listbox.selection_set(idx)
             
             # Show info
             timestamp = session_data.get("timestamp", "Unknown")
+            version = session_data.get("version", "1.0")
+            
+            restored_items = []
+            if session_data.get("datasets"): restored_items.append("Datasets")
+            if session_data.get("styles"): restored_items.append("Styles")
+            if session_data.get("legend_order"): restored_items.append("Legend Order")
+            if session_data.get("legend_settings"): restored_items.append("Legend Settings")
+            if session_data.get("titles_labels"): restored_items.append("Titles & Labels")
+            if session_data.get("data_transformation"): restored_items.append("Data Transformation")
+            if session_data.get("axis_ranges"): restored_items.append("Axis Ranges")
+            if session_data.get("tick_settings"): restored_items.append("Tick Settings")
+            if session_data.get("font_settings"): restored_items.append("Font Settings")
+            if session_data.get("plot_settings"): restored_items.append("Plot Settings")
+            if session_data.get("axis_selections"): restored_items.append("Axis Selections")
+            
             messagebox.showinfo("Session Loaded", 
                 f"Session loaded successfully!\n\n"
+                f"Version: {version}\n"
                 f"Saved on: {timestamp}\n"
                 f"Datasets: {len(self.datasets)}\n"
-                f"Styles: {len(self.styles)}")
+                f"Styles: {len(self.styles)}\n\n"
+                f"Restored: {', '.join(restored_items)}")
+            
+            # Update plot with restored settings
+            self.update_plot()
             
         except Exception as e:
             messagebox.showerror("Load Error", f"Failed to load session:\n{str(e)}")
