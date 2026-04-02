@@ -160,6 +160,10 @@ class InteractivePlotter:
         
         # --- DATASET WINDOW ---
         self.dataset_window = None
+        
+        # --- SCREEN DIMENSIONS (for responsive design) ---
+        self.screen_width = self.root.winfo_screenwidth()
+        self.screen_height = self.root.winfo_screenheight()
 
         self.setup_ui()
 
@@ -179,7 +183,19 @@ class InteractivePlotter:
         canvas_scroll.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         canvas_scroll.pack(side="left", fill="both", expand=True)
-        canvas_scroll.bind_all("<MouseWheel>", lambda e: canvas_scroll.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        #canvas_scroll.bind_all("<MouseWheel>", lambda e: canvas_scroll.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+
+        #plot_frame = ttk.Frame(main_container)
+        def _on_main_mousewheel(event):
+            canvas_scroll.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        def _bind_main_mousewheel(event):
+            canvas_scroll.bind_all("<MouseWheel>", _on_main_mousewheel)
+        def _unbind_main_mousewheel(event):
+            canvas_scroll.unbind_all("<MouseWheel>")
+        canvas_scroll.bind('<Enter>', _bind_main_mousewheel)
+        canvas_scroll.bind('<Leave>', _unbind_main_mousewheel)
+        control_frame.bind('<Enter>', _bind_main_mousewheel)
+        control_frame.bind('<Leave>', _unbind_main_mousewheel)
 
         plot_frame = ttk.Frame(main_container)
         main_container.add(plot_frame)
@@ -263,10 +279,6 @@ class InteractivePlotter:
         row += 1
         # --------------------------------------------
 
-        ttk.Button(control_frame, text="Configure Styles", command=self.open_style_dialog).grid(row=row, column=0,
-                                                                                                columnspan=4,
-                                                                                                sticky='ew', pady=5)
-        row += 1
 
         ttk.Label(control_frame, text="X Axis:").grid(row=row, column=0, sticky='w')
         self.x_combo = ttk.Combobox(control_frame, state='readonly', width=20)
@@ -343,27 +355,169 @@ class InteractivePlotter:
         control_frame.columnconfigure(2, weight=1)
         control_frame.columnconfigure(3, weight=1)
 
+        # Set minimum window size to ensure toolbar is visible on smaller screens
+        self.root.minsize(900, 600)
+        
         self.fig = Figure(figsize=(10, 7), dpi=100)
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=plot_frame)
         self.canvas.draw()
-        self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
+        # Create and pack toolbar FIRST at the bottom so it's always visible
         toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
         toolbar.update()
+        
+        # Then pack canvas with expand - this ensures toolbar stays visible
+        self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
         self.ax.text(0.5, 0.5, 'Load CSV file(s) to begin', ha='center', va='center', fontsize=16, color='gray')
         self.ax.set_xticks([]);
         self.ax.set_yticks([])
         self.canvas.draw()
 
+    # --- HELPER METHODS FOR RESPONSIVE DESIGN ---
+    
+    def get_dialog_size(self, width_pct=0.35, height_pct=0.85, max_width=None, max_height=None, min_width=350, min_height=300):
+        """Calculate dialog size based on screen dimensions.
+        
+        Args:
+            width_pct: Percentage of screen width (default 35%)
+            height_pct: Percentage of screen height (default 85%)
+            max_width: Maximum width in pixels
+            max_height: Maximum height in pixels
+            min_width: Minimum width in pixels
+            min_height: Minimum height in pixels
+        
+        Returns:
+            Tuple of (width, height) in pixels
+        """
+        w = int(self.screen_width * width_pct)
+        h = int(self.screen_height * height_pct)
+        
+        if max_width:
+            w = min(max_width, w)
+        if max_height:
+            h = min(max_height, h)
+        
+        w = max(min_width, w)
+        h = max(min_height, h)
+        
+        return w, h
+    
+    def create_scrollable_dialog(self, parent, title, width_pct=0.35, height_pct=0.85, 
+                                  max_width=None, max_height=None, min_width=350, min_height=300,
+                                  auto_width=False):
+        """Create a scrollable dialog window.
+        
+        Args:
+            auto_width: If True, adjust width based on content after dialog is built (disabled by default)
+        
+        Returns:
+            Tuple of (dialog, content_frame, canvas) where content_frame is the scrollable area
+        """
+        d = tk.Toplevel(parent)
+        d.title(title)
+        
+        # Calculate size based on screen - use min_width as the actual width to ensure buttons fit
+        w, h = self.get_dialog_size(width_pct, height_pct, max_width, max_height, min_width, min_height)
+        
+        # Ensure minimum width of 450 to accommodate buttons (3 buttons x 12 chars + padding)
+        w = max(w, 450)
+        
+        # Center the dialog on parent
+        d.geometry(f"{w}x{h}")
+        d.transient(parent)
+        
+        # Create main container to hold scrollable area and button frame
+        main_container = ttk.Frame(d)
+        main_container.pack(fill='both', expand=True)
+        
+        # Create button frame FIRST at bottom (before canvas so it stays visible)
+        btn_container = ttk.Frame(main_container)
+        btn_container.pack(side='bottom', fill='x', pady=10, padx=10)
+        
+        # Create scrollable frame (fills remaining space above buttons)
+        canvas = tk.Canvas(main_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
+        content_frame = ttk.Frame(canvas, padding=10)
+        
+        content_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=content_frame, anchor="nw")
+        
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        
+        # Enable mousewheel scrolling for this dialog only
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind("<MouseWheel>", on_mousewheel)
+        content_frame.bind("<MouseWheel>", on_mousewheel)
+        
+        # Function to adjust width based on content (disabled by default)
+        def adjust_width():
+            pass  # No-op since auto_width is disabled
+        
+        # Cleanup binding when dialog closes
+        def on_close():
+            canvas.unbind("<MouseWheel>")
+            content_frame.unbind("<MouseWheel>")
+            d.destroy()
+        d.protocol("WM_DELETE_WINDOW", on_close)
+        
+        # Store adjust function on dialog for later use (no-op)
+        d.adjust_width = adjust_width
+        
+        return d, content_frame, canvas, main_container, btn_container
+
+    def add_dialog_buttons(self, parent, dialog, update_cmd, ok_cmd=None, cancel_cmd=None, 
+                           extra_buttons=None):
+        """Add standardized button frame to a dialog.
+        
+        Args:
+            parent: Parent frame to pack buttons into (should be content_frame, not main_container)
+            dialog: The dialog window (for closing on OK/Cancel)
+            update_cmd: Command for Update Plot button
+            ok_cmd: Optional command for OK button (default: update + close)
+            cancel_cmd: Optional command for Cancel button (default: just close)
+            extra_buttons: List of (text, command) tuples for additional buttons
+        
+        Returns:
+            The button frame
+        """
+        # Default commands
+        if ok_cmd is None:
+            ok_cmd = lambda: [update_cmd(), dialog.destroy()]
+        if cancel_cmd is None:
+            cancel_cmd = lambda: dialog.destroy()
+        
+        # Create button frame at the bottom of the content
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill='x', pady=(15, 5), side='bottom')
+        
+        # Create buttons - they will expand to fill available width within the frame
+        ttk.Button(btn_frame, text="Update Plot", command=update_cmd).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_frame, text="OK", command=ok_cmd).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_frame, text="Cancel", command=cancel_cmd).pack(
+            side='left', expand=True, fill='x', padx=2)
+        
+        # Add extra buttons if provided
+        if extra_buttons:
+            for text, cmd in extra_buttons:
+                ttk.Button(btn_frame, text=text, command=cmd).pack(
+                    side='left', expand=True, fill='x', padx=2)
+        
+        return btn_frame
+
     # --- DIALOG BUILDERS (FIXED FONTS) ---
 
     def open_ranges_dialog(self):
-        d = tk.Toplevel(self.root)
-        d.title("Ranges & Data Transformation")
-        d.geometry("450x700")
-        d.transient(self.root)
-        frame = ttk.Frame(d, padding=10)
-        frame.pack(fill='both', expand=True)
+        d, frame, canvas, main_container, btn_container = self.create_scrollable_dialog(
+            self.root, "Ranges & Data Transformation",
+            width_pct=0.35, height_pct=0.85, max_width=500, max_height=700
+        )
 
         # FIX: Changed font='bold' to font=('Arial', 10, 'bold')
         ttk.Label(frame, text="Data Transformation (Divide by)", font=('Arial', 10, 'bold')).pack(pady=5)
@@ -396,16 +550,22 @@ class InteractivePlotter:
         add_entry("Y2 Min:", self.v_y2_min)
         add_entry("Y2 Max:", self.v_y2_max)
 
-        ttk.Button(frame, text="Reset Ranges", command=self.reset_ranges).pack(pady=10)
-        ttk.Button(frame, text="Update Plot", command=self.update_plot).pack(pady=5)
+        # Add buttons to the fixed button container (outside scrollable area)
+        btn_width = 12
+        ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="OK", command=lambda: [self.update_plot(), d.destroy()], width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="Cancel", command=d.destroy, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="Reset Ranges", command=self.reset_ranges, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
 
     def open_labels_dialog(self):
-        d = tk.Toplevel(self.root)
-        d.title("Labels, Titles & Colors")
-        d.geometry("450x850")
-        d.transient(self.root)
-        frame = ttk.Frame(d, padding=10)
-        frame.pack(fill='both', expand=True)
+        d, frame, canvas, main_container, btn_container = self.create_scrollable_dialog(
+            self.root, "Labels, Titles & Colors",
+            width_pct=0.38, height_pct=0.85, max_width=500, max_height=850
+        )
 
         def add_entry(txt, var):
             f = ttk.Frame(frame)
@@ -482,15 +642,20 @@ class InteractivePlotter:
         ttk.Checkbutton(frame, text="Draggable Legend (click & drag to reposition)", 
                         variable=self.legend_draggable).pack(pady=5)
         
-        ttk.Button(frame, text="Update Plot", command=self.update_plot).pack(pady=10)
+        # Add buttons to the fixed button container (outside scrollable area)
+        btn_width = 12
+        ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="OK", command=lambda: [self.update_plot(), d.destroy()], width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="Cancel", command=d.destroy, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
 
     def open_ticks_dialog(self):
-        d = tk.Toplevel(self.root)
-        d.title("Ticks & Fonts")
-        d.geometry("450x550")
-        d.transient(self.root)
-        frame = ttk.Frame(d, padding=10)
-        frame.pack(fill='both', expand=True)
+        d, frame, canvas, main_container, btn_container = self.create_scrollable_dialog(
+            self.root, "Ticks & Fonts",
+            width_pct=0.40, height_pct=0.85, max_width=550, max_height=650
+        )
 
         # FIX: Font bug
         ttk.Label(frame, text="Tick Control", font=('Arial', 10, 'bold')).pack(pady=5)
@@ -529,12 +694,25 @@ class InteractivePlotter:
 
         ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(frame, text="Font Settings", font=('Arial', 10, 'bold')).pack(pady=5)
+        
+        # Font search info label
+        ttk.Label(frame, text="(Type in the font dropdown to search/filter fonts)", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5))
+        
         f_fam = ttk.Frame(frame)
         f_fam.pack(fill='x', pady=2)
         ttk.Label(f_fam, text="Font Family:").pack(side='left')
-        ttk.Combobox(f_fam, textvariable=self.v_font_fam,
-                     values=["Arial", "Times New Roman", "Courier New", "Calibri", "DejaVu Sans"], width=25).pack(
-            side='right')
+        # Get available system fonts from matplotlib
+        from matplotlib.font_manager import fontManager
+        available_fonts = sorted(set([f.name for f in fontManager.ttflist]))
+        
+        # Create combobox with autocomplete functionality
+        font_combo = ttk.Combobox(f_fam, textvariable=self.v_font_fam,
+                                   values=available_fonts, width=25)
+        font_combo.pack(side='right')
+        
+        # Setup autocomplete for font combobox
+        self._setup_autocomplete_combobox(font_combo, available_fonts, d)
 
         def add_sz(txt, var):
             f = ttk.Frame(frame)
@@ -547,7 +725,15 @@ class InteractivePlotter:
         add_sz("Legend Size:", self.v_leg_size)
         add_sz("X Tick Size:", self.v_xtick_size)
         add_sz("Y Tick Size:", self.v_ytick_size)
-        ttk.Button(frame, text="Update Plot", command=self.update_plot).pack(pady=10)
+        
+        # Add buttons to the fixed button container (outside scrollable area)
+        btn_width = 12
+        ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="OK", command=lambda: [self.update_plot(), d.destroy()], width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="Cancel", command=d.destroy, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
 
     # --- MAIN LOGIC ---
     def load_files(self):
@@ -710,18 +896,11 @@ class InteractivePlotter:
                 for yc in y_cols: pairs_to_style.append((fk, yc))
         if not pairs_to_style: return messagebox.showinfo("Info", "Select Y axes first.")
 
-        d = tk.Toplevel(self.root);
-        d.title("Style Config");
-        d.geometry("700x400");
-        d.transient(self.root)
-        cv = tk.Canvas(d);
-        sb = ttk.Scrollbar(d, orient="vertical", command=cv.yview)
-        fr = ttk.Frame(cv);
-        fr.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
-        cv.create_window((0, 0), window=fr, anchor="nw");
-        cv.configure(yscrollcommand=sb.set)
-        cv.pack(side="left", fill="both", expand=True);
-        sb.pack(side="right", fill="y")
+        # Use create_scrollable_dialog for consistent structure with wider window
+        d, fr, cv, main_container, btn_container = self.create_scrollable_dialog(
+            self.root, "Style Config",
+            width_pct=0.55, height_pct=0.75, max_width=900, max_height=600, min_width=600, min_height=300
+        )
 
         ttk.Label(fr, text="Series").grid(row=0, column=0, padx=5, pady=5)
         ttk.Label(fr, text="Color").grid(row=0, column=1, padx=5, pady=5)
@@ -776,7 +955,15 @@ class InteractivePlotter:
             leg_entry.grid(row=r, column=4, padx=5)
             leg_val.trace("w", lambda n, i, m, v=leg_val, k=k: up_leg(v, k))
             r += 1
-        ttk.Button(d, text="Apply", command=lambda: [self.update_plot(), d.destroy()]).pack(pady=10)
+        
+        # Add buttons to the fixed button container (outside scrollable area)
+        btn_width = 12
+        ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="OK", command=lambda: [self.update_plot(), d.destroy()], width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="Cancel", command=d.destroy, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
 
     def open_legend_order_dialog(self):
         """Open dialog to adjust legend order."""
@@ -816,10 +1003,12 @@ class InteractivePlotter:
             if item not in current_order:
                 current_order.append(item)
         
-        # Create dialog
+        # Create dialog with dynamic sizing - ensure minimum width of 450 for buttons
+        w, h = self.get_dialog_size(0.35, 0.70, max_width=500, max_height=500, min_width=450, min_height=350)
+        
         d = tk.Toplevel(self.root)
         d.title("Legend Order")
-        d.geometry("400x450")
+        d.geometry(f"{w}x{h}")
         d.transient(self.root)
         frame = ttk.Frame(d, padding=10)
         frame.pack(fill='both', expand=True)
@@ -912,11 +1101,9 @@ class InteractivePlotter:
         ttk.Button(btn_frame, text="↓ Bottom", command=move_to_bottom, width=8).pack(side='left', padx=2)
         ttk.Button(btn_frame, text="Reset", command=reset_order, width=8).pack(side='right', padx=2)
         
-        # Apply/Cancel buttons
-        bottom_frame = ttk.Frame(frame)
-        bottom_frame.pack(fill='x', pady=(10, 0))
-        
-        def apply_order():
+        # Standardized button frame at bottom
+        def apply_order(close_dialog=True):
+            """Apply the current order and optionally close the dialog."""
             # Merge current_order with existing legend_order
             # Preserve existing order for items not in current selection
             # Update order for items in current selection (keeping their relative positions)
@@ -937,31 +1124,20 @@ class InteractivePlotter:
             
             self.legend_order = new_order
             self.update_plot()
-            d.destroy()
+            if close_dialog:
+                d.destroy()
         
-        def apply_and_keep():
-            # Merge current_order with existing legend_order
-            new_order = []
-            added_keys = set()
-            
-            # First, preserve items from existing legend_order that aren't in current selection
-            for key in self.legend_order:
-                if key not in pairs_to_order:
-                    new_order.append(key)
-                    added_keys.add(key)
-            
-            # Then, add items from current_order
-            for key in current_order:
-                if key not in added_keys:
-                    new_order.append(key)
-                    added_keys.add(key)
-            
-            self.legend_order = new_order
-            self.update_plot()
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill='x', pady=(10, 0))
         
-        ttk.Button(bottom_frame, text="Apply", command=apply_order).pack(side='left', expand=True, fill='x', padx=2)
-        ttk.Button(bottom_frame, text="Apply & Keep Open", command=apply_and_keep).pack(side='left', expand=True, fill='x', padx=2)
-        ttk.Button(bottom_frame, text="Cancel", command=d.destroy).pack(side='left', expand=True, fill='x', padx=2)
+        # Use fixed width buttons to prevent overflow
+        btn_width = 12
+        ttk.Button(btn_frame, text="Update Plot", command=lambda: apply_order(close_dialog=False), width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_frame, text="OK", command=lambda: apply_order(close_dialog=True), width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_frame, text="Cancel", command=d.destroy, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
 
     def update_plot(self):
         sel_ds = self.get_selected_datasets()
@@ -1322,6 +1498,70 @@ class InteractivePlotter:
             print(f"Error plotting: {e}")
             messagebox.showerror("Plot Error", str(e))
 
+    def _setup_autocomplete_combobox(self, combobox, all_values, parent_window):
+        """Setup autocomplete functionality for a combobox.
+        
+        When typing in the combobox, it filters the list to show only matching fonts.
+        - Type letters to filter the list
+        - Press Down arrow to open dropdown with filtered results
+        - Press Enter or Tab to accept the selection
+        """
+        # Store all values for filtering
+        combobox._all_values = all_values
+        
+        def on_keyrelease(event):
+            """Handle key release to filter combobox values."""
+            typed = combobox.get().lower()
+            
+            # Filter values that start with or contain the typed text
+            if typed:
+                # First prioritize fonts that start with the typed text
+                starts_with = [v for v in all_values if v.lower().startswith(typed)]
+                contains = [v for v in all_values if typed in v.lower() and v not in starts_with]
+                filtered = starts_with + contains
+            else:
+                filtered = all_values
+            
+            # Update combobox values
+            combobox['values'] = filtered
+            
+            # If we have a match and user typed something, show the dropdown
+            if filtered and typed:
+                # Find the best match and set it
+                if filtered:
+                    combobox.event_generate('<Down>')
+        
+        def on_enter(event):
+            """Handle Enter key to accept selection."""
+            # If there's a filtered list and the current text matches a font, select it
+            current = combobox.get()
+            if current in all_values:
+                combobox.set(current)
+            elif combobox['values']:
+                # Select the first match
+                combobox.set(combobox['values'][0])
+            return "break"  # Prevent default behavior
+        
+        def on_focus_out(event):
+            """Handle focus out - reset to full list if valid selection."""
+            current = combobox.get()
+            if current in all_values:
+                # Valid selection, keep it
+                pass
+            elif not current:
+                # Empty, reset to default
+                pass
+            # Reset the full list for next time
+            combobox['values'] = all_values
+        
+        # Bind events
+        combobox.bind('<KeyRelease>', on_keyrelease)
+        combobox.bind('<Return>', on_enter)
+        combobox.bind('<FocusOut>', on_focus_out)
+        
+        # Make combobox editable so user can type
+        combobox.configure(state='normal')
+    
     def reset_ranges(self):
         for v in [self.v_x_min, self.v_x_max, self.v_y_min, self.v_y_max, self.v_y2_min, self.v_y2_max, self.v_z_min,
                   self.v_z_max, self.v_break_start, self.v_break_end]:
@@ -1540,9 +1780,12 @@ class InteractivePlotter:
             self.dataset_window.lift()
             return
         
+        # Use dynamic sizing for the dataset manager
+        w, h = self.get_dialog_size(0.40, 0.80, max_width=600, max_height=700, min_width=400, min_height=400)
+        
         self.dataset_window = tk.Toplevel(self.root)
         self.dataset_window.title("Dataset Manager")
-        self.dataset_window.geometry("500x600")
+        self.dataset_window.geometry(f"{w}x{h}")
         self.dataset_window.transient(self.root)
         
         frame = ttk.Frame(self.dataset_window, padding=10)
