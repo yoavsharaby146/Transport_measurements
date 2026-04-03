@@ -1738,9 +1738,13 @@ class InteractivePlotter:
             }
             
             # === AXIS SELECTIONS ===
+            y_idxs = self.y_listbox.curselection()
+            y_columns = [self.y_listbox.get(i) for i in y_idxs]
+            
             session_data["axis_selections"] = {
                 "axis_ref_file": self.axis_ref_combo.get(),
                 "x_column": self.x_combo.get(),
+                "y_column": y_columns,
                 "z_column": self.z_combo.get(),
                 "y1_column": self.y1_combo.get(),
                 "y2_column": self.y2_combo.get(),
@@ -2063,6 +2067,14 @@ class InteractivePlotter:
                 z_col = axis_selections.get("z_column", "")
                 if z_col and z_col in self.z_combo['values']:
                     self.z_combo.set(z_col)
+                
+                # Restore Y listbox selections (for Line, Scatter, Broken Y-Axis, Color Map plots)
+                y_columns = axis_selections.get("y_column", [])
+                if y_columns:
+                    self.y_listbox.selection_clear(0, tk.END)
+                    for i in range(self.y_listbox.size()):
+                        if self.y_listbox.get(i) in y_columns:
+                            self.y_listbox.selection_set(i)
                 
                 y1_col = axis_selections.get("y1_column", "")
                 if y1_col and y1_col in self.y1_combo['values']:
