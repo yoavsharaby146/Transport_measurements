@@ -107,6 +107,17 @@ class InteractivePlotter:
         self.legend_columns = tk.StringVar(value="1")
         self.legend_draggable = tk.BooleanVar(value=True)
         self.legend_position = tk.StringVar(value="Best")
+        
+        # --- LABEL POSITION SETTINGS (figure coordinates 0-1) ---
+        self.title_x = tk.StringVar(value="0.5")  # Default center
+        self.title_y = tk.StringVar(value="0.98")  # Default top
+        self.xlabel_x = tk.StringVar(value="0.5")  # Default center
+        self.xlabel_y = tk.StringVar(value="0.04")  # Default bottom
+        self.ylabel_x = tk.StringVar(value="0.04")  # Default left
+        self.ylabel_y = tk.StringVar(value="0.5")  # Default center
+        self.y2label_x = tk.StringVar(value="0.96")  # Default right
+        self.y2label_y = tk.StringVar(value="0.5")  # Default center
+        self.use_custom_label_positions = tk.BooleanVar(value=False)  # Enable custom positions
 
         self.v_x_pad = tk.StringVar(value="4.0")
         self.v_y_pad = tk.StringVar(value="4.0")
@@ -642,6 +653,46 @@ class InteractivePlotter:
         ttk.Checkbutton(frame, text="Draggable Legend (click & drag to reposition)", 
                         variable=self.legend_draggable).pack(pady=5)
         
+        # --- LABEL POSITION SETTINGS ---
+        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(frame, text="Label Positions (Figure Coordinates 0-1)", font=('Arial', 10, 'bold')).pack(pady=5)
+        ttk.Checkbutton(frame, text="Use Custom Label Positions", 
+                        variable=self.use_custom_label_positions).pack(pady=2)
+        ttk.Label(frame, text="(0,0 = bottom-left, 1,1 = top-right)", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5))
+        
+        # Title position
+        title_pos_frame = ttk.Frame(frame)
+        title_pos_frame.pack(fill='x', pady=2)
+        ttk.Label(title_pos_frame, text="Title X:", width=10).pack(side='left')
+        ttk.Entry(title_pos_frame, textvariable=self.title_x, width=8).pack(side='left', padx=2)
+        ttk.Label(title_pos_frame, text="Y:").pack(side='left', padx=(5, 0))
+        ttk.Entry(title_pos_frame, textvariable=self.title_y, width=8).pack(side='left', padx=2)
+        
+        # X Label position
+        xlabel_pos_frame = ttk.Frame(frame)
+        xlabel_pos_frame.pack(fill='x', pady=2)
+        ttk.Label(xlabel_pos_frame, text="X Label X:", width=10).pack(side='left')
+        ttk.Entry(xlabel_pos_frame, textvariable=self.xlabel_x, width=8).pack(side='left', padx=2)
+        ttk.Label(xlabel_pos_frame, text="Y:").pack(side='left', padx=(5, 0))
+        ttk.Entry(xlabel_pos_frame, textvariable=self.xlabel_y, width=8).pack(side='left', padx=2)
+        
+        # Y Label position
+        ylabel_pos_frame = ttk.Frame(frame)
+        ylabel_pos_frame.pack(fill='x', pady=2)
+        ttk.Label(ylabel_pos_frame, text="Y Label X:", width=10).pack(side='left')
+        ttk.Entry(ylabel_pos_frame, textvariable=self.ylabel_x, width=8).pack(side='left', padx=2)
+        ttk.Label(ylabel_pos_frame, text="Y:").pack(side='left', padx=(5, 0))
+        ttk.Entry(ylabel_pos_frame, textvariable=self.ylabel_y, width=8).pack(side='left', padx=2)
+        
+        # Y2 Label position
+        y2label_pos_frame = ttk.Frame(frame)
+        y2label_pos_frame.pack(fill='x', pady=2)
+        ttk.Label(y2label_pos_frame, text="Y2 Label X:", width=10).pack(side='left')
+        ttk.Entry(y2label_pos_frame, textvariable=self.y2label_x, width=8).pack(side='left', padx=2)
+        ttk.Label(y2label_pos_frame, text="Y:").pack(side='left', padx=(5, 0))
+        ttk.Entry(y2label_pos_frame, textvariable=self.y2label_y, width=8).pack(side='left', padx=2)
+        
         # Add buttons to the fixed button container (outside scrollable area)
         btn_width = 12
         ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
@@ -1149,6 +1200,23 @@ class InteractivePlotter:
                 return type_fn(var.get())
             except:
                 return default
+        
+        # Get custom label positions if enabled
+        use_custom_pos = self.use_custom_label_positions.get()
+        custom_title_pos = (0.5, 0.98)
+        custom_xlabel_pos = (0.5, 0.04)
+        custom_ylabel_pos = (0.04, 0.5)
+        custom_y2label_pos = (0.96, 0.5)
+        
+        if use_custom_pos:
+            try:
+                custom_title_pos = (val(self.title_x, 0.5), val(self.title_y, 0.98))
+                custom_xlabel_pos = (val(self.xlabel_x, 0.5), val(self.xlabel_y, 0.04))
+                custom_ylabel_pos = (val(self.ylabel_x, 0.04), val(self.ylabel_y, 0.5))
+                custom_y2label_pos = (val(self.y2label_x, 0.96), val(self.y2label_y, 0.5))
+            except Exception as e:
+                print(f"Error parsing custom positions: {e}")
+                use_custom_pos = False
 
         xf = val(self.v_x_div, 1.0);
         yf = val(self.v_y_div, 1.0)
@@ -1364,9 +1432,19 @@ class InteractivePlotter:
                 target_ax.set_xscale('log')
                 if ptype == "Broken Y-Axis": axes_list[0].set_xscale('log')
 
-            target_ax.set_xlabel(self.v_xlabel.get() or xcol, fontsize=l_sz, labelpad=x_lab_pad, fontname=font,
+            # Initialize label text objects (for custom positioning later)
+            xlabel_text = None
+            title_text = None
+            ylabel_text = None
+            y2label_text = None
+            
+            # Set xlabel with optional custom position
+            xlabel_text = target_ax.set_xlabel(self.v_xlabel.get() or xcol, fontsize=l_sz, labelpad=x_lab_pad, fontname=font,
                                  color=self.xlabel_color)
-            (axes_list[0] if ptype == "Broken Y-Axis" else self.ax).set_title(self.v_title.get(), fontsize=t_sz,
+            
+            # Set title with optional custom position
+            title_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
+            title_text = title_ax.set_title(self.v_title.get(), fontsize=t_sz,
                                                                               fontweight='bold', fontname=font,
                                                                               color=self.title_color)
 
@@ -1391,15 +1469,27 @@ class InteractivePlotter:
                 kw.update(transform=axes_list[1].transAxes)
                 axes_list[1].plot((-d, +d), (1 - d, 1 + d), **kw);
                 axes_list[1].plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
+                # Set Y label for broken axis - centered between the two subplots
+                ylabel_text = self.fig.supylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, 
+                                   x=0.04, y=0.5, fontname=font, color=self.ylabel_color)
+                if use_custom_pos:
+                    ylabel_text.set_position(custom_ylabel_pos)
+                    ylabel_text.set_transform(self.fig.transFigure)
             elif ptype == "Dual Y-Axis":
                 # Set Y1 (left axis) label
                 y1_label = self.v_ylabel.get() or (ycols[0] if ycols else "Y1")
-                self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                ylabel_text = self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color)
+                if use_custom_pos:
+                    ylabel_text.set_position(custom_ylabel_pos)
+                    ylabel_text.set_transform(self.fig.transFigure)
                 # Set Y2 (right axis) label
                 y2_label = self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2")
-                axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                         color=self.ylabel_color)
+                if use_custom_pos:
+                    y2label_text.set_position(custom_y2label_pos)
+                    y2label_text.set_transform(self.fig.transFigure)
                 # Set Y1 axis range
                 if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
                 if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
@@ -1407,8 +1497,11 @@ class InteractivePlotter:
                 if val(self.v_y2_min): axes_list[1].set_ylim(bottom=val(self.v_y2_min))
                 if val(self.v_y2_max): axes_list[1].set_ylim(top=val(self.v_y2_max))
             elif ptype != "Color Map":
-                self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color)
+                if use_custom_pos:
+                    ylabel_text.set_position(custom_ylabel_pos)
+                    ylabel_text.set_transform(self.fig.transFigure)
                 if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
                 if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
 
@@ -1492,6 +1585,37 @@ class InteractivePlotter:
                 for a in axes_list: a.grid(True, alpha=0.3)
 
             self.fig.tight_layout()
+            
+            # Apply custom label positions AFTER tight_layout
+            if use_custom_pos:
+                print(f"Applying custom positions: title={custom_title_pos}, xlabel={custom_xlabel_pos}, ylabel={custom_ylabel_pos}")
+                # Title - use fig.text for reliable figure coordinates
+                if title_text is not None:
+                    # Remove the axis-level title and create a figure-level text
+                    title_text.set_visible(False)
+                    self.fig.text(custom_title_pos[0], custom_title_pos[1], 
+                                  self.v_title.get(), fontsize=t_sz,
+                                  fontweight='bold', fontname=font,
+                                  color=self.title_color, ha='center', va='top')
+                # X label
+                if xlabel_text is not None:
+                    xlabel_text.set_visible(False)
+                    self.fig.text(custom_xlabel_pos[0], custom_xlabel_pos[1],
+                                  self.v_xlabel.get() or xcol, fontsize=l_sz,
+                                  fontname=font, color=self.xlabel_color, ha='center', va='bottom')
+                # Y label
+                if ylabel_text is not None:
+                    ylabel_text.set_visible(False)
+                    self.fig.text(custom_ylabel_pos[0], custom_ylabel_pos[1],
+                                  self.v_ylabel.get() or "Values", fontsize=l_sz,
+                                  fontname=font, color=self.ylabel_color, ha='left', va='center', rotation='vertical')
+                # Y2 label (for Dual Y-Axis)
+                if y2label_text is not None:
+                    y2label_text.set_visible(False)
+                    self.fig.text(custom_y2label_pos[0], custom_y2label_pos[1],
+                                  self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2"), 
+                                  fontsize=l_sz, fontname=font, color=self.ylabel_color, ha='right', va='center', rotation='vertical')
+            
             self.canvas.draw()
 
         except Exception as e:
@@ -1898,7 +2022,8 @@ class InteractivePlotter:
                     
                     self.canvas.draw()
                 break
-
+                
+    
     def load_session(self):
         """Load a session from a JSON cache file."""
         # Determine where to look
