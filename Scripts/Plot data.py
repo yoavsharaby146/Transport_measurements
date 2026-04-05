@@ -117,7 +117,17 @@ class InteractivePlotter:
         self.ylabel_y = tk.StringVar(value="0.5")  # Default center
         self.y2label_x = tk.StringVar(value="0.96")  # Default right
         self.y2label_y = tk.StringVar(value="0.5")  # Default center
+        self.zlabel_x = tk.StringVar(value="0.96")  # Default right (for colorbar)
+        self.zlabel_y = tk.StringVar(value="0.5")  # Default center
         self.use_custom_label_positions = tk.BooleanVar(value=False)  # Enable custom positions
+        
+        # --- TEXT ROTATION SETTINGS (degrees) ---
+        self.title_rotation = tk.StringVar(value="0")  # 0 = horizontal
+        self.xlabel_rotation = tk.StringVar(value="0")
+        self.ylabel_rotation = tk.StringVar(value="90")  # 90 = vertical
+        self.y2label_rotation = tk.StringVar(value="90")  # 90 = vertical (inverted for right side)
+        self.zlabel_rotation = tk.StringVar(value="90")  # 90 = vertical (for colorbar)
+        self.use_custom_rotation = tk.BooleanVar(value=False)  # Enable custom rotation
 
         self.v_x_pad = tk.StringVar(value="4.0")
         self.v_y_pad = tk.StringVar(value="4.0")
@@ -130,6 +140,15 @@ class InteractivePlotter:
         self.zlabel_color = 'black'
         self.xtick_color = 'black'
         self.ytick_color = 'black'
+        self.plot_bg_color = 'white'
+        self.fig_bg_color = 'white'
+        self.legend_fill_color = 'white'
+        self.legend_frame_color = 'black'
+        
+        # --- TRANSPARENCY (ALPHA) SETTINGS ---
+        self.plot_bg_alpha = tk.StringVar(value="1.0")
+        self.fig_bg_alpha = tk.StringVar(value="1.0")
+        self.legend_fill_alpha = tk.StringVar(value="1.0")
 
         self.v_x_maj = tk.StringVar()
         self.v_y_maj = tk.StringVar()
@@ -573,127 +592,235 @@ class InteractivePlotter:
             side='left', expand=True, fill='x', padx=2)
 
     def open_labels_dialog(self):
-        d, frame, canvas, main_container, btn_container = self.create_scrollable_dialog(
-            self.root, "Labels, Titles & Colors",
-            width_pct=0.38, height_pct=0.85, max_width=500, max_height=850
-        )
-
-        def add_entry(txt, var):
-            f = ttk.Frame(frame)
+        """Open the Labels & Titles dialog with a tabbed interface."""
+        # Create dialog window
+        d = tk.Toplevel(self.root)
+        d.title("Labels, Titles & Colors")
+        
+        # Calculate size - wider for tabs
+        w, h = self.get_dialog_size(0.45, 0.80, max_width=600, max_height=700, min_width=500, min_height=500)
+        d.geometry(f"{w}x{h}")
+        d.transient(self.root)
+        
+        # Main container
+        main_container = ttk.Frame(d)
+        main_container.pack(fill='both', expand=True)
+        
+        # Create notebook (tab container)
+        notebook = ttk.Notebook(main_container)
+        notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Helper functions
+        def add_entry(parent, txt, var, width=15):
+            f = ttk.Frame(parent)
             f.pack(fill='x', pady=2)
-            ttk.Label(f, text=txt, width=15).pack(side='left')
+            ttk.Label(f, text=txt, width=width).pack(side='left')
             ttk.Entry(f, textvariable=var).pack(side='right', expand=True, fill='x')
-
-        # FIX: Font bug
-        ttk.Label(frame, text="Text Content", font=('Arial', 10, 'bold')).pack(pady=5)
-        add_entry("Plot Title:", self.v_title)
-        add_entry("X Label:", self.v_xlabel)
-        add_entry("Y Label:", self.v_ylabel)
-        add_entry("Y2 Label:", self.v_y2label)
-        add_entry("Z Label (Color):", self.v_zlabel)
-        add_entry("Legend (csv):", self.v_legend)
-        ttk.Checkbutton(frame, text="Show Legend", variable=self.show_legend).pack(pady=2)
-        ttk.Checkbutton(frame, text="Show Grid", variable=self.show_grid).pack(pady=2)
-
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(frame, text="Label Spacing (Padding)", font=('Arial', 10, 'bold')).pack(pady=5)
-        add_entry("X Pad:", self.v_x_pad)
-        add_entry("Y Pad:", self.v_y_pad)
-        add_entry("Y Broken Offset:", self.v_y_broken_offset)
-
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(frame, text="Label Colors", font=('Arial', 10, 'bold')).pack(pady=5)
-
+        
+        def add_pos_entry(parent, label, x_var, y_var):
+            """Add X/Y position entry pair."""
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            ttk.Label(f, text=label, width=12).pack(side='left')
+            ttk.Label(f, text="X:").pack(side='left', padx=(5, 2))
+            ttk.Entry(f, textvariable=x_var, width=8).pack(side='left', padx=2)
+            ttk.Label(f, text="Y:").pack(side='left', padx=(10, 2))
+            ttk.Entry(f, textvariable=y_var, width=8).pack(side='left', padx=2)
+        
+        def add_rot_entry(parent, label, var):
+            """Add rotation entry with degree symbol."""
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            ttk.Label(f, text=label, width=15).pack(side='left')
+            ttk.Entry(f, textvariable=var, width=8).pack(side='left', padx=2)
+            ttk.Label(f, text="°").pack(side='left')
+        
         def choose_col(attr, btn):
             c = colorchooser.askcolor(parent=d)[1]
             if c:
                 setattr(self, attr, c)
                 btn.config(bg=c)
                 d.lift()
-
-        def add_col(txt, attr, default):
-            f = ttk.Frame(frame)
+        
+        def add_col(parent, txt, attr, default):
+            f = ttk.Frame(parent)
             f.pack(fill='x', pady=2)
-            ttk.Label(f, text=txt, width=15).pack(side='left')
-            b = tk.Button(f, text=" ", bg=default, width=10)
+            ttk.Label(f, text=txt, width=18).pack(side='left')
+            b = tk.Button(f, text=" ", bg=default, width=8)
             b.config(command=lambda: choose_col(attr, b))
             b.pack(side='right')
-
-        add_col("Title Color:", "title_color", self.title_color)
-        add_col("X Label Color:", "xlabel_color", self.xlabel_color)
-        add_col("Y Label Color:", "ylabel_color", self.ylabel_color)
-        add_col("Z Label Color:", "zlabel_color", self.zlabel_color)
-        add_col("X Tick Color:", "xtick_color", self.xtick_color)
-        add_col("Y Tick Color:", "ytick_color", self.ytick_color)
         
-        # --- LEGEND SETTINGS ---
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(frame, text="Legend Settings", font=('Arial', 10, 'bold')).pack(pady=5)
+        # ============================================
+        # TAB 1: Text Content
+        # ============================================
+        tab_text = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_text, text="Text Content")
+        
+        ttk.Label(tab_text, text="Plot Labels & Title", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_text, "Plot Title:", self.v_title)
+        add_entry(tab_text, "X Label:", self.v_xlabel)
+        add_entry(tab_text, "Y Label:", self.v_ylabel)
+        add_entry(tab_text, "Y2 Label:", self.v_y2label)
+        add_entry(tab_text, "Z Label (Color):", self.v_zlabel)
+        
+        ttk.Separator(tab_text, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_text, text="Legend Text", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_text, "Legend (csv):", self.v_legend, width=15)
+        ttk.Checkbutton(tab_text, text="Show Legend", variable=self.show_legend).pack(pady=2, anchor='w')
+        ttk.Checkbutton(tab_text, text="Show Grid", variable=self.show_grid).pack(pady=2, anchor='w')
+        
+        ttk.Separator(tab_text, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_text, text="Label Spacing (Padding)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_text, "X Pad:", self.v_x_pad)
+        add_entry(tab_text, "Y Pad:", self.v_y_pad)
+        add_entry(tab_text, "Y Broken Offset:", self.v_y_broken_offset)
+        add_entry(tab_text, "Z Pad:", self.v_z_pad)
+        
+        # ============================================
+        # TAB 2: Colors
+        # ============================================
+        tab_colors = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_colors, text="Colors")
+        
+        ttk.Label(tab_colors, text="Label Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_col(tab_colors, "Title Color:", "title_color", self.title_color)
+        add_col(tab_colors, "X Label Color:", "xlabel_color", self.xlabel_color)
+        add_col(tab_colors, "Y Label Color:", "ylabel_color", self.ylabel_color)
+        add_col(tab_colors, "Z Label Color:", "zlabel_color", self.zlabel_color)
+        
+        ttk.Separator(tab_colors, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_colors, text="Tick Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_col(tab_colors, "X Tick Color:", "xtick_color", self.xtick_color)
+        add_col(tab_colors, "Y Tick Color:", "ytick_color", self.ytick_color)
+        
+        ttk.Separator(tab_colors, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_colors, text="Background Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_col(tab_colors, "Plot Background:", "plot_bg_color", self.plot_bg_color)
+        add_col(tab_colors, "Figure Background:", "fig_bg_color", self.fig_bg_color)
+        
+        ttk.Separator(tab_colors, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_colors, text="Legend Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_col(tab_colors, "Legend Fill:", "legend_fill_color", self.legend_fill_color)
+        add_col(tab_colors, "Legend Frame:", "legend_frame_color", self.legend_frame_color)
+        
+        # ============================================
+        # TAB 3: Positions
+        # ============================================
+        tab_positions = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_positions, text="Positions")
+        
+        ttk.Checkbutton(tab_positions, text="Use Custom Label Positions", 
+                        variable=self.use_custom_label_positions).pack(pady=5, anchor='w')
+        ttk.Label(tab_positions, text="Figure coordinates: (0,0) = bottom-left, (1,1) = top-right", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 10), anchor='w')
+        
+        ttk.Label(tab_positions, text="Title Position", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_pos_entry(tab_positions, "Title:", self.title_x, self.title_y)
+        
+        ttk.Separator(tab_positions, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_positions, text="X Label Position", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_pos_entry(tab_positions, "X Label:", self.xlabel_x, self.xlabel_y)
+        
+        ttk.Separator(tab_positions, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_positions, text="Y Label Position", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_pos_entry(tab_positions, "Y Label:", self.ylabel_x, self.ylabel_y)
+        
+        ttk.Separator(tab_positions, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_positions, text="Y2 Label Position (Dual Y-Axis)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_pos_entry(tab_positions, "Y2 Label:", self.y2label_x, self.y2label_y)
+        
+        ttk.Separator(tab_positions, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_positions, text="Z Label Position (Color Map)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_pos_entry(tab_positions, "Z Label:", self.zlabel_x, self.zlabel_y)
+        
+        # ============================================
+        # TAB 4: Rotation
+        # ============================================
+        tab_rotation = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_rotation, text="Rotation")
+        
+        ttk.Checkbutton(tab_rotation, text="Use Custom Text Rotation", 
+                        variable=self.use_custom_rotation).pack(pady=5, anchor='w')
+        ttk.Label(tab_rotation, text="Rotation angle in degrees (0 = horizontal, 90 = vertical)", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 10), anchor='w')
+        
+        ttk.Label(tab_rotation, text="Title Rotation", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_rot_entry(tab_rotation, "Title Rotation:", self.title_rotation)
+        
+        ttk.Separator(tab_rotation, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rotation, text="X Label Rotation", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_rot_entry(tab_rotation, "X Label Rotation:", self.xlabel_rotation)
+        
+        ttk.Separator(tab_rotation, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rotation, text="Y Label Rotation", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_rot_entry(tab_rotation, "Y Label Rotation:", self.ylabel_rotation)
+        ttk.Label(tab_rotation, text="(Default: 90° = vertical, reading bottom-to-top)", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
+        
+        ttk.Separator(tab_rotation, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rotation, text="Y2 Label Rotation (Dual Y-Axis)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_rot_entry(tab_rotation, "Y2 Label Rotation:", self.y2label_rotation)
+        ttk.Label(tab_rotation, text="(Default: 90° = vertical, reading bottom-to-top)", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
+        
+        ttk.Separator(tab_rotation, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rotation, text="Z Label Rotation (Color Map)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_rot_entry(tab_rotation, "Z Label Rotation:", self.zlabel_rotation)
+        ttk.Label(tab_rotation, text="(Default: 90° = vertical, for colorbar label)", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
+        
+        # ============================================
+        # TAB 5: Legend
+        # ============================================
+        tab_legend = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_legend, text="Legend")
+        
+        ttk.Label(tab_legend, text="Legend Layout", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         
         # Legend columns
-        col_frame = ttk.Frame(frame)
+        col_frame = ttk.Frame(tab_legend)
         col_frame.pack(fill='x', pady=2)
         ttk.Label(col_frame, text="Legend Columns:", width=15).pack(side='left')
         col_combo = ttk.Combobox(col_frame, textvariable=self.legend_columns, 
                                   values=["1", "2", "3", "4", "5", "6", "7", "8"], width=10, state='readonly')
-        col_combo.pack(side='right')
+        col_combo.pack(side='left')
         
         # Legend position
-        pos_frame = ttk.Frame(frame)
-        pos_frame.pack(fill='x', pady=2)
+        pos_frame = ttk.Frame(tab_legend)
+        pos_frame.pack(fill='x', pady=5)
         ttk.Label(pos_frame, text="Position:", width=15).pack(side='left')
         pos_combo = ttk.Combobox(pos_frame, textvariable=self.legend_position,
                                   values=["Best", "Upper Right", "Upper Left", "Lower Right", "Lower Left",
                                           "Center Left", "Center Right", "Lower Center", "Upper Center", "Center",
                                           "Outside Right", "Outside Bottom"],
                                   width=18, state='readonly')
-        pos_combo.pack(side='right')
+        pos_combo.pack(side='left')
         
-        # Draggable checkbox
-        ttk.Checkbutton(frame, text="Draggable Legend (click & drag to reposition)", 
-                        variable=self.legend_draggable).pack(pady=5)
+        ttk.Separator(tab_legend, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_legend, text="Legend Interaction", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Checkbutton(tab_legend, text="Draggable Legend (click & drag to reposition)", 
+                        variable=self.legend_draggable).pack(pady=2, anchor='w')
         
-        # --- LABEL POSITION SETTINGS ---
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(frame, text="Label Positions (Figure Coordinates 0-1)", font=('Arial', 10, 'bold')).pack(pady=5)
-        ttk.Checkbutton(frame, text="Use Custom Label Positions", 
-                        variable=self.use_custom_label_positions).pack(pady=2)
-        ttk.Label(frame, text="(0,0 = bottom-left, 1,1 = top-right)", 
-                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5))
+        # ============================================
+        # TAB 6: Transparency
+        # ============================================
+        tab_transparency = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_transparency, text="Transparency")
         
-        # Title position
-        title_pos_frame = ttk.Frame(frame)
-        title_pos_frame.pack(fill='x', pady=2)
-        ttk.Label(title_pos_frame, text="Title X:", width=10).pack(side='left')
-        ttk.Entry(title_pos_frame, textvariable=self.title_x, width=8).pack(side='left', padx=2)
-        ttk.Label(title_pos_frame, text="Y:").pack(side='left', padx=(5, 0))
-        ttk.Entry(title_pos_frame, textvariable=self.title_y, width=8).pack(side='left', padx=2)
+        ttk.Label(tab_transparency, text="Alpha Values (0.0 - 1.0)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_transparency, text="0 = fully transparent, 1 = fully opaque", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 10), anchor='w')
         
-        # X Label position
-        xlabel_pos_frame = ttk.Frame(frame)
-        xlabel_pos_frame.pack(fill='x', pady=2)
-        ttk.Label(xlabel_pos_frame, text="X Label X:", width=10).pack(side='left')
-        ttk.Entry(xlabel_pos_frame, textvariable=self.xlabel_x, width=8).pack(side='left', padx=2)
-        ttk.Label(xlabel_pos_frame, text="Y:").pack(side='left', padx=(5, 0))
-        ttk.Entry(xlabel_pos_frame, textvariable=self.xlabel_y, width=8).pack(side='left', padx=2)
+        add_entry(tab_transparency, "Plot Background Alpha:", self.plot_bg_alpha)
+        add_entry(tab_transparency, "Figure Background Alpha:", self.fig_bg_alpha)
+        add_entry(tab_transparency, "Legend Fill Alpha:", self.legend_fill_alpha)
         
-        # Y Label position
-        ylabel_pos_frame = ttk.Frame(frame)
-        ylabel_pos_frame.pack(fill='x', pady=2)
-        ttk.Label(ylabel_pos_frame, text="Y Label X:", width=10).pack(side='left')
-        ttk.Entry(ylabel_pos_frame, textvariable=self.ylabel_x, width=8).pack(side='left', padx=2)
-        ttk.Label(ylabel_pos_frame, text="Y:").pack(side='left', padx=(5, 0))
-        ttk.Entry(ylabel_pos_frame, textvariable=self.ylabel_y, width=8).pack(side='left', padx=2)
+        # ============================================
+        # Button frame at bottom
+        # ============================================
+        btn_container = ttk.Frame(main_container)
+        btn_container.pack(side='bottom', fill='x', pady=10, padx=10)
         
-        # Y2 Label position
-        y2label_pos_frame = ttk.Frame(frame)
-        y2label_pos_frame.pack(fill='x', pady=2)
-        ttk.Label(y2label_pos_frame, text="Y2 Label X:", width=10).pack(side='left')
-        ttk.Entry(y2label_pos_frame, textvariable=self.y2label_x, width=8).pack(side='left', padx=2)
-        ttk.Label(y2label_pos_frame, text="Y:").pack(side='left', padx=(5, 0))
-        ttk.Entry(y2label_pos_frame, textvariable=self.y2label_y, width=8).pack(side='left', padx=2)
-        
-        # Add buttons to the fixed button container (outside scrollable area)
         btn_width = 12
         ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
             side='left', expand=True, fill='x', padx=2)
@@ -1207,6 +1334,7 @@ class InteractivePlotter:
         custom_xlabel_pos = (0.5, 0.04)
         custom_ylabel_pos = (0.04, 0.5)
         custom_y2label_pos = (0.96, 0.5)
+        custom_zlabel_pos = (0.96, 0.5)
         
         if use_custom_pos:
             try:
@@ -1214,9 +1342,25 @@ class InteractivePlotter:
                 custom_xlabel_pos = (val(self.xlabel_x, 0.5), val(self.xlabel_y, 0.04))
                 custom_ylabel_pos = (val(self.ylabel_x, 0.04), val(self.ylabel_y, 0.5))
                 custom_y2label_pos = (val(self.y2label_x, 0.96), val(self.y2label_y, 0.5))
+                custom_zlabel_pos = (val(self.zlabel_x, 0.96), val(self.zlabel_y, 0.5))
             except Exception as e:
                 print(f"Error parsing custom positions: {e}")
                 use_custom_pos = False
+        
+         # Get custom rotation settings if enabled
+        use_custom_rot = self.use_custom_rotation.get()
+        title_rot = 0
+        xlabel_rot = 0
+        ylabel_rot = 90
+        y2label_rot = 90
+        zlabel_rot = 90
+        
+        if use_custom_rot:
+            title_rot = val(self.title_rotation, 0)
+            xlabel_rot = val(self.xlabel_rotation, 0)
+            ylabel_rot = val(self.ylabel_rotation, 90)
+            y2label_rot = val(self.y2label_rotation, 90)
+            zlabel_rot = val(self.zlabel_rotation, 90)
 
         xf = val(self.v_x_div, 1.0);
         yf = val(self.v_y_div, 1.0)
@@ -1342,6 +1486,13 @@ class InteractivePlotter:
 
             lines, labels = [], []
             c_idx = 0
+            
+            # Initialize label text objects (for custom positioning later) - MUST be before plot type sections
+            xlabel_text = None
+            title_text = None
+            ylabel_text = None
+            y2label_text = None
+            zlabel_text = None
 
             if ptype in ["Line", "Scatter", "Broken Y-Axis", "Dual Y-Axis"]:
                 for (fk, yc, ax_idx) in series_to_plot:
@@ -1395,11 +1546,15 @@ class InteractivePlotter:
                 zi = griddata((X, Y), Z, (xi, yi), method='cubic')
                 im = self.ax.imshow(zi, extent=(X.min(), X.max(), Y.min(), Y.max()), origin='lower', aspect='auto',
                                     cmap='seismic', vmin=z_min_val, vmax=z_max_val)
-                self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
-                                   color=self.ylabel_color)
+                # Track ylabel_text for custom positioning
+                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                                   color=self.ylabel_color, rotation=ylabel_rot)
                 cbar = self.fig.colorbar(im, ax=self.ax)
+                # Set colorbar label and get the text object for custom positioning
                 cbar.set_label(self.v_zlabel.get() or self.z_combo.get(), fontsize=l_sz, labelpad=z_lab_pad,
-                               fontname=font, color=self.zlabel_color)
+                               fontname=font, color=self.zlabel_color, rotation=zlabel_rot)
+                # Get the actual label text object from the colorbar
+                zlabel_text = cbar.ax.yaxis.label
                 if z_maj: cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(z_maj))
                 if z_min > 1: cbar.ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(z_min))
                 cbar.ax.tick_params(labelsize=yt_sz, pad=z_pad_val)
@@ -1413,7 +1568,26 @@ class InteractivePlotter:
                 elif mode == "Engineering":
                     (ax_obj.xaxis if char == 'x' else ax_obj.yaxis).set_major_formatter(ticker.EngFormatter())
 
+            # Apply figure background color and alpha
+            self.fig.patch.set_facecolor(self.fig_bg_color)
+            try:
+                fig_alpha = float(self.fig_bg_alpha.get())
+                self.fig.patch.set_alpha(max(0.0, min(1.0, fig_alpha)))
+            except:
+                pass
+            
+            # Apply plot background color with alpha
+            try:
+                plot_alpha = float(self.plot_bg_alpha.get())
+                plot_alpha = max(0.0, min(1.0, plot_alpha))
+            except:
+                plot_alpha = 1.0
+            
             for ax_curr in axes_list:
+                # Apply background color with alpha
+                ax_curr.set_facecolor(self.plot_bg_color)
+                ax_curr.patch.set_alpha(plot_alpha)
+                
                 if not self.x_log.get():
                     apply_format(ax_curr, 'x', self.v_x_not.get())
                     if x_maj: ax_curr.xaxis.set_major_locator(ticker.MultipleLocator(x_maj))
@@ -1432,21 +1606,15 @@ class InteractivePlotter:
                 target_ax.set_xscale('log')
                 if ptype == "Broken Y-Axis": axes_list[0].set_xscale('log')
 
-            # Initialize label text objects (for custom positioning later)
-            xlabel_text = None
-            title_text = None
-            ylabel_text = None
-            y2label_text = None
-            
-            # Set xlabel with optional custom position
+            # Set xlabel with rotation
             xlabel_text = target_ax.set_xlabel(self.v_xlabel.get() or xcol, fontsize=l_sz, labelpad=x_lab_pad, fontname=font,
-                                 color=self.xlabel_color)
+                                 color=self.xlabel_color, rotation=xlabel_rot)
             
-            # Set title with optional custom position
+            # Set title with rotation
             title_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
             title_text = title_ax.set_title(self.v_title.get(), fontsize=t_sz,
                                                                               fontweight='bold', fontname=font,
-                                                                              color=self.title_color)
+                                                                              color=self.title_color, rotation=title_rot)
 
             if val(self.v_x_min): target_ax.set_xlim(left=val(self.v_x_min))
             if val(self.v_x_max): target_ax.set_xlim(right=val(self.v_x_max))
@@ -1476,17 +1644,17 @@ class InteractivePlotter:
                     ylabel_text.set_position(custom_ylabel_pos)
                     ylabel_text.set_transform(self.fig.transFigure)
             elif ptype == "Dual Y-Axis":
-                # Set Y1 (left axis) label
+                # Set Y1 (left axis) label with rotation
                 y1_label = self.v_ylabel.get() or (ycols[0] if ycols else "Y1")
                 ylabel_text = self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
-                                   color=self.ylabel_color)
+                                   color=self.ylabel_color, rotation=ylabel_rot)
                 if use_custom_pos:
                     ylabel_text.set_position(custom_ylabel_pos)
                     ylabel_text.set_transform(self.fig.transFigure)
-                # Set Y2 (right axis) label
+                # Set Y2 (right axis) label with rotation
                 y2_label = self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2")
                 y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
-                                        color=self.ylabel_color)
+                                        color=self.ylabel_color, rotation=y2label_rot)
                 if use_custom_pos:
                     y2label_text.set_position(custom_y2label_pos)
                     y2label_text.set_transform(self.fig.transFigure)
@@ -1498,7 +1666,7 @@ class InteractivePlotter:
                 if val(self.v_y2_max): axes_list[1].set_ylim(top=val(self.v_y2_max))
             elif ptype != "Color Map":
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
-                                   color=self.ylabel_color)
+                                   color=self.ylabel_color, rotation=ylabel_rot)
                 if use_custom_pos:
                     ylabel_text.set_position(custom_ylabel_pos)
                     ylabel_text.set_transform(self.fig.transFigure)
@@ -1573,6 +1741,15 @@ class InteractivePlotter:
                                           bbox_to_anchor=bbox_to_anchor,
                                           prop={'size': leg_sz, 'family': font})
                 
+                # Apply legend fill color and transparency
+                legend.get_frame().set_facecolor(self.legend_fill_color)
+                legend.get_frame().set_edgecolor(self.legend_frame_color)
+                try:
+                    leg_alpha = float(self.legend_fill_alpha.get())
+                    legend.get_frame().set_alpha(max(0.0, min(1.0, leg_alpha)))
+                except:
+                    pass
+                
                 # Make legend draggable if enabled
                 if self.legend_draggable.get():
                     legend.set_draggable(True)
@@ -1588,7 +1765,6 @@ class InteractivePlotter:
             
             # Apply custom label positions AFTER tight_layout
             if use_custom_pos:
-                print(f"Applying custom positions: title={custom_title_pos}, xlabel={custom_xlabel_pos}, ylabel={custom_ylabel_pos}")
                 # Title - use fig.text for reliable figure coordinates
                 if title_text is not None:
                     # Remove the axis-level title and create a figure-level text
@@ -1596,25 +1772,31 @@ class InteractivePlotter:
                     self.fig.text(custom_title_pos[0], custom_title_pos[1], 
                                   self.v_title.get(), fontsize=t_sz,
                                   fontweight='bold', fontname=font,
-                                  color=self.title_color, ha='center', va='top')
+                                  color=self.title_color, ha='center', va='top', rotation=title_rot)
                 # X label
                 if xlabel_text is not None:
                     xlabel_text.set_visible(False)
                     self.fig.text(custom_xlabel_pos[0], custom_xlabel_pos[1],
                                   self.v_xlabel.get() or xcol, fontsize=l_sz,
-                                  fontname=font, color=self.xlabel_color, ha='center', va='bottom')
+                                  fontname=font, color=self.xlabel_color, ha='center', va='bottom', rotation=xlabel_rot)
                 # Y label
                 if ylabel_text is not None:
                     ylabel_text.set_visible(False)
                     self.fig.text(custom_ylabel_pos[0], custom_ylabel_pos[1],
                                   self.v_ylabel.get() or "Values", fontsize=l_sz,
-                                  fontname=font, color=self.ylabel_color, ha='left', va='center', rotation='vertical')
+                                  fontname=font, color=self.ylabel_color, ha='left', va='center', rotation=ylabel_rot)
                 # Y2 label (for Dual Y-Axis)
                 if y2label_text is not None:
                     y2label_text.set_visible(False)
                     self.fig.text(custom_y2label_pos[0], custom_y2label_pos[1],
                                   self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2"), 
-                                  fontsize=l_sz, fontname=font, color=self.ylabel_color, ha='right', va='center', rotation='vertical')
+                                  fontsize=l_sz, fontname=font, color=self.ylabel_color, ha='right', va='center', rotation=y2label_rot)
+                # Z label (for Color Map)
+                if zlabel_text is not None:
+                    zlabel_text.set_visible(False)
+                    self.fig.text(custom_zlabel_pos[0], custom_zlabel_pos[1],
+                                  self.v_zlabel.get() or self.z_combo.get(), fontsize=l_sz,
+                                  fontname=font, color=self.zlabel_color, ha='left', va='center', rotation=zlabel_rot)
             
             self.canvas.draw()
 
@@ -1746,7 +1928,7 @@ class InteractivePlotter:
             # Prepare session data
             session_data = {
                 "timestamp": datetime.now().isoformat(),
-                "version": "2.0",  # Version for future compatibility
+                "plot_type": self.plot_type.get(),
             }
             
             # === DATASETS ===
