@@ -187,6 +187,8 @@ class InteractivePlotter:
         # --- LINE VISIBILITY STATE ---
         self.line_visibility = {}  # (filename, column) -> bool for toggling lines via legend
         self.current_lines = []  # Store current plot lines for legend toggle
+        self.current_legend_labels = []  # Store legend labels for context menu
+        self.hidden_legend_items = set()  # Set of (filename, column) tuples that are hidden
         
         # --- DATASET WINDOW ---
         self.dataset_window = None
@@ -380,6 +382,10 @@ class InteractivePlotter:
                                                                                      sticky='ew', pady=5)
         row += 1
         ttk.Button(control_frame, text="Export Plot", command=self.export_plot).grid(row=row, column=0, columnspan=4,
+                                                                                     sticky='ew', pady=5)
+        row += 1
+        # Show All button for restoring hidden lines
+        ttk.Button(control_frame, text="Show All Lines", command=self.show_all_lines).grid(row=row, column=0, columnspan=4,
                                                                                      sticky='ew', pady=5)
         row += 1
         control_frame.columnconfigure(2, weight=1)
@@ -1077,23 +1083,34 @@ class InteractivePlotter:
         # Use create_scrollable_dialog for consistent structure with wider window
         d, fr, cv, main_container, btn_container = self.create_scrollable_dialog(
             self.root, "Style Config",
-            width_pct=0.55, height_pct=0.75, max_width=900, max_height=600, min_width=600, min_height=300
+            width_pct=0.60, height_pct=0.75, max_width=1000, max_height=650, min_width=700, min_height=300
         )
 
         ttk.Label(fr, text="Series").grid(row=0, column=0, padx=5, pady=5)
-        ttk.Label(fr, text="Color").grid(row=0, column=1, padx=5, pady=5)
-        ttk.Label(fr, text="Width").grid(row=0, column=2, padx=5, pady=5)
-        ttk.Label(fr, text="Type").grid(row=0, column=3, padx=5, pady=5)
-        ttk.Label(fr, text="Legend").grid(row=0, column=4, padx=5, pady=5)
+        ttk.Label(fr, text="Color").grid(row=0, column=1, padx=5, pady=5, columnspan=2)
+        ttk.Label(fr, text="Width").grid(row=0, column=3, padx=5, pady=5)
+        ttk.Label(fr, text="Type").grid(row=0, column=4, padx=5, pady=5)
+        ttk.Label(fr, text="Legend").grid(row=0, column=5, padx=5, pady=5)
+        ttk.Label(fr, text="In Leg.").grid(row=0, column=6, padx=5, pady=5)
         r = 1
 
-        def pick_c(btn, k):
+        def pick_c(btn, k, default_color):
             c = colorchooser.askcolor(parent=d)[1]
             if c:
                 if k not in self.styles: self.styles[k] = {}
                 self.styles[k]['color'] = c;
                 btn.config(bg=c);
                 d.lift()
+
+        def reset_c(btn, k):
+            """Reset color to default (remove custom color from styles)."""
+            if k in self.styles and 'color' in self.styles[k]:
+                del self.styles[k]['color']
+                # If styles dict is now empty, remove it
+                if not self.styles[k]:
+                    del self.styles[k]
+            # Update button to show default state (gray placeholder)
+            btn.config(bg='#d3d3d3')
 
         def up_w(v, k):
             if k not in self.styles: self.styles[k] = {}
@@ -1110,28 +1127,55 @@ class InteractivePlotter:
             if k not in self.styles: self.styles[k] = {}
             self.styles[k]['legend'] = v.get()
 
+        def up_show_leg(var, k):
+            """Update show_in_legend setting."""
+            if k not in self.styles: self.styles[k] = {}
+            self.styles[k]['show_in_legend'] = var.get()
+
         for fk, yc in pairs_to_style:
             k = (fk, yc);
             st = self.styles.get(k, {})
+            # Show gray placeholder if no custom color is set
+            has_custom_color = 'color' in st
             c = st.get('color', '#d3d3d3')
             w = st.get('width', 2.0);
             ls = st.get('linestyle', '-')
+            show_in_leg = st.get('show_in_legend', True)
+            
             ttk.Label(fr, text=f"{fk}\n{yc}").grid(row=r, column=0, padx=5, sticky='w')
-            btn = tk.Button(fr, text=" ", bg=c, width=5)
-            btn.config(command=lambda b=btn, k=k: pick_c(b, k))
-            btn.grid(row=r, column=1)
+            
+            # Color button frame with color picker and reset button
+            color_frame = ttk.Frame(fr)
+            color_frame.grid(row=r, column=1, columnspan=2, padx=2)
+            
+            btn = tk.Button(color_frame, text=" ", bg=c, width=4)
+            btn.config(command=lambda b=btn, k=k, dc=c: pick_c(b, k, dc))
+            btn.pack(side='left', padx=1)
+            
+            # Reset button
+            reset_btn = ttk.Button(color_frame, text="Reset", width=5)
+            reset_btn.config(command=lambda b=btn, k=k: reset_c(b, k))
+            reset_btn.pack(side='left', padx=1)
+            
             wv = tk.StringVar(value=str(w))
             wv.trace("w", lambda n, i, m, v=wv, k=k: up_w(v.get(), k))
-            ttk.Entry(fr, textvariable=wv, width=6).grid(row=r, column=2)
+            ttk.Entry(fr, textvariable=wv, width=6).grid(row=r, column=3)
             lsb = ttk.Combobox(fr, values=['-', '--', '-.', ':', 'None'], width=5, state='readonly')
             lsb.set(ls);
             lsb.bind("<<ComboboxSelected>>", lambda e, b=lsb, k=k: up_ls(b.get(), k))
-            lsb.grid(row=r, column=3);
+            lsb.grid(row=r, column=4);
             # Legend entry field
             leg_val = tk.StringVar(value=st.get('legend', ''))
             leg_entry = ttk.Entry(fr, textvariable=leg_val, width=15)
-            leg_entry.grid(row=r, column=4, padx=5)
+            leg_entry.grid(row=r, column=5, padx=5)
             leg_val.trace("w", lambda n, i, m, v=leg_val, k=k: up_leg(v, k))
+            
+            # Show in legend checkbox
+            show_leg_var = tk.BooleanVar(value=show_in_leg)
+            show_leg_cb = ttk.Checkbutton(fr, variable=show_leg_var, width=3)
+            show_leg_cb.grid(row=r, column=6, padx=5)
+            show_leg_var.trace("w", lambda n, i, m, v=show_leg_var, k=k: up_show_leg(v, k))
+            
             r += 1
         
         # Add buttons to the fixed button container (outside scrollable area)
@@ -1704,6 +1748,39 @@ class InteractivePlotter:
                     if ordered_lines:
                         lines, labels = ordered_lines, ordered_labels
                 
+                # Filter lines/labels based on show_in_legend setting AND hidden_legend_items
+                series_keys_for_legend = [(fk, yc) for (fk, yc, _) in series_to_plot]
+                filtered_lines = []
+                filtered_labels = []
+                filtered_keys = []  # Track which keys are still visible
+                for i, (ln, lbl) in enumerate(zip(lines, labels)):
+                    if i < len(series_keys_for_legend):
+                        key = series_keys_for_legend[i]
+                        st = self.styles.get(key, {})
+                        # Default to TRUE if show_in_legend is not set
+                        # Also check if item is in hidden_legend_items
+                        if st.get('show_in_legend', True) and key not in self.hidden_legend_items:
+                            filtered_lines.append(ln)
+                            filtered_labels.append(lbl)
+                            filtered_keys.append(key)
+                        else:
+                            # Hide the line from the plot if it's in hidden_legend_items
+                            ln.set_visible(False)
+                    else:
+                        # Keep items we can't map (shouldn't happen, but safety)
+                        filtered_lines.append(ln)
+                        filtered_labels.append(lbl)
+                
+                lines, labels = filtered_lines, filtered_labels
+                
+                # Store the keys for legend toggle functionality
+                self.current_legend_keys = filtered_keys
+                
+                # Skip legend creation if no items to show
+                if not lines:
+                    self.current_lines = []
+                    return
+                
                 # Get legend settings
                 ncol = int(self.legend_columns.get())
                 position = self.legend_position.get()
@@ -2171,8 +2248,13 @@ class InteractivePlotter:
             self.dataset_window.destroy()
         self.dataset_window = None
 
+    def show_all_lines(self):
+        """Show all hidden lines and reset visibility state."""
+        self.hidden_legend_items.clear()
+        self.update_plot()
+
     def on_legend_pick(self, event):
-        """Handle click on legend to toggle line visibility."""
+        """Handle click on legend to toggle line and legend entry visibility."""
         if event.artist is None:
             return
         
@@ -2186,24 +2268,68 @@ class InteractivePlotter:
         if mouseevent is None:
             return
         
+        # Handle right-click for context menu
+        if mouseevent.button == 3:  # Right click
+            self._show_legend_context_menu(mouseevent, legend)
+            return
+        
+        # Handle left-click for toggle
         # Find clicked legend item
         for i, text in enumerate(legend.get_texts()):
             bbox = text.get_window_extent()
             if bbox.contains(mouseevent.x, mouseevent.y):
-                # Toggle visibility of corresponding line
-                if i < len(self.current_lines):
-                    line = self.current_lines[i]
-                    visible = line.get_visible()
-                    line.set_visible(not visible)
+                # Toggle visibility by adding/removing from hidden_legend_items
+                if i < len(self.current_lines) and hasattr(self, 'current_legend_keys') and i < len(self.current_legend_keys):
+                    key = self.current_legend_keys[i]
                     
-                    # Fade/unfade legend text
-                    if visible:
-                        text.set_alpha(0.3)
+                    if key in self.hidden_legend_items:
+                        # Show the line
+                        self.hidden_legend_items.discard(key)
                     else:
-                        text.set_alpha(1.0)
+                        # Hide the line
+                        self.hidden_legend_items.add(key)
                     
-                    self.canvas.draw()
+                    # Re-render the plot to update both line and legend
+                    self.update_plot()
                 break
+    
+    def _show_legend_context_menu(self, mouseevent, legend):
+        """Show context menu on right-click of legend."""
+        # Create context menu
+        menu = tk.Menu(self.root, tearoff=0)
+        
+        # Add "Show All Lines" option
+        menu.add_command(label="Show All Lines", command=self.show_all_lines)
+        
+        # Add separator
+        menu.add_separator()
+        
+        # Add hidden items that can be restored
+        if self.hidden_legend_items:
+            menu.add_command(label="Hidden items:", state='disabled')
+            for key in self.hidden_legend_items:
+                # Get display name
+                st = self.styles.get(key, {})
+                leg = st.get('legend', '').strip()
+                if leg:
+                    display_name = f"  {leg}"
+                else:
+                    display_name = f"  {key[0]}: {key[1]}"
+                # Create closure to capture key
+                def make_restore_callback(k):
+                    def restore():
+                        self.hidden_legend_items.discard(k)
+                        self.update_plot()
+                    return restore
+                menu.add_command(label=display_name, command=make_restore_callback(key))
+        else:
+            menu.add_command(label="(No hidden items)", state='disabled')
+        
+        # Show menu at cursor position
+        # Convert from matplotlib coordinates to tkinter coordinates
+        x = self.canvas.get_tk_widget().winfo_rootx() + int(mouseevent.x)
+        y = self.canvas.get_tk_widget().winfo_rooty() + int(mouseevent.y)
+        menu.tk_popup(x, y)
                 
     
     def load_session(self):
