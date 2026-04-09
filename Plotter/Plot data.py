@@ -189,6 +189,7 @@ class InteractivePlotter:
         self.current_lines = []  # Store current plot lines for legend toggle
         self.current_legend_labels = []  # Store legend labels for context menu
         self.hidden_legend_items = set()  # Set of (filename, column) tuples that are hidden
+        self._series_line_groups = {}  # (filename, column) -> [Line2D, ...] for ALL axes (broken Y-axis support)
         
         # --- DATASET WINDOW ---
         self.dataset_window = None
@@ -410,6 +411,9 @@ class InteractivePlotter:
         self.ax.set_xticks([]);
         self.ax.set_yticks([])
         self.canvas.draw()
+        
+        # Bind right-click on canvas for context menu (works even when no legend is visible)
+        self.canvas.mpl_connect('button_press_event', self._on_canvas_right_click)
 
     # --- HELPER METHODS FOR RESPONSIVE DESIGN ---
     
@@ -1531,6 +1535,9 @@ class InteractivePlotter:
             lines, labels = [], []
             c_idx = 0
             
+            # Track ALL line objects per series (for broken Y-axis, each series has 2 lines)
+            self._series_line_groups = {}
+            
             # Initialize label text objects (for custom positioning later) - MUST be before plot type sections
             xlabel_text = None
             title_text = None
@@ -1568,15 +1575,20 @@ class InteractivePlotter:
 
                     target_axes = axes_list if ptype == "Broken Y-Axis" else [axes_list[ax_idx]]
 
+                    # Track all line objects for this series (for visibility toggling)
+                    series_lines = []
                     for ax_t in target_axes:
                         if "Scatter" in ptype:
                             ln = ax_t.scatter(X_plot, Y_plot, label=lbl, color=c, s=w, alpha=0.6)
                         else:
                             ln, = ax_t.plot(X_plot, Y_plot, label=lbl, color=c, linewidth=w, linestyle=ls)
+                        series_lines.append(ln)
                         if ax_t == target_axes[0]:
                             lines.append(ln);
                             labels.append(lbl)
                             if ptype == "Dual Y-Axis": ax_t.tick_params(axis='y', labelcolor=c)
+                    # Store all lines for this series key (important for broken Y-axis)
+                    self._series_line_groups[sk] = series_lines
                     c_idx += 1
 
             elif ptype == "Color Map":
@@ -1764,8 +1776,12 @@ class InteractivePlotter:
                             filtered_labels.append(lbl)
                             filtered_keys.append(key)
                         else:
-                            # Hide the line from the plot if it's in hidden_legend_items
-                            ln.set_visible(False)
+                            # Hide ALL lines for this series (important for broken Y-axis)
+                            if key in self._series_line_groups:
+                                for line_obj in self._series_line_groups[key]:
+                                    line_obj.set_visible(False)
+                            else:
+                                ln.set_visible(False)
                     else:
                         # Keep items we can't map (shouldn't happen, but safety)
                         filtered_lines.append(ln)
@@ -1776,64 +1792,65 @@ class InteractivePlotter:
                 # Store the keys for legend toggle functionality
                 self.current_legend_keys = filtered_keys
                 
-                # Skip legend creation if no items to show
+                # If no visible lines, skip legend creation but still render the plot
                 if not lines:
                     self.current_lines = []
-                    return
+                    self.current_legend_keys = []
                 
-                # Get legend settings
-                ncol = int(self.legend_columns.get())
-                position = self.legend_position.get()
-                
-                # Map position string to matplotlib loc and bbox_to_anchor
-                loc_map = {
-                    "Best": "best",
-                    "Upper Right": "upper right",
-                    "Upper Left": "upper left",
-                    "Lower Right": "lower right",
-                    "Lower Left": "lower left",
-                    "Center Left": "center left",
-                    "Center Right": "center right",
-                    "Lower Center": "lower center",
-                    "Upper Center": "upper center",
-                    "Center": "center",
-                    "Outside Right": "center left",
-                    "Outside Bottom": "upper center"
-                }
-                
-                loc = loc_map.get(position, "best")
-                bbox_to_anchor = None
-                
-                if position == "Outside Right":
-                    bbox_to_anchor = (1.02, 0.5)
-                elif position == "Outside Bottom":
-                    bbox_to_anchor = (0.5, -0.15)
-                
-                # Store lines for legend toggle functionality
-                self.current_lines = lines
-                
-                # Create legend
-                legend_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
-                legend = legend_ax.legend(lines, labels, loc=loc, ncol=ncol,
-                                          bbox_to_anchor=bbox_to_anchor,
-                                          prop={'size': leg_sz, 'family': font})
-                
-                # Apply legend fill color and transparency
-                legend.get_frame().set_facecolor(self.legend_fill_color)
-                legend.get_frame().set_edgecolor(self.legend_frame_color)
-                try:
-                    leg_alpha = float(self.legend_fill_alpha.get())
-                    legend.get_frame().set_alpha(max(0.0, min(1.0, leg_alpha)))
-                except:
-                    pass
-                
-                # Make legend draggable if enabled
-                if self.legend_draggable.get():
-                    legend.set_draggable(True)
-                
-                # Connect pick event for legend toggle (click on legend to hide/show lines)
-                self.canvas.mpl_connect('pick_event', self.on_legend_pick)
-                legend.set_picker(10)  # Set pick radius for legend
+                if lines:
+                    # Get legend settings
+                    ncol = int(self.legend_columns.get())
+                    position = self.legend_position.get()
+                    
+                    # Map position string to matplotlib loc and bbox_to_anchor
+                    loc_map = {
+                        "Best": "best",
+                        "Upper Right": "upper right",
+                        "Upper Left": "upper left",
+                        "Lower Right": "lower right",
+                        "Lower Left": "lower left",
+                        "Center Left": "center left",
+                        "Center Right": "center right",
+                        "Lower Center": "lower center",
+                        "Upper Center": "upper center",
+                        "Center": "center",
+                        "Outside Right": "center left",
+                        "Outside Bottom": "upper center"
+                    }
+                    
+                    loc = loc_map.get(position, "best")
+                    bbox_to_anchor = None
+                    
+                    if position == "Outside Right":
+                        bbox_to_anchor = (1.02, 0.5)
+                    elif position == "Outside Bottom":
+                        bbox_to_anchor = (0.5, -0.15)
+                    
+                    # Store lines for legend toggle functionality
+                    self.current_lines = lines
+                    
+                    # Create legend
+                    legend_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
+                    legend = legend_ax.legend(lines, labels, loc=loc, ncol=ncol,
+                                              bbox_to_anchor=bbox_to_anchor,
+                                              prop={'size': leg_sz, 'family': font})
+                    
+                    # Apply legend fill color and transparency
+                    legend.get_frame().set_facecolor(self.legend_fill_color)
+                    legend.get_frame().set_edgecolor(self.legend_frame_color)
+                    try:
+                        leg_alpha = float(self.legend_fill_alpha.get())
+                        legend.get_frame().set_alpha(max(0.0, min(1.0, leg_alpha)))
+                    except:
+                        pass
+                    
+                    # Make legend draggable if enabled
+                    if self.legend_draggable.get():
+                        legend.set_draggable(True)
+                    
+                    # Connect pick event for legend toggle (click on legend to hide/show lines)
+                    self.canvas.mpl_connect('pick_event', self.on_legend_pick)
+                    legend.set_picker(10)  # Set pick radius for legend
 
             if self.show_grid.get():
                 for a in axes_list: a.grid(True, alpha=0.3)
@@ -2252,6 +2269,47 @@ class InteractivePlotter:
         """Show all hidden lines and reset visibility state."""
         self.hidden_legend_items.clear()
         self.update_plot()
+
+    def _on_canvas_right_click(self, event):
+        """Handle right-click on canvas to show context menu (works even with no legend)."""
+        if event.button != 3:  # Only handle right-click
+            return
+        
+        # Only show context menu if there are hidden items
+        if not self.hidden_legend_items:
+            return
+        
+        # Create context menu
+        menu = tk.Menu(self.root, tearoff=0)
+        
+        # Add "Show All Lines" option
+        menu.add_command(label="Show All Lines", command=self.show_all_lines)
+        
+        # Add separator
+        menu.add_separator()
+        
+        # Add hidden items that can be restored
+        menu.add_command(label="Hidden items:", state='disabled')
+        for key in list(self.hidden_legend_items):
+            # Get display name
+            st = self.styles.get(key, {})
+            leg = st.get('legend', '').strip()
+            if leg:
+                display_name = f"  {leg}"
+            else:
+                display_name = f"  {key[0]}: {key[1]}"
+            # Create closure to capture key
+            def make_restore_callback(k):
+                def restore():
+                    self.hidden_legend_items.discard(k)
+                    self.update_plot()
+                return restore
+            menu.add_command(label=display_name, command=make_restore_callback(key))
+        
+        # Show menu at cursor position
+        x = self.canvas.get_tk_widget().winfo_rootx() + int(event.x)
+        y = self.canvas.get_tk_widget().winfo_rooty() + int(event.y)
+        menu.tk_popup(x, y)
 
     def on_legend_pick(self, event):
         """Handle click on legend to toggle line and legend entry visibility."""
