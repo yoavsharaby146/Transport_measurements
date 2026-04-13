@@ -658,9 +658,9 @@ with tab3:
     with c_hall:
         st.subheader("Hall Effect Carrier Density")
         st.markdown(r"Formula: $n = \frac{1}{e R_H} = \frac{1}{e (dR_{xy}/dB)}$")
-        delta_r = st.number_input("Change in Hall Resistance ΔRxy (Ω)", value=1400.0,
+        delta_r = st.number_input(r"Change in Hall Resistance $ΔR_{xy}$ (Ω)", value=1400.0,
                                   key="hall_dr")
-        delta_b = st.number_input("Change in Magnetic Field ΔB (T)", value=1.0,
+        delta_b = st.number_input(r"Change in Magnetic Field $ΔB$ (T)", value=1.0,
                                   min_value=0.001, key="hall_db")
 
         if delta_b == 0:
@@ -676,7 +676,7 @@ with tab3:
     with c_sdh:
         st.subheader("SdH Oscillations")
         st.markdown(r"Formula: $n = \frac{g e}{h \Delta(1/B)} = \frac{g e}{h} B_F$")
-        bf = st.number_input("SdH Frequency B_F (Tesla)", value=10.0, min_value=0.001,
+        bf = st.number_input(r"SdH Frequency $B_F$ (Tesla)", value=10.0, min_value=0.001,
                              key="sdh_bf")
         g_factor = st.number_input(
             "Degeneracy Factor (g)", value=4, step=1, min_value=1, format="%d",
@@ -903,7 +903,7 @@ with tab4:
 
         # Fermi wavelength (universal for 2D)
         lambda_F = np.sqrt(2 * np.pi / n_fermi_m2)
-        st.metric(r"Fermi Wavelength $\lambda$", f"{lambda_F * 1e9:.2f} nm")
+        st.metric(r"Fermi Wavelength (λ)", f"{lambda_F * 1e9:.2f} nm")
 
     # =========================================================================
     # SECTION D: CYCLOTRON PROPERTIES
