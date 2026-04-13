@@ -2389,7 +2389,6 @@ class InteractivePlotter:
         y = self.canvas.get_tk_widget().winfo_rooty() + int(mouseevent.y)
         menu.tk_popup(x, y)
                 
-    
     def load_session(self):
         """Load a session from a JSON cache file."""
         # Determine where to look
