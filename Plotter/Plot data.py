@@ -190,6 +190,7 @@ class InteractivePlotter:
         self.current_legend_labels = []  # Store legend labels for context menu
         self.hidden_legend_items = set()  # Set of (filename, column) tuples that are hidden
         self._series_line_groups = {}  # (filename, column) -> [Line2D, ...] for ALL axes (broken Y-axis support)
+        self._all_series_keys = []  # All series keys for context menu toggle (works without legend)
         
         # --- DATASET WINDOW ---
         self.dataset_window = None
@@ -1729,6 +1730,19 @@ class InteractivePlotter:
                 if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
                 if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
 
+            # --- ALWAYS track series keys for context menu toggle (even without legend) ---
+            series_keys_all = [(fk, yc) for (fk, yc, _) in series_to_plot]
+            
+            # Apply hidden_legend_items visibility (works with or without legend)
+            for key in series_keys_all:
+                if key in self.hidden_legend_items:
+                    if key in self._series_line_groups:
+                        for line_obj in self._series_line_groups[key]:
+                            line_obj.set_visible(False)
+            
+            # Store all series keys for context menu toggle
+            self._all_series_keys = series_keys_all
+            
             if self.show_legend.get() and ptype != "Color Map":
                 # Apply legend order if set
                 if self.legend_order:
@@ -2270,46 +2284,71 @@ class InteractivePlotter:
         self.hidden_legend_items.clear()
         self.update_plot()
 
-    def _on_canvas_right_click(self, event):
-        """Handle right-click on canvas to show context menu (works even with no legend)."""
-        if event.button != 3:  # Only handle right-click
-            return
-        
-        # Only show context menu if there are hidden items
-        if not self.hidden_legend_items:
+    def _show_line_toggle_menu(self, screen_x, screen_y):
+        """Create and show the line visibility toggle menu. Re-posts itself after each toggle."""
+        all_keys = getattr(self, '_all_series_keys', [])
+        if not all_keys:
             return
         
         # Create context menu
         menu = tk.Menu(self.root, tearoff=0)
         
-        # Add "Show All Lines" option
-        menu.add_command(label="Show All Lines", command=self.show_all_lines)
+        # Add "Show All Lines" option at top
+        def show_all_and_repost():
+            self.hidden_legend_items.clear()
+            self.update_plot()
+            self.root.after(10, lambda: self._show_line_toggle_menu(screen_x, screen_y))
+        
+        menu.add_command(label="Show All Lines", command=show_all_and_repost)
         
         # Add separator
         menu.add_separator()
         
-        # Add hidden items that can be restored
-        menu.add_command(label="Hidden items:", state='disabled')
-        for key in list(self.hidden_legend_items):
+        # Add ALL series with visibility toggle
+        menu.add_command(label="Toggle Line Visibility:", state='disabled')
+        for key in all_keys:
             # Get display name
             st = self.styles.get(key, {})
             leg = st.get('legend', '').strip()
             if leg:
-                display_name = f"  {leg}"
+                display_name = leg
             else:
-                display_name = f"  {key[0]}: {key[1]}"
+                display_name = f"{key[0]}: {key[1]}"
+            
+            # Show checkmark prefix based on visibility
+            is_visible = key not in self.hidden_legend_items
+            prefix = "✓ " if is_visible else "✗ "
+            
             # Create closure to capture key
-            def make_restore_callback(k):
-                def restore():
-                    self.hidden_legend_items.discard(k)
+            def make_toggle_callback(k):
+                def toggle():
+                    if k in self.hidden_legend_items:
+                        self.hidden_legend_items.discard(k)
+                    else:
+                        self.hidden_legend_items.add(k)
                     self.update_plot()
-                return restore
-            menu.add_command(label=display_name, command=make_restore_callback(key))
+                    # Re-post the menu after a short delay so it stays open
+                    self.root.after(10, lambda: self._show_line_toggle_menu(screen_x, screen_y))
+                return toggle
+            menu.add_command(label=prefix + display_name, command=make_toggle_callback(key))
         
-        # Show menu at cursor position
-        x = self.canvas.get_tk_widget().winfo_rootx() + int(event.x)
-        y = self.canvas.get_tk_widget().winfo_rooty() + int(event.y)
-        menu.tk_popup(x, y)
+        # Show menu at given position
+        menu.tk_popup(screen_x, screen_y)
+    
+    def _on_canvas_right_click(self, event):
+        """Handle right-click on canvas to show context menu with all series toggle (works even with no legend)."""
+        if event.button != 3:  # Only handle right-click
+            return
+        
+        # Need at least one series to show the menu
+        all_keys = getattr(self, '_all_series_keys', [])
+        if not all_keys:
+            return
+        
+        # Calculate screen position and delegate to menu builder
+        screen_x = self.canvas.get_tk_widget().winfo_rootx() + int(event.x)
+        screen_y = self.canvas.get_tk_widget().winfo_rooty() + int(event.y)
+        self._show_line_toggle_menu(screen_x, screen_y)
 
     def on_legend_pick(self, event):
         """Handle click on legend to toggle line and legend entry visibility."""
@@ -2352,42 +2391,10 @@ class InteractivePlotter:
                 break
     
     def _show_legend_context_menu(self, mouseevent, legend):
-        """Show context menu on right-click of legend."""
-        # Create context menu
-        menu = tk.Menu(self.root, tearoff=0)
-        
-        # Add "Show All Lines" option
-        menu.add_command(label="Show All Lines", command=self.show_all_lines)
-        
-        # Add separator
-        menu.add_separator()
-        
-        # Add hidden items that can be restored
-        if self.hidden_legend_items:
-            menu.add_command(label="Hidden items:", state='disabled')
-            for key in self.hidden_legend_items:
-                # Get display name
-                st = self.styles.get(key, {})
-                leg = st.get('legend', '').strip()
-                if leg:
-                    display_name = f"  {leg}"
-                else:
-                    display_name = f"  {key[0]}: {key[1]}"
-                # Create closure to capture key
-                def make_restore_callback(k):
-                    def restore():
-                        self.hidden_legend_items.discard(k)
-                        self.update_plot()
-                    return restore
-                menu.add_command(label=display_name, command=make_restore_callback(key))
-        else:
-            menu.add_command(label="(No hidden items)", state='disabled')
-        
-        # Show menu at cursor position
-        # Convert from matplotlib coordinates to tkinter coordinates
+        """Show context menu on right-click of legend — uses the same persistent toggle menu."""
         x = self.canvas.get_tk_widget().winfo_rootx() + int(mouseevent.x)
         y = self.canvas.get_tk_widget().winfo_rooty() + int(mouseevent.y)
-        menu.tk_popup(x, y)
+        self._show_line_toggle_menu(x, y)
                 
     def load_session(self):
         """Load a session from a JSON cache file."""
