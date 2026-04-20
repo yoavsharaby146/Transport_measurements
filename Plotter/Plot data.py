@@ -178,6 +178,31 @@ class InteractivePlotter:
         self.x_log = tk.BooleanVar()
         self.y_log = tk.BooleanVar()
 
+        # --- TICK DIRECTION & LENGTH (Origin Pro-like) ---
+        self.v_tick_dir_x = tk.StringVar(value="out")       # "out", "in", "inout", "none"
+        self.v_tick_dir_y = tk.StringVar(value="out")
+        self.v_tick_dir_y2 = tk.StringVar(value="out")
+        self.v_tick_dir_z = tk.StringVar(value="out")
+        self.v_minor_tick_dir_x = tk.StringVar(value="out")
+        self.v_minor_tick_dir_y = tk.StringVar(value="out")
+        self.v_minor_tick_dir_y2 = tk.StringVar(value="out")
+        self.v_minor_tick_dir_z = tk.StringVar(value="out")
+        self.v_major_tick_length = tk.StringVar(value="4.0")
+        self.v_minor_tick_length = tk.StringVar(value="2.0")
+
+        # --- TICK VISIBILITY PER SIDE ---
+        self.v_x_tick_bottom = tk.BooleanVar(value=True)
+        self.v_x_tick_top = tk.BooleanVar(value=False)
+        self.v_y_tick_left = tk.BooleanVar(value=True)
+        self.v_y_tick_right = tk.BooleanVar(value=False)
+
+        # --- GRID SETTINGS ---
+        self.show_major_grid = tk.BooleanVar(value=True)
+        self.show_minor_grid = tk.BooleanVar(value=False)
+        self.v_grid_alpha = tk.StringVar(value="0.3")
+        self.v_grid_linestyle = tk.StringVar(value="-")
+        self.v_grid_linewidth = tk.StringVar(value="0.5")
+
         # --- CACHE SETTINGS ---
         self.cache_folder = None  # User-selected folder for cache files
         
@@ -841,17 +866,32 @@ class InteractivePlotter:
             side='left', expand=True, fill='x', padx=2)
 
     def open_ticks_dialog(self):
-        d, frame, canvas, main_container, btn_container = self.create_scrollable_dialog(
-            self.root, "Ticks & Fonts",
-            width_pct=0.40, height_pct=0.85, max_width=550, max_height=650
-        )
+        """Open the Ticks & Fonts dialog with a tabbed interface."""
+        d = tk.Toplevel(self.root)
+        d.title("Ticks & Fonts")
+        
+        w, h = self.get_dialog_size(0.45, 0.80, max_width=600, max_height=700, min_width=500, min_height=500)
+        d.geometry(f"{w}x{h}")
+        d.transient(self.root)
+        
+        main_container = ttk.Frame(d)
+        main_container.pack(fill='both', expand=True)
+        
+        notebook = ttk.Notebook(main_container)
+        notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        dir_options = ["out", "in", "inout", "none"]
 
-        # FIX: Font bug
-        ttk.Label(frame, text="Tick Control", font=('Arial', 10, 'bold')).pack(pady=5)
+        # ============================================
+        # TAB 1: Tick Control
+        # ============================================
+        tab_tick = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_tick, text="Tick Control")
+        
+        ttk.Label(tab_tick, text="Tick Step & Padding", font=('Arial', 10, 'bold')).pack(pady=5)
 
-        gf = ttk.Frame(frame)
+        gf = ttk.Frame(tab_tick)
         gf.pack(fill='x')
-        # FIX: Font bug in grid headers
         ttk.Label(gf, text="Axis", width=8, font=('Arial', 10, 'bold')).grid(row=0, column=0)
         ttk.Label(gf, text="Maj Step", width=10, font=('Arial', 10, 'bold')).grid(row=0, column=1)
         ttk.Label(gf, text="Min Divs", width=10, font=('Arial', 10, 'bold')).grid(row=0, column=2)
@@ -868,54 +908,133 @@ class InteractivePlotter:
         add_t_row("Y2 (Right)", self.v_y2_maj, self.v_y2_min_div, self.v_y2_pad, 3)
         add_t_row("Z (Color)", self.v_z_maj, self.v_z_min_div, self.v_z_tick_pad, 4)
 
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(frame, text="Notation", font=('Arial', 10, 'bold')).pack(pady=5)
-        f_not = ttk.Frame(frame)
+        ttk.Separator(tab_tick, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_tick, text="Notation", font=('Arial', 10, 'bold')).pack(pady=5)
+        f_not = ttk.Frame(tab_tick)
         f_not.pack(fill='x')
         ttk.Label(f_not, text="X Notation:").pack(side='left')
-        xn = ttk.Combobox(f_not, textvariable=self.v_x_not, values=["Scientific", "Plain", "Engineering"], width=15,
-                          state='readonly')
-        xn.pack(side='left', padx=5)
+        ttk.Combobox(f_not, textvariable=self.v_x_not, values=["Scientific", "Plain", "Engineering"], width=15,
+                      state='readonly').pack(side='left', padx=5)
         ttk.Label(f_not, text="Y Notation:").pack(side='left')
-        yn = ttk.Combobox(f_not, textvariable=self.v_y_not, values=["Scientific", "Plain", "Engineering"], width=15,
-                          state='readonly')
-        yn.pack(side='left', padx=5)
+        ttk.Combobox(f_not, textvariable=self.v_y_not, values=["Scientific", "Plain", "Engineering"], width=15,
+                      state='readonly').pack(side='left', padx=5)
 
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(frame, text="Font Settings", font=('Arial', 10, 'bold')).pack(pady=5)
-        
-        # Font search info label
-        ttk.Label(frame, text="(Type in the font dropdown to search/filter fonts)", 
+        # ============================================
+        # TAB 2: Font Settings
+        # ============================================
+        tab_font = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_font, text="Font Settings")
+
+        ttk.Label(tab_font, text="Font Settings", font=('Arial', 10, 'bold')).pack(pady=5)
+        ttk.Label(tab_font, text="(Type in the font dropdown to search/filter fonts)",
                   font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5))
-        
-        f_fam = ttk.Frame(frame)
+
+        f_fam = ttk.Frame(tab_font)
         f_fam.pack(fill='x', pady=2)
         ttk.Label(f_fam, text="Font Family:").pack(side='left')
-        # Get available system fonts from matplotlib
         from matplotlib.font_manager import fontManager
         available_fonts = sorted(set([f.name for f in fontManager.ttflist]))
-        
-        # Create combobox with autocomplete functionality
         font_combo = ttk.Combobox(f_fam, textvariable=self.v_font_fam,
                                    values=available_fonts, width=25)
         font_combo.pack(side='right')
-        
-        # Setup autocomplete for font combobox
         self._setup_autocomplete_combobox(font_combo, available_fonts, d)
 
-        def add_sz(txt, var):
-            f = ttk.Frame(frame)
+        def add_sz(parent, txt, var):
+            f = ttk.Frame(parent)
             f.pack(fill='x', pady=2)
             ttk.Label(f, text=txt).pack(side='left')
             ttk.Entry(f, textvariable=var, width=10).pack(side='right')
 
-        add_sz("Title Size:", self.v_t_size)
-        add_sz("Axis Label Size:", self.v_l_size)
-        add_sz("Legend Size:", self.v_leg_size)
-        add_sz("X Tick Size:", self.v_xtick_size)
-        add_sz("Y Tick Size:", self.v_ytick_size)
-        
-        # Add buttons to the fixed button container (outside scrollable area)
+        add_sz(tab_font, "Title Size:", self.v_t_size)
+        add_sz(tab_font, "Axis Label Size:", self.v_l_size)
+        add_sz(tab_font, "Legend Size:", self.v_leg_size)
+        add_sz(tab_font, "X Tick Size:", self.v_xtick_size)
+        add_sz(tab_font, "Y Tick Size:", self.v_ytick_size)
+
+        # ============================================
+        # TAB 3: Tick Appearance
+        # ============================================
+        tab_appear = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_appear, text="Tick Appearance")
+
+        ttk.Label(tab_appear, text="Major Tick Direction:", font=('Arial', 9, 'bold')).pack(anchor='w', pady=(5, 2))
+        dir_frame = ttk.Frame(tab_appear)
+        dir_frame.pack(fill='x', pady=2)
+        ttk.Label(dir_frame, text="X:", width=8).grid(row=0, column=0)
+        ttk.Combobox(dir_frame, textvariable=self.v_tick_dir_x, values=dir_options, width=8, state='readonly').grid(row=0, column=1, padx=2)
+        ttk.Label(dir_frame, text="Y:", width=8).grid(row=0, column=2)
+        ttk.Combobox(dir_frame, textvariable=self.v_tick_dir_y, values=dir_options, width=8, state='readonly').grid(row=0, column=3, padx=2)
+        ttk.Label(dir_frame, text="Y2:", width=8).grid(row=1, column=0)
+        ttk.Combobox(dir_frame, textvariable=self.v_tick_dir_y2, values=dir_options, width=8, state='readonly').grid(row=1, column=1, padx=2)
+        ttk.Label(dir_frame, text="Z:", width=8).grid(row=1, column=2)
+        ttk.Combobox(dir_frame, textvariable=self.v_tick_dir_z, values=dir_options, width=8, state='readonly').grid(row=1, column=3, padx=2)
+
+        ttk.Label(tab_appear, text="Minor Tick Direction:", font=('Arial', 9, 'bold')).pack(anchor='w', pady=(10, 2))
+        mdir_frame = ttk.Frame(tab_appear)
+        mdir_frame.pack(fill='x', pady=2)
+        ttk.Label(mdir_frame, text="X:", width=8).grid(row=0, column=0)
+        ttk.Combobox(mdir_frame, textvariable=self.v_minor_tick_dir_x, values=dir_options, width=8, state='readonly').grid(row=0, column=1, padx=2)
+        ttk.Label(mdir_frame, text="Y:", width=8).grid(row=0, column=2)
+        ttk.Combobox(mdir_frame, textvariable=self.v_minor_tick_dir_y, values=dir_options, width=8, state='readonly').grid(row=0, column=3, padx=2)
+        ttk.Label(mdir_frame, text="Y2:", width=8).grid(row=1, column=0)
+        ttk.Combobox(mdir_frame, textvariable=self.v_minor_tick_dir_y2, values=dir_options, width=8, state='readonly').grid(row=1, column=1, padx=2)
+        ttk.Label(mdir_frame, text="Z:", width=8).grid(row=1, column=2)
+        ttk.Combobox(mdir_frame, textvariable=self.v_minor_tick_dir_z, values=dir_options, width=8, state='readonly').grid(row=1, column=3, padx=2)
+
+        ttk.Label(tab_appear, text="Tick Length (points):", font=('Arial', 9, 'bold')).pack(anchor='w', pady=(10, 2))
+        len_frame = ttk.Frame(tab_appear)
+        len_frame.pack(fill='x', pady=2)
+        ttk.Label(len_frame, text="Major:", width=8).pack(side='left')
+        ttk.Entry(len_frame, textvariable=self.v_major_tick_length, width=8).pack(side='left', padx=2)
+        ttk.Label(len_frame, text="Minor:", width=8).pack(side='left', padx=(10, 0))
+        ttk.Entry(len_frame, textvariable=self.v_minor_tick_length, width=8).pack(side='left', padx=2)
+
+        ttk.Separator(tab_appear, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_appear, text="Tick Visibility per Side", font=('Arial', 10, 'bold')).pack(pady=5)
+        side_frame = ttk.Frame(tab_appear)
+        side_frame.pack(fill='x', pady=2)
+        ttk.Label(side_frame, text="X Axis:", width=8, font=('Arial', 9, 'bold')).grid(row=0, column=0, sticky='w')
+        ttk.Checkbutton(side_frame, text="Bottom", variable=self.v_x_tick_bottom).grid(row=0, column=1, padx=5)
+        ttk.Checkbutton(side_frame, text="Top", variable=self.v_x_tick_top).grid(row=0, column=2, padx=5)
+        ttk.Label(side_frame, text="Y Axis:", width=8, font=('Arial', 9, 'bold')).grid(row=1, column=0, sticky='w')
+        ttk.Checkbutton(side_frame, text="Left", variable=self.v_y_tick_left).grid(row=1, column=1, padx=5)
+        ttk.Checkbutton(side_frame, text="Right", variable=self.v_y_tick_right).grid(row=1, column=2, padx=5)
+
+        # ============================================
+        # TAB 4: Grid Settings
+        # ============================================
+        tab_grid = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_grid, text="Grid Settings")
+
+        ttk.Label(tab_grid, text="Grid Visibility", font=('Arial', 10, 'bold')).pack(pady=5)
+        grid_frame = ttk.Frame(tab_grid)
+        grid_frame.pack(fill='x', pady=2)
+        ttk.Checkbutton(grid_frame, text="Major Grid", variable=self.show_major_grid).grid(row=0, column=0, sticky='w', padx=5)
+        ttk.Checkbutton(grid_frame, text="Minor Grid", variable=self.show_minor_grid).grid(row=0, column=1, sticky='w', padx=5)
+
+        ttk.Separator(tab_grid, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_grid, text="Grid Style", font=('Arial', 10, 'bold')).pack(pady=5)
+
+        def add_grid_entry(parent, txt, var):
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            ttk.Label(f, text=txt, width=15).pack(side='left')
+            ttk.Entry(f, textvariable=var, width=8).pack(side='left', padx=2)
+
+        add_grid_entry(tab_grid, "Grid Alpha:", self.v_grid_alpha)
+        add_grid_entry(tab_grid, "Grid Width:", self.v_grid_linewidth)
+
+        g_ls_frame = ttk.Frame(tab_grid)
+        g_ls_frame.pack(fill='x', pady=2)
+        ttk.Label(g_ls_frame, text="Grid Style:", width=15).pack(side='left')
+        ttk.Combobox(g_ls_frame, textvariable=self.v_grid_linestyle,
+                     values=['-', '--', ':', '-.'], width=8, state='readonly').pack(side='left', padx=2)
+
+        # ============================================
+        # Button frame at bottom
+        # ============================================
+        btn_container = ttk.Frame(main_container)
+        btn_container.pack(side='bottom', fill='x', pady=10, padx=10)
         btn_width = 12
         ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
             side='left', expand=True, fill='x', padx=2)
@@ -1649,10 +1768,36 @@ class InteractivePlotter:
                     apply_format(ax_curr, 'x', self.v_x_not.get())
                     if x_maj: ax_curr.xaxis.set_major_locator(ticker.MultipleLocator(x_maj))
                     if x_min > 1: ax_curr.xaxis.set_minor_locator(ticker.AutoMinorLocator(x_min))
-                ax_curr.tick_params(axis='x', labelsize=xt_sz, pad=x_pad_val, labelcolor=self.xtick_color)
+                # Tick direction, length, and side visibility
+                x_dir = self.v_tick_dir_x.get()
+                y_dir = self.v_tick_dir_y.get()
+                maj_len = val(self.v_major_tick_length, 4.0)
+                min_len = val(self.v_minor_tick_length, 2.0)
+                min_x_dir = self.v_minor_tick_dir_x.get()
+                min_y_dir = self.v_minor_tick_dir_y.get()
+
+                x_tick_len = 0 if x_dir == "none" else maj_len
+                ax_curr.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
+                    length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.xtick_color,
+                    bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
+                # Apply minor tick direction for X (also apply side visibility)
+                if x_min > 1:
+                    min_x_len = 0 if min_x_dir == "none" else min_len
+                    ax_curr.tick_params(axis='x', which='minor', direction=min_x_dir if min_x_dir != "none" else "out",
+                        length=min_x_len,
+                        bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
 
                 if ptype != "Dual Y-Axis":
-                    ax_curr.tick_params(axis='y', labelsize=yt_sz, pad=y_pad_val, labelcolor=self.ytick_color)
+                    y_tick_len = 0 if y_dir == "none" else maj_len
+                    ax_curr.tick_params(axis='y', direction=y_dir if y_dir != "none" else "out",
+                        length=y_tick_len, labelsize=yt_sz, pad=y_pad_val, labelcolor=self.ytick_color,
+                        left=self.v_y_tick_left.get(), right=self.v_y_tick_right.get())
+                    # Apply minor tick direction for Y (also apply side visibility)
+                    if y_min > 1:
+                        min_y_len = 0 if min_y_dir == "none" else min_len
+                        ax_curr.tick_params(axis='y', which='minor', direction=min_y_dir if min_y_dir != "none" else "out",
+                            length=min_y_len,
+                            left=self.v_y_tick_left.get(), right=self.v_y_tick_right.get())
                     if not self.y_log.get() and ptype != "Color Map":
                         apply_format(ax_curr, 'y', self.v_y_not.get())
                         if y_maj: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y_maj))
@@ -1866,8 +2011,19 @@ class InteractivePlotter:
                     self.canvas.mpl_connect('pick_event', self.on_legend_pick)
                     legend.set_picker(10)  # Set pick radius for legend
 
-            if self.show_grid.get():
-                for a in axes_list: a.grid(True, alpha=0.3)
+            # --- GRID SETTINGS (Origin Pro-like: major/minor grid control) ---
+            grid_alpha = val(self.v_grid_alpha, 0.3)
+            grid_ls = self.v_grid_linestyle.get()
+            grid_lw = val(self.v_grid_linewidth, 0.5)
+            for a in axes_list:
+                if self.show_major_grid.get():
+                    a.grid(True, which='major', alpha=grid_alpha, linestyle=grid_ls, linewidth=grid_lw)
+                else:
+                    a.grid(False, which='major')
+                if self.show_minor_grid.get():
+                    a.grid(True, which='minor', alpha=grid_alpha * 0.7, linestyle=grid_ls, linewidth=grid_lw * 0.7)
+                else:
+                    a.grid(False, which='minor')
 
             self.fig.tight_layout()
             
@@ -2141,6 +2297,37 @@ class InteractivePlotter:
                 "y_notation": self.v_y_not.get(),
             }
             
+            # === TICK APPEARANCE SETTINGS ===
+            session_data["tick_appearance"] = {
+                "tick_dir_x": self.v_tick_dir_x.get(),
+                "tick_dir_y": self.v_tick_dir_y.get(),
+                "tick_dir_y2": self.v_tick_dir_y2.get(),
+                "tick_dir_z": self.v_tick_dir_z.get(),
+                "minor_tick_dir_x": self.v_minor_tick_dir_x.get(),
+                "minor_tick_dir_y": self.v_minor_tick_dir_y.get(),
+                "minor_tick_dir_y2": self.v_minor_tick_dir_y2.get(),
+                "minor_tick_dir_z": self.v_minor_tick_dir_z.get(),
+                "major_tick_length": self.v_major_tick_length.get(),
+                "minor_tick_length": self.v_minor_tick_length.get(),
+            }
+
+            # === TICK SIDE VISIBILITY ===
+            session_data["tick_sides"] = {
+                "x_tick_bottom": self.v_x_tick_bottom.get(),
+                "x_tick_top": self.v_x_tick_top.get(),
+                "y_tick_left": self.v_y_tick_left.get(),
+                "y_tick_right": self.v_y_tick_right.get(),
+            }
+
+            # === GRID SETTINGS ===
+            session_data["grid_settings"] = {
+                "show_major_grid": self.show_major_grid.get(),
+                "show_minor_grid": self.show_minor_grid.get(),
+                "grid_alpha": self.v_grid_alpha.get(),
+                "grid_linestyle": self.v_grid_linestyle.get(),
+                "grid_linewidth": self.v_grid_linewidth.get(),
+            }
+
             # === PLOT SETTINGS ===
             session_data["plot_settings"] = {
                 "plot_type": self.plot_type.get(),
@@ -2528,6 +2715,37 @@ class InteractivePlotter:
                 self.v_x_not.set(font_settings.get("x_notation", "Scientific"))
                 self.v_y_not.set(font_settings.get("y_notation", "Scientific"))
             
+            # === RESTORE TICK APPEARANCE ===
+            tick_appearance = session_data.get("tick_appearance", {})
+            if tick_appearance:
+                self.v_tick_dir_x.set(tick_appearance.get("tick_dir_x", "out"))
+                self.v_tick_dir_y.set(tick_appearance.get("tick_dir_y", "out"))
+                self.v_tick_dir_y2.set(tick_appearance.get("tick_dir_y2", "out"))
+                self.v_tick_dir_z.set(tick_appearance.get("tick_dir_z", "out"))
+                self.v_minor_tick_dir_x.set(tick_appearance.get("minor_tick_dir_x", "out"))
+                self.v_minor_tick_dir_y.set(tick_appearance.get("minor_tick_dir_y", "out"))
+                self.v_minor_tick_dir_y2.set(tick_appearance.get("minor_tick_dir_y2", "out"))
+                self.v_minor_tick_dir_z.set(tick_appearance.get("minor_tick_dir_z", "out"))
+                self.v_major_tick_length.set(tick_appearance.get("major_tick_length", "4.0"))
+                self.v_minor_tick_length.set(tick_appearance.get("minor_tick_length", "2.0"))
+
+            # === RESTORE TICK SIDE VISIBILITY ===
+            tick_sides = session_data.get("tick_sides", {})
+            if tick_sides:
+                self.v_x_tick_bottom.set(tick_sides.get("x_tick_bottom", True))
+                self.v_x_tick_top.set(tick_sides.get("x_tick_top", False))
+                self.v_y_tick_left.set(tick_sides.get("y_tick_left", True))
+                self.v_y_tick_right.set(tick_sides.get("y_tick_right", False))
+
+            # === RESTORE GRID SETTINGS ===
+            grid_settings = session_data.get("grid_settings", {})
+            if grid_settings:
+                self.show_major_grid.set(grid_settings.get("show_major_grid", True))
+                self.show_minor_grid.set(grid_settings.get("show_minor_grid", False))
+                self.v_grid_alpha.set(grid_settings.get("grid_alpha", "0.3"))
+                self.v_grid_linestyle.set(grid_settings.get("grid_linestyle", "-"))
+                self.v_grid_linewidth.set(grid_settings.get("grid_linewidth", "0.5"))
+
             # === RESTORE PLOT SETTINGS ===
             plot_settings = session_data.get("plot_settings", {})
             if plot_settings:
