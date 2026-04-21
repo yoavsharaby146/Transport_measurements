@@ -1,24 +1,59 @@
-import matplotlib
+# ==================== IMPORTS ====================
 
-matplotlib.use("TkAgg")
-
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, colorchooser
-import polars as pl
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from matplotlib.figure import Figure
-import matplotlib.gridspec as gridspec
-import numpy as np
-from scipy.interpolate import griddata
+# --- Standard Library ---
 import sys
 import json
 import os
 from datetime import datetime
 
-# Import colormaps for the gradient feature
+# --- Third-Party: Data & Math ---
+import numpy as np
+import polars as pl
+from scipy.interpolate import griddata
+
+# --- Third-Party: Matplotlib ---
+import matplotlib
+matplotlib.use("TkAgg")
+
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import matplotlib.gridspec as gridspec
 from matplotlib import cm
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+
+# --- Third-Party: Tkinter GUI ---
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, colorchooser
+
+# ==================== CONSTANTS ====================
+
+COLORMAPS = [
+    'viridis', 'plasma', 'inferno', 'magma', 'cividis',
+
+    'Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
+    'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
+    'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn',
+
+    'binary', 'gist_yarg', 'gist_gray', 'gray', 'bone',
+    'pink', 'spring', 'summer', 'autumn', 'winter', 'cool',
+    'Wistia', 'hot', 'afmhot', 'gist_heat', 'copper',
+
+    'PiYG', 'PRGn', 'BrBG', 'PuOr', 'RdGy', 'RdBu', 'RdYlBu',
+    'RdYlGn', 'Spectral', 'coolwarm', 'bwr', 'seismic',
+    'berlin', 'managua', 'vanimo',
+
+    'twilight', 'twilight_shifted', 'hsv',
+
+    'Pastel1', 'Pastel2', 'Paired', 'Accent', 'Dark2',
+    'Set1', 'Set2', 'Set3', 'tab10', 'tab20', 'tab20b',
+    'tab20c',
+
+    'flag', 'prism', 'ocean', 'gist_earth', 'terrain',
+    'gist_stern', 'gnuplot', 'gnuplot2', 'CMRmap',
+    'cubehelix', 'brg', 'gist_rainbow', 'rainbow', 'jet',
+    'turbo', 'nipy_spectral', 'gist_ncar'
+]
 
 
 class InteractivePlotter:
@@ -47,35 +82,9 @@ class InteractivePlotter:
         self.merge_cols_var = tk.BooleanVar(value=False)
         self.use_ref_x_var = tk.BooleanVar(value=False)
 
-        # --- COLOR SETTINGS (NEW) ---
+        # --- COLOR SETTINGS ---
         self.v_color_mode = tk.StringVar(value="Cycle")  # "Cycle" or "Gradient"
         self.v_cmap_name = tk.StringVar(value="viridis")
-        self.available_cmaps = [
-                                'viridis', 'plasma', 'inferno', 'magma', 'cividis',
-                                
-                                'Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
-                                'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
-                                'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn',
-
-                                'binary', 'gist_yarg', 'gist_gray', 'gray', 'bone',
-                                'pink', 'spring', 'summer', 'autumn', 'winter', 'cool',
-                                'Wistia', 'hot', 'afmhot', 'gist_heat', 'copper',
-
-                                'PiYG', 'PRGn', 'BrBG', 'PuOr', 'RdGy', 'RdBu', 'RdYlBu',
-                                'RdYlGn', 'Spectral', 'coolwarm', 'bwr', 'seismic',
-                                'berlin', 'managua', 'vanimo',
-
-                                'twilight', 'twilight_shifted', 'hsv',
-
-                                'Pastel1', 'Pastel2', 'Paired', 'Accent', 'Dark2',
-                                'Set1', 'Set2', 'Set3', 'tab10', 'tab20', 'tab20b',
-                                'tab20c',
-
-                                'flag', 'prism', 'ocean', 'gist_earth', 'terrain',
-                                'gist_stern', 'gnuplot', 'gnuplot2', 'CMRmap',
-                                'cubehelix', 'brg', 'gist_rainbow', 'rainbow', 'jet',
-                                'turbo', 'nipy_spectral', 'gist_ncar'
-                                ]
 
         # --- DATA VARIABLES ---
         self.v_x_div = tk.StringVar(value="1")
@@ -324,20 +333,19 @@ class InteractivePlotter:
         self.plot_type.bind('<<ComboboxSelected>>', self.on_plot_type_change)
         row += 1
 
-        # --- NEW: Color Controls (Gradient Feature) ---
+        # --- Color Controls ---
         ttk.Label(control_frame, text="Color Mode:").grid(row=row, column=0, sticky='w')
         c_mode = ttk.Combobox(control_frame, textvariable=self.v_color_mode, values=["Cycle", "Gradient"],
                               state='readonly', width=10)
         c_mode.grid(row=row, column=1, sticky='ew', padx=2)
         c_mode.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
 
-        c_map = ttk.Combobox(control_frame, textvariable=self.v_cmap_name, values=self.available_cmaps,
+        c_map = ttk.Combobox(control_frame, textvariable=self.v_cmap_name, values=COLORMAPS,
                              state='readonly', width=12)
         c_map.grid(row=row, column=2, columnspan=2, sticky='ew', padx=2)
         c_map.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
         row += 1
-        # --------------------------------------------
-
+        row += 1
 
         ttk.Label(control_frame, text="X Axis:").grid(row=row, column=0, sticky='w')
         self.x_combo = ttk.Combobox(control_frame, state='readonly', width=20)
@@ -382,7 +390,7 @@ class InteractivePlotter:
         ttk.Separator(control_frame, orient='horizontal').grid(row=row, column=0, columnspan=4, sticky='ew', pady=10)
         row += 1
 
-        # --- CLEANED BUTTONS (Removed 'Chinese' characters) ---
+        # --- CONFIGURATION ---
         ttk.Label(control_frame, text="CONFIGURATION", font=('Arial', 10, 'bold')).grid(row=row, column=0, columnspan=4,
                                                                                         sticky='w', pady=(0, 5))
         row += 1
@@ -585,7 +593,6 @@ class InteractivePlotter:
             width_pct=0.35, height_pct=0.85, max_width=500, max_height=700
         )
 
-        # FIX: Changed font='bold' to font=('Arial', 10, 'bold')
         ttk.Label(frame, text="Data Transformation (Divide by)", font=('Arial', 10, 'bold')).pack(pady=5)
 
         def add_entry(txt, var):
@@ -703,7 +710,6 @@ class InteractivePlotter:
         ttk.Label(tab_text, text="Legend Text", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_entry(tab_text, "Legend (csv):", self.v_legend, width=15)
         ttk.Checkbutton(tab_text, text="Show Legend", variable=self.show_legend).pack(pady=2, anchor='w')
-        ttk.Checkbutton(tab_text, text="Show Grid", variable=self.show_grid).pack(pady=2, anchor='w')
         
         ttk.Separator(tab_text, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_text, text="Label Spacing (Padding)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
