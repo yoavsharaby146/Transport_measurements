@@ -1,12 +1,12 @@
 ================================================================================
-               INTERACTIVE CSV PLOTTER - User Guide
+                INTERACTIVE DATA PLOTTER - User Guide
 ================================================================================
 
 DESCRIPTION
 -----------
-A feature-rich interactive CSV plotting application with a Tkinter GUI.
-Supports multiple plot types, extensive customization, session save/load,
-and an Origin Pro-inspired interface.
+A feature-rich interactive plotting application with a Tkinter GUI.
+Supports CSV and Excel files, multiple plot types, extensive customization,
+session save/load, and an Origin Pro-inspired interface.
 
 REQUIREMENTS
 ------------
@@ -15,6 +15,7 @@ REQUIREMENTS
 - matplotlib     (pip install matplotlib)
 - numpy          (pip install numpy)
 - scipy          (pip install scipy)
+- openpyxl       (pip install openpyxl)   -- optional, for Excel file support
 
 Tkinter comes bundled with most Python installations.
 
@@ -31,7 +32,7 @@ QUICK START
 ================================================================================
 
 1. LOAD DATA
-   - Click "Load CSV File(s)" to select one or more CSV files.
+   - Click "Load Data File(s)" to select one or more CSV or Excel files.
    - Files appear in the dataset listbox. Click to select (Ctrl+click for
      multiple).
    - "Dataset Manager" opens a larger window for managing loaded files.
@@ -69,7 +70,7 @@ CONTROL PANEL REFERENCE
 ================================================================================
 
 DATA FILES section:
-  Load CSV File(s)    Open file dialog (supports multi-select).
+  Load Data File(s)   Open file dialog (supports CSV, XLSX, XLS; multi-select).
   Dataset list        Click to select active datasets.
   Unload              Remove selected datasets.
   Dataset Manager     Opens a separate management window.
@@ -197,15 +198,21 @@ GRADIENT
 
 
 ================================================================================
-CSV FILE REQUIREMENTS
+DATA FILE REQUIREMENTS
 ================================================================================
 
+CSV files:
 - Standard comma-separated format.
 - First row(s) may contain metadata; the plotter auto-detects the header
   by searching for 'time(s)' in the first 50 lines.
 - Trailing empty lines, comments (; or #), and inconsistent column counts
   are handled automatically.
 - UTF-8 encoding assumed.
+
+Excel files (.xlsx / .xls):
+- Requires the 'openpyxl' package (pip install openpyxl).
+- The first sheet is read automatically.
+- Column names are taken from the first row.
 
 
 ================================================================================

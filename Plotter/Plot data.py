@@ -212,6 +212,16 @@ class InteractivePlotter:
         self.v_grid_linestyle = tk.StringVar(value="-")
         self.v_grid_linewidth = tk.StringVar(value="0.5")
 
+        # --- SECONDARY X-AXIS (Top Axis) ---
+        self.enable_secondary_x = tk.BooleanVar(value=False)
+        self.v_sec_x_forward = tk.StringVar(value="x")  # Forward transform formula (bottom -> top)
+        self.v_sec_x_inverse = tk.StringVar(value="x")  # Inverse transform formula (top -> bottom)
+        self.v_sec_x_label = tk.StringVar(value="")     # Label for secondary top X-axis
+        self.v_sec_x_tick_size = tk.StringVar(value="10")  # Tick font size for top X-axis
+        self.v_sec_x_maj = tk.StringVar(value="")       # Major tick step for top X-axis
+        self.v_sec_x_min_div = tk.StringVar(value="")   # Minor tick divisions for top X-axis
+        self.sec_x_label_color = 'black'                 # Label color for secondary X-axis
+
         # --- CACHE SETTINGS ---
         self.cache_folder = None  # User-selected folder for cache files
         
@@ -273,9 +283,9 @@ class InteractivePlotter:
         ttk.Label(control_frame, text="DATA FILES", font=('Arial', 10, 'bold')).grid(row=row, column=0, columnspan=4,
                                                                                      sticky='w', pady=(0, 5))
         row += 1
-        ttk.Button(control_frame, text="Load CSV File(s)", command=self.load_files).grid(row=row, column=0,
-                                                                                         columnspan=4, sticky='ew',
-                                                                                         pady=5)
+        ttk.Button(control_frame, text="Load Data File(s)", command=self.load_files).grid(row=row, column=0,
+                                                                                          columnspan=4, sticky='ew',
+                                                                                          pady=5)
         row += 1
 
         # Compact dataset list with button to open separate window
@@ -441,7 +451,7 @@ class InteractivePlotter:
         # Then pack canvas with expand - this ensures toolbar stays visible
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
-        self.ax.text(0.5, 0.5, 'Load CSV file(s) to begin', ha='center', va='center', fontsize=16, color='gray')
+        self.ax.text(0.5, 0.5, 'Load data file(s) to begin', ha='center', va='center', fontsize=16, color='gray')
         self.ax.set_xticks([]);
         self.ax.set_yticks([])
         self.canvas.draw()
@@ -641,7 +651,7 @@ class InteractivePlotter:
         d.title("Labels, Titles & Colors")
         
         # Calculate size - wider for tabs
-        w, h = self.get_dialog_size(0.45, 0.80, max_width=600, max_height=700, min_width=500, min_height=500)
+        w, h = self.get_dialog_size(0.45, 0.90, max_width=650, max_height=850, min_width=500, min_height=600)
         d.geometry(f"{w}x{h}")
         d.transient(self.root)
         
@@ -844,7 +854,55 @@ class InteractivePlotter:
                         variable=self.legend_draggable).pack(pady=2, anchor='w')
         
         # ============================================
-        # TAB 6: Transparency
+        # TAB 6: Secondary X-Axis (Top Axis)
+        # ============================================
+        tab_sec_x = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_sec_x, text="Secondary X")
+        
+        ttk.Label(tab_sec_x, text="Secondary Top X-Axis", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Checkbutton(tab_sec_x, text="Enable Secondary Top X-Axis", 
+                        variable=self.enable_secondary_x).pack(pady=5, anchor='w')
+        
+        ttk.Separator(tab_sec_x, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_sec_x, text="Transformation Formulas", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_sec_x, text="Use 'x' as the variable. Examples: x / 1e10, x * 4.1357e-15, 1 / x",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
+        ttk.Label(tab_sec_x, text="Supports numpy as np: np.sqrt(x), np.log10(x), x**2, etc.",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 10), anchor='w')
+        
+        add_entry(tab_sec_x, "Transform:", self.v_sec_x_forward, width=12)
+        ttk.Label(tab_sec_x, text="Inverse auto-derived for: x*K, x/K, x+K, x-K, 1/x, x**K, np.sqrt, np.log10, etc.",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(2, 5), anchor='w')
+        
+        ttk.Separator(tab_sec_x, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_sec_x, text="Top Axis Label", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_sec_x, "Top X Label:", self.v_sec_x_label, width=15)
+        
+        # Label color for secondary X-axis
+        add_col(tab_sec_x, "Top X Label Color:", "sec_x_label_color", self.sec_x_label_color)
+        
+        ttk.Separator(tab_sec_x, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_sec_x, text="Top Axis Tick Settings", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        
+        f_sz = ttk.Frame(tab_sec_x)
+        f_sz.pack(fill='x', pady=2)
+        ttk.Label(f_sz, text="Tick Font Size:", width=15).pack(side='left')
+        ttk.Entry(f_sz, textvariable=self.v_sec_x_tick_size, width=10).pack(side='left', padx=2)
+        
+        f_maj = ttk.Frame(tab_sec_x)
+        f_maj.pack(fill='x', pady=2)
+        ttk.Label(f_maj, text="Major Tick Step:", width=15).pack(side='left')
+        ttk.Entry(f_maj, textvariable=self.v_sec_x_maj, width=10).pack(side='left', padx=2)
+        ttk.Label(f_maj, text="(blank = auto)", font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=5)
+        
+        f_min = ttk.Frame(tab_sec_x)
+        f_min.pack(fill='x', pady=2)
+        ttk.Label(f_min, text="Minor Divisions:", width=15).pack(side='left')
+        ttk.Entry(f_min, textvariable=self.v_sec_x_min_div, width=10).pack(side='left', padx=2)
+        ttk.Label(f_min, text="(blank = auto)", font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=5)
+        
+        # ============================================
+        # TAB 7: Transparency
         # ============================================
         tab_transparency = ttk.Frame(notebook, padding=10)
         notebook.add(tab_transparency, text="Transparency")
@@ -1050,62 +1108,56 @@ class InteractivePlotter:
             side='left', expand=True, fill='x', padx=2)
 
     # --- MAIN LOGIC ---
+
+    def _load_csv(self, filepath):
+        """Load a CSV file with header detection and footer skipping."""
+        with open(filepath, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        header_line = 0
+        for i, line in enumerate(lines[:50]):
+            if 'time(s)' in line.lower(): header_line = i; break
+
+        skip_footer = 0
+        header_cols = len(lines[header_line].split(','))
+        for i in range(len(lines) - 1, header_line, -1):
+            line = lines[i].strip()
+            if not line: skip_footer += 1; continue
+            if line.startswith(';') or line.startswith('#'): skip_footer += 1; continue
+            if len(line.split(',')) != header_cols: skip_footer += 1; continue
+            break
+
+        if skip_footer > 0:
+            return pl.read_csv(filepath, skip_rows=header_line,
+                               n_rows=len(lines) - header_line - skip_footer,
+                               truncate_ragged_lines=True, ignore_errors=True)
+        else:
+            return pl.read_csv(filepath, skip_rows=header_line,
+                               truncate_ragged_lines=True, ignore_errors=True)
+
+    def _load_excel(self, filepath):
+        """Load an Excel file (.xlsx/.xls). Requires openpyxl."""
+        try:
+            import openpyxl
+        except ImportError:
+            raise ImportError("Excel support requires 'openpyxl'.\nInstall it with:  pip install openpyxl")
+        return pl.read_excel(filepath)
+
     def load_files(self):
-        filenames = filedialog.askopenfilenames(title="Select CSV file(s)",
-                                                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+        filenames = filedialog.askopenfilenames(
+            title="Select data file(s)",
+            filetypes=[("Data files", "*.csv *.xlsx *.xls"),
+                       ("CSV files", "*.csv"),
+                       ("Excel files", "*.xlsx *.xls"),
+                       ("All files", "*.*")])
         if not filenames: return
         for filepath in filenames:
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                header_line = 0
-                for i, line in enumerate(lines[:50]):
-                    if 'time(s)' in line.lower(): header_line = i; break
-                
-                # Count how many trailing lines to skip (metadata, comments, empty lines)
-                skip_footer = 0
-                header_cols = len(lines[header_line].split(','))
-                
-                # Check from the end of file for problematic lines
-                for i in range(len(lines) - 1, header_line, -1):
-                    line = lines[i].strip()
-                    # Skip empty lines
-                    if not line:
-                        skip_footer += 1
-                        continue
-                    # Skip comment/metadata lines starting with ; or #
-                    if line.startswith(';') or line.startswith('#'):
-                        skip_footer += 1
-                        continue
-                    # Skip lines with different column count
-                    line_cols = len(line.split(','))
-                    if line_cols != header_cols:
-                        skip_footer += 1
-                        continue
-                    # Found a valid data line, stop checking
-                    break
-                
-                # Read CSV, skipping footer if metadata detected
-                # Use truncate_ragged_lines=True to handle inconsistent column counts
-                # Use ignore_errors=True to skip rows with parsing issues
-                if skip_footer > 0:
-                    # Read all data except trailing problematic lines
-                    df = pl.read_csv(
-                        filepath, 
-                        skip_rows=header_line, 
-                        n_rows=len(lines) - header_line - skip_footer,
-                        truncate_ragged_lines=True,
-                        ignore_errors=True
-                    )
+                ext = os.path.splitext(filepath)[1].lower()
+                if ext in ('.xlsx', '.xls'):
+                    df = self._load_excel(filepath)
                 else:
-                    df = pl.read_csv(
-                        filepath, 
-                        skip_rows=header_line,
-                        truncate_ragged_lines=True,
-                        ignore_errors=True
-                    )
-                
-                filename = filepath.split('/')[-1]
+                    df = self._load_csv(filepath)
+                filename = os.path.basename(filepath)
                 self.datasets[filename] = df
             except Exception as e:
                 messagebox.showerror("Error", str(e))
@@ -1490,6 +1542,79 @@ class InteractivePlotter:
             side='left', expand=True, fill='x', padx=2)
         ttk.Button(btn_frame, text="Cancel", command=d.destroy, width=btn_width).pack(
             side='left', expand=True, fill='x', padx=2)
+
+    @staticmethod
+    def _auto_derive_inverse(formula_str):
+        """Auto-derive the inverse of common transform formulas.
+        
+        Returns the inverse formula string, or None if pattern not recognized.
+        """
+        import re
+        s = formula_str.strip()
+        
+        # Pattern: x * K or x*K → x / K
+        m = re.match(r'^x\s*\*\s*(.+)$', s)
+        if m:
+            return f"x / {m.group(1)}"
+        
+        # Pattern: x / K or x/K → x * K
+        m = re.match(r'^x\s*/\s*(.+)$', s)
+        if m:
+            return f"x * {m.group(1)}"
+        
+        # Pattern: x + K → x - K
+        m = re.match(r'^x\s*\+\s*(.+)$', s)
+        if m:
+            return f"x - {m.group(1)}"
+        
+        # Pattern: x - K → x + K
+        m = re.match(r'^x\s*-\s*(.+)$', s)
+        if m:
+            return f"x + {m.group(1)}"
+        
+        # Pattern: 1 / x → 1 / x (self-inverse)
+        if s.strip() in ['1/x', '1 / x']:
+            return '1 / x'
+        
+        # Pattern: K / x or K*x → swap (K*x → x/K, K/x → x/K ... actually these are trickier)
+        # Pattern: K * x → x / K
+        m = re.match(r'^(.+?)\s*\*\s*x$', s)
+        if m:
+            return f"x / {m.group(1)}"
+        
+        # Pattern: K / x → K / x (needs special handling — for now, not auto-inverted)
+        
+        # Pattern: x ** K → x ** (1/K)
+        m = re.match(r'^x\s*\*\*\s*(.+)$', s)
+        if m:
+            try:
+                k = float(m.group(1))
+                inv_k = 1.0 / k
+                # Use clean representation
+                if inv_k == int(inv_k):
+                    inv_k = int(inv_k)
+                return f"x ** {inv_k}"
+            except:
+                pass
+        
+        # Pattern: np.sqrt(x) → x ** 2
+        if s.strip() in ['np.sqrt(x)', 'np.sqrt( x )']:
+            return 'x ** 2'
+        
+        # Pattern: np.log10(x) → 10 ** x
+        if s.strip() in ['np.log10(x)', 'np.log10( x )']:
+            return '10 ** x'
+        
+        # Pattern: np.log(x) → np.exp(x)
+        if s.strip() in ['np.log(x)', 'np.log( x )']:
+            return 'np.exp(x)'
+        
+        # Pattern: np.exp(x) → np.log(x)
+        if s.strip() in ['np.exp(x)', 'np.exp( x )']:
+            return 'np.log(x)'
+        
+        # Not recognized
+        return None
 
     def update_plot(self):
         sel_ds = self.get_selected_datasets()
@@ -2031,6 +2156,66 @@ class InteractivePlotter:
                 else:
                     a.grid(False, which='minor')
 
+            # --- SECONDARY TOP X-AXIS ---
+            if self.enable_secondary_x.get() and ptype != "Broken Y-Axis":
+                try:
+                    fwd_formula = self.v_sec_x_forward.get().strip()
+                    
+                    if fwd_formula:
+                        # Auto-derive inverse if not manually set
+                        inv_formula = self.v_sec_x_inverse.get().strip()
+                        if not inv_formula or inv_formula == fwd_formula:
+                            auto_inv = self._auto_derive_inverse(fwd_formula)
+                            if auto_inv:
+                                inv_formula = auto_inv
+                        
+                        if inv_formula:
+                            # Create safe lambda functions from the formulas
+                            # Support numpy operations via 'np' in the namespace
+                            safe_dict = {"np": np, "__builtins__": {}}
+                            fwd_func = eval(f"lambda x: {fwd_formula}", safe_dict)
+                            inv_func = eval(f"lambda x: {inv_formula}", safe_dict)
+                            
+                            # Create the secondary axis
+                            sec_x_ax = target_ax.secondary_xaxis('top', functions=(fwd_func, inv_func))
+                            
+                            # Apply label
+                            sec_label = self.v_sec_x_label.get().strip()
+                            if sec_label:
+                                sec_x_ax.set_xlabel(sec_label, fontsize=l_sz, fontname=font,
+                                                    color=self.sec_x_label_color)
+                            
+                            # Apply tick settings
+                            sec_xt_sz = val(self.v_sec_x_tick_size, 10)
+                            sec_x_ax.tick_params(axis='x', labelsize=sec_xt_sz, labelcolor=self.xtick_color)
+                            
+                            # Apply major tick step if specified
+                            sec_x_maj_val = val(self.v_sec_x_maj)
+                            if sec_x_maj_val:
+                                sec_x_ax.xaxis.set_major_locator(ticker.MultipleLocator(sec_x_maj_val))
+                            
+                            # Apply minor tick divisions if specified
+                            sec_x_min_div = int(val(self.v_sec_x_min_div, 0))
+                            if sec_x_min_div > 1:
+                                sec_x_ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(sec_x_min_div))
+                            
+                            # Apply tick direction to match top ticks
+                            x_dir = self.v_tick_dir_x.get()
+                            maj_len = val(self.v_major_tick_length, 4.0)
+                            min_len = val(self.v_minor_tick_length, 2.0)
+                            x_tick_len = 0 if x_dir == "none" else maj_len
+                            sec_x_ax.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
+                                                length=x_tick_len)
+                            # Apply minor tick direction for secondary X
+                            if sec_x_min_div > 1:
+                                min_x_dir = self.v_minor_tick_dir_x.get()
+                                min_x_len = 0 if min_x_dir == "none" else min_len
+                                sec_x_ax.tick_params(axis='x', which='minor', 
+                                    direction=min_x_dir if min_x_dir != "none" else "out",
+                                    length=min_x_len)
+                except Exception as sec_e:
+                    print(f"Secondary X-Axis error: {sec_e}")
+
             self.fig.tight_layout()
             
             # Apply custom label positions AFTER tight_layout
@@ -2334,6 +2519,18 @@ class InteractivePlotter:
                 "grid_linewidth": self.v_grid_linewidth.get(),
             }
 
+            # === SECONDARY X-AXIS ===
+            session_data["secondary_x_axis"] = {
+                "enabled": self.enable_secondary_x.get(),
+                "forward": self.v_sec_x_forward.get(),
+                "inverse": self.v_sec_x_inverse.get(),
+                "label": self.v_sec_x_label.get(),
+                "tick_size": self.v_sec_x_tick_size.get(),
+                "major_step": self.v_sec_x_maj.get(),
+                "minor_divisions": self.v_sec_x_min_div.get(),
+                "label_color": self.sec_x_label_color,
+            }
+
             # === PLOT SETTINGS ===
             session_data["plot_settings"] = {
                 "plot_type": self.plot_type.get(),
@@ -2405,7 +2602,7 @@ class InteractivePlotter:
         # Load buttons at top
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(fill='x', pady=(0, 10))
-        ttk.Button(btn_frame, text="Load CSV File(s)", command=self.load_files).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="Load Data File(s)", command=self.load_files).pack(side='left', padx=2)
         ttk.Button(btn_frame, text="Unload Selected", command=self.unload_files).pack(side='left', padx=2)
         ttk.Button(btn_frame, text="Refresh", command=lambda: self.refresh_dataset_window_list()).pack(side='left', padx=2)
         
@@ -2751,6 +2948,18 @@ class InteractivePlotter:
                 self.v_grid_alpha.set(grid_settings.get("grid_alpha", "0.3"))
                 self.v_grid_linestyle.set(grid_settings.get("grid_linestyle", "-"))
                 self.v_grid_linewidth.set(grid_settings.get("grid_linewidth", "0.5"))
+
+            # === RESTORE SECONDARY X-AXIS ===
+            sec_x_settings = session_data.get("secondary_x_axis", {})
+            if sec_x_settings:
+                self.enable_secondary_x.set(sec_x_settings.get("enabled", False))
+                self.v_sec_x_forward.set(sec_x_settings.get("forward", "x"))
+                self.v_sec_x_inverse.set(sec_x_settings.get("inverse", "x"))
+                self.v_sec_x_label.set(sec_x_settings.get("label", ""))
+                self.v_sec_x_tick_size.set(sec_x_settings.get("tick_size", "10"))
+                self.v_sec_x_maj.set(sec_x_settings.get("major_step", ""))
+                self.v_sec_x_min_div.set(sec_x_settings.get("minor_divisions", ""))
+                self.sec_x_label_color = sec_x_settings.get("label_color", "black")
 
             # === RESTORE PLOT SETTINGS ===
             plot_settings = session_data.get("plot_settings", {})
