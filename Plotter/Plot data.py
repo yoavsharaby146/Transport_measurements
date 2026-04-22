@@ -100,8 +100,12 @@ class InteractivePlotter:
         self.v_y2_max = tk.StringVar()
         self.v_z_min = tk.StringVar()
         self.v_z_max = tk.StringVar()
-        self.v_break_start = tk.StringVar()
-        self.v_break_end = tk.StringVar()
+        self.v_break_start = tk.StringVar()  # Backward compat → Y Break 1 Start
+        self.v_break_end = tk.StringVar()    # Backward compat → Y Break 1 End
+
+        # --- AXIS BREAKS (universal — works with any plot type) ---
+        self.v_y_breaks = [(tk.StringVar(), tk.StringVar()) for _ in range(1)]
+        self.v_x_breaks = [(tk.StringVar(), tk.StringVar()) for _ in range(1)]
 
         self.v_title = tk.StringVar(value="My Plot")
         self.v_xlabel = tk.StringVar()
@@ -598,42 +602,86 @@ class InteractivePlotter:
     # --- DIALOG BUILDERS (FIXED FONTS) ---
 
     def open_ranges_dialog(self):
-        d, frame, canvas, main_container, btn_container = self.create_scrollable_dialog(
-            self.root, "Ranges & Data Transformation",
-            width_pct=0.35, height_pct=0.85, max_width=500, max_height=700
-        )
+        """Open the Ranges & Data dialog with a tabbed interface."""
+        d = tk.Toplevel(self.root)
+        d.title("Ranges & Data Transformation")
+        w, h = self.get_dialog_size(0.40, 0.80, max_width=550, max_height=700, min_width=450, min_height=500)
+        d.geometry(f"{w}x{h}")
+        d.transient(self.root)
 
-        ttk.Label(frame, text="Data Transformation (Divide by)", font=('Arial', 10, 'bold')).pack(pady=5)
+        main_container = ttk.Frame(d)
+        main_container.pack(fill='both', expand=True)
 
-        def add_entry(txt, var):
-            f = ttk.Frame(frame)
+        notebook = ttk.Notebook(main_container)
+        notebook.pack(fill='both', expand=True, padx=5, pady=5)
+
+        def add_entry(parent, txt, var, width=15):
+            f = ttk.Frame(parent)
             f.pack(fill='x', pady=2)
-            ttk.Label(f, text=txt, width=15).pack(side='left')
+            ttk.Label(f, text=txt, width=width).pack(side='left')
             ttk.Entry(f, textvariable=var).pack(side='right', expand=True, fill='x')
 
-        add_entry("Divide X:", self.v_x_div)
-        add_entry("Divide Y:", self.v_y_div)
-        add_entry("Divide Y2:", self.v_y2_div)
-        add_entry("Divide Z:", self.v_z_div)
+        # ============================================
+        # TAB 1: Ranges & Transform
+        # ============================================
+        tab_ranges = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_ranges, text="Ranges & Transform")
 
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(frame, text="Axis Ranges", font=('Arial', 10, 'bold')).pack(pady=5)
+        ttk.Label(tab_ranges, text="Data Transformation (Divide by)", font=('Arial', 10, 'bold')).pack(pady=5)
+        add_entry(tab_ranges, "Divide X:", self.v_x_div)
+        add_entry(tab_ranges, "Divide Y:", self.v_y_div)
+        add_entry(tab_ranges, "Divide Y2:", self.v_y2_div)
+        add_entry(tab_ranges, "Divide Z:", self.v_z_div)
 
-        add_entry("X Min:", self.v_x_min)
-        add_entry("X Max:", self.v_x_max)
-        add_entry("Y Min:", self.v_y_min)
-        add_entry("Y Max:", self.v_y_max)
-        add_entry("Z Min (Color):", self.v_z_min)
-        add_entry("Z Max (Color):", self.v_z_max)
+        ttk.Separator(tab_ranges, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_ranges, text="Axis Ranges", font=('Arial', 10, 'bold')).pack(pady=5)
+        add_entry(tab_ranges, "X Min:", self.v_x_min)
+        add_entry(tab_ranges, "X Max:", self.v_x_max)
+        add_entry(tab_ranges, "Y Min:", self.v_y_min)
+        add_entry(tab_ranges, "Y Max:", self.v_y_max)
+        add_entry(tab_ranges, "Z Min (Color):", self.v_z_min)
+        add_entry(tab_ranges, "Z Max (Color):", self.v_z_max)
 
-        ttk.Label(frame, text="Broken Axis:", foreground="blue").pack(pady=(5, 0))
-        add_entry("Break Start:", self.v_break_start)
-        add_entry("Break End:", self.v_break_end)
-        ttk.Separator(frame, orient='horizontal').pack(fill='x', pady=10)
-        add_entry("Y2 Min:", self.v_y2_min)
-        add_entry("Y2 Max:", self.v_y2_max)
+        ttk.Separator(tab_ranges, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_ranges, text="Dual Y-Axis Ranges", font=('Arial', 10, 'bold')).pack(pady=5)
+        add_entry(tab_ranges, "Y2 Min:", self.v_y2_min)
+        add_entry(tab_ranges, "Y2 Max:", self.v_y2_max)
 
-        # Add buttons to the fixed button container (outside scrollable area)
+        # ============================================
+        # TAB 2: Axis Breaks
+        # ============================================
+        tab_breaks = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_breaks, text="Axis Breaks")
+
+        ttk.Label(tab_breaks, text="Y Axis Break", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_breaks, text="Omit a range from the Y axis. Leave blank to disable.\nWorks with Line, Scatter, and Dual Y-Axis plots.",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(anchor='w', pady=(0, 5))
+        bf = ttk.Frame(tab_breaks)
+        bf.pack(fill='x', pady=2)
+        ttk.Label(bf, text="Y Break:", width=10).pack(side='left')
+        ttk.Label(bf, text="Start:").pack(side='left', padx=(5, 2))
+        ttk.Entry(bf, textvariable=self.v_y_breaks[0][0], width=10).pack(side='left', padx=2)
+        ttk.Label(bf, text="End:").pack(side='left', padx=(10, 2))
+        ttk.Entry(bf, textvariable=self.v_y_breaks[0][1], width=10).pack(side='left', padx=2)
+
+        ttk.Separator(tab_breaks, orient='horizontal').pack(fill='x', pady=15)
+
+        ttk.Label(tab_breaks, text="X Axis Break", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_breaks, text="Omit a range from the X axis. Leave blank to disable.",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(anchor='w', pady=(0, 5))
+        bf = ttk.Frame(tab_breaks)
+        bf.pack(fill='x', pady=2)
+        ttk.Label(bf, text="X Break:", width=10).pack(side='left')
+        ttk.Label(bf, text="Start:").pack(side='left', padx=(5, 2))
+        ttk.Entry(bf, textvariable=self.v_x_breaks[0][0], width=10).pack(side='left', padx=2)
+        ttk.Label(bf, text="End:").pack(side='left', padx=(10, 2))
+        ttk.Entry(bf, textvariable=self.v_x_breaks[0][1], width=10).pack(side='left', padx=2)
+
+        # ============================================
+        # Button frame at bottom
+        # ============================================
+        btn_container = ttk.Frame(main_container)
+        btn_container.pack(side='bottom', fill='x', pady=10, padx=10)
         btn_width = 12
         ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
             side='left', expand=True, fill='x', padx=2)
@@ -1616,6 +1664,95 @@ class InteractivePlotter:
         # Not recognized
         return None
 
+    # --- AXIS BREAK HELPERS ---
+
+    @staticmethod
+    def _parse_breaks(break_list):
+        """Parse a list of (start_var, end_var) tuples into sorted (start, end) pairs.
+        Returns list of (start, end) tuples sorted by start, with gaps > 0."""
+        breaks = []
+        for s_var, e_var in break_list:
+            try:
+                s = float(s_var.get())
+                e = float(e_var.get())
+                if s < e:
+                    breaks.append((s, e))
+            except (ValueError, TypeError):
+                pass
+        breaks.sort(key=lambda x: x[0])
+        # Merge overlapping breaks
+        merged = []
+        for s, e in breaks:
+            if merged and s <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+            else:
+                merged.append((s, e))
+        return merged
+
+    @staticmethod
+    def _transform_data(data, breaks):
+        """Transform data by subtracting cumulative break gaps.
+        
+        Args:
+            data: numpy array of values
+            breaks: sorted list of (start, end) tuples
+            
+        Returns:
+            Transformed data array where gaps are collapsed.
+            Points inside breaks are set to NaN so they are NOT drawn.
+        """
+        result = data.astype(float).copy()
+        for s, e in breaks:
+            gap = e - s
+            # Use ORIGINAL data for masks to avoid incorrectly NaN'ing shifted values
+            inside_original = (data >= s) & (data <= e)
+            above_original = data > e
+            result[inside_original] = np.nan
+            result[above_original] -= gap
+        return result
+
+    @staticmethod
+    def _make_break_formatter(original_breaks):
+        """Create a FuncFormatter that maps display values back to original values.
+        
+        The formatter reverses the break transformation for tick labels.
+        """
+        def formatter(x, pos):
+            val = x
+            # Reverse: add back gaps for each break
+            for s, e in original_breaks:
+                gap = e - s
+                if val >= s:
+                    val += gap
+                # Handle points that were clipped to break start
+            return f'{val:.4g}'
+        return formatter
+
+    @staticmethod
+    def _draw_break_indicators(ax, breaks, axis='y'):
+        """Draw Origin-style axis break marks — two small diagonal slashes on the spine."""
+        for s_disp, e_disp in breaks:
+            mid = (s_disp + e_disp) / 2.0
+            if axis == 'y':
+                span = abs(ax.get_ylim()[1] - ax.get_ylim()[0]) or 1.0
+                d = span * 0.01  # half-height of slash
+                offset = span * 0.005  # vertical offset between the two slashes
+                # Draw two parallel slashes on left and right spine
+                for sx in [0.0, 1.0]:
+                    for dy in [-offset, offset]:
+                        ax.plot([sx - 0.010, sx + 0.010], [mid + dy - d, mid + dy + d],
+                                transform=ax.get_yaxis_transform(),
+                                color='k', clip_on=False, linewidth=0.8, zorder=10)
+            else:
+                span = abs(ax.get_xlim()[1] - ax.get_xlim()[0]) or 1.0
+                d = span * 0.01
+                offset = span * 0.005
+                for sy in [0.0, 1.0]:
+                    for dx in [-offset, offset]:
+                        ax.plot([mid + dx - d, mid + dx + d], [sy - 0.010, sy + 0.010],
+                                transform=ax.get_xaxis_transform(),
+                                color='k', clip_on=False, linewidth=0.8, zorder=10)
+
     def update_plot(self):
         sel_ds = self.get_selected_datasets()
         if not sel_ds or self.current_dataset_key is None: return
@@ -1768,6 +1905,12 @@ class InteractivePlotter:
                 if ref in self.datasets and xcol in self.datasets[ref].columns:
                     X_master = self.datasets[ref][xcol].to_numpy() / xf
 
+            # --- PARSE AXIS BREAKS (universal — works with any plot type except Broken Y-Axis) ---
+            y_breaks_orig = self._parse_breaks(self.v_y_breaks)
+            x_breaks_orig = self._parse_breaks(self.v_x_breaks)
+            has_y_breaks = len(y_breaks_orig) > 0 and ptype not in ["Broken Y-Axis", "Color Map"]
+            has_x_breaks = len(x_breaks_orig) > 0 and ptype not in ["Broken Y-Axis", "Color Map"]
+
             axes_list = []
             if ptype == "Broken Y-Axis":
                 gs = gridspec.GridSpec(2, 1, height_ratios=[1, 1], hspace=0.2)
@@ -1809,6 +1952,12 @@ class InteractivePlotter:
                         Y_plot = df[yc].to_numpy() / curr_yf
                     else:
                         continue
+
+                    # --- Apply axis break transformations ---
+                    if has_x_breaks:
+                        X_plot = self._transform_data(X_plot, x_breaks_orig)
+                    if has_y_breaks:
+                        Y_plot = self._transform_data(Y_plot, y_breaks_orig)
 
                     sk = (fk, yc);
                     st = self.styles.get(sk, {})
@@ -1949,8 +2098,39 @@ class InteractivePlotter:
                                                                               fontweight='bold', fontname=font,
                                                                               color=self.title_color, rotation=title_rot)
 
-            if val(self.v_x_min): target_ax.set_xlim(left=val(self.v_x_min))
-            if val(self.v_x_max): target_ax.set_xlim(right=val(self.v_x_max))
+            # --- Apply axis break formatters and indicators ---
+            if has_y_breaks or has_x_breaks:
+                for ax_curr in axes_list:
+                    if has_y_breaks:
+                        ax_curr.yaxis.set_major_formatter(ticker.FuncFormatter(
+                            self._make_break_formatter(y_breaks_orig)))
+                        # Transform Y axis limits
+                        y_min_val = val(self.v_y_min)
+                        y_max_val = val(self.v_y_max)
+                        if y_min_val is not None:
+                            ax_curr.set_ylim(bottom=self._transform_data(np.array([y_min_val]), y_breaks_orig)[0])
+                        if y_max_val is not None:
+                            ax_curr.set_ylim(top=self._transform_data(np.array([y_max_val]), y_breaks_orig)[0])
+                    if has_x_breaks:
+                        ax_curr.xaxis.set_major_formatter(ticker.FuncFormatter(
+                            self._make_break_formatter(x_breaks_orig)))
+                        # Transform X axis limits
+                        x_min_val = val(self.v_x_min)
+                        x_max_val = val(self.v_x_max)
+                        if x_min_val is not None:
+                            ax_curr.set_xlim(left=self._transform_data(np.array([x_min_val]), x_breaks_orig)[0])
+                        if x_max_val is not None:
+                            ax_curr.set_xlim(right=self._transform_data(np.array([x_max_val]), x_breaks_orig)[0])
+                # Draw break indicators on the primary axis
+                if has_y_breaks:
+                    y_breaks_display = [(s, s) for s, e in y_breaks_orig]
+                    self._draw_break_indicators(axes_list[0], y_breaks_display, axis='y')
+                if has_x_breaks:
+                    x_breaks_display = [(s, s) for s, e in x_breaks_orig]
+                    self._draw_break_indicators(axes_list[0], x_breaks_display, axis='x')
+
+            if val(self.v_x_min) and not has_x_breaks: target_ax.set_xlim(left=val(self.v_x_min))
+            if val(self.v_x_max) and not has_x_breaks: target_ax.set_xlim(right=val(self.v_x_max))
             if ptype == "Broken Y-Axis": axes_list[0].set_xlim(target_ax.get_xlim())
 
             if ptype == "Broken Y-Axis":
@@ -2003,8 +2183,8 @@ class InteractivePlotter:
                 if use_custom_pos:
                     ylabel_text.set_position(custom_ylabel_pos)
                     ylabel_text.set_transform(self.fig.transFigure)
-                if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
-                if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
+                if val(self.v_y_min) and not has_y_breaks: self.ax.set_ylim(bottom=val(self.v_y_min))
+                if val(self.v_y_max) and not has_y_breaks: self.ax.set_ylim(top=val(self.v_y_max))
 
             # --- ALWAYS track series keys for context menu toggle (even without legend) ---
             series_keys_all = [(fk, yc) for (fk, yc, _) in series_to_plot]
@@ -2327,6 +2507,9 @@ class InteractivePlotter:
         for v in [self.v_x_min, self.v_x_max, self.v_y_min, self.v_y_max, self.v_y2_min, self.v_y2_max, self.v_z_min,
                   self.v_z_max, self.v_break_start, self.v_break_end]:
             v.set("")
+        for s_var, e_var in self.v_y_breaks + self.v_x_breaks:
+            s_var.set("")
+            e_var.set("")
         self.update_plot()
 
     def export_plot(self):
@@ -2448,6 +2631,12 @@ class InteractivePlotter:
                 "z_max": self.v_z_max.get(),
                 "break_start": self.v_break_start.get(),
                 "break_end": self.v_break_end.get(),
+            }
+            
+            # === AXIS BREAKS ===
+            session_data["axis_breaks"] = {
+                "y_breaks": [(s.get(), e.get()) for s, e in self.v_y_breaks],
+                "x_breaks": [(s.get(), e.get()) for s, e in self.v_x_breaks],
             }
             
             # === PADDING ===
@@ -2786,7 +2975,6 @@ class InteractivePlotter:
         y = self.canvas.get_tk_widget().winfo_rooty() + int(mouseevent.y)
         self._show_line_toggle_menu(x, y)
                 
-    
     def load_session(self):
         """Load a session from a JSON cache file."""
         # Determine where to look
@@ -2879,6 +3067,20 @@ class InteractivePlotter:
                 self.v_z_max.set(axis_ranges.get("z_max", ""))
                 self.v_break_start.set(axis_ranges.get("break_start", ""))
                 self.v_break_end.set(axis_ranges.get("break_end", ""))
+            
+            # === RESTORE AXIS BREAKS ===
+            axis_breaks = session_data.get("axis_breaks", {})
+            if axis_breaks:
+                y_breaks = axis_breaks.get("y_breaks", [])
+                for i, (s_var, e_var) in enumerate(self.v_y_breaks):
+                    if i < len(y_breaks):
+                        s_var.set(y_breaks[i][0] if y_breaks[i][0] else "")
+                        e_var.set(y_breaks[i][1] if y_breaks[i][1] else "")
+                x_breaks = axis_breaks.get("x_breaks", [])
+                for i, (s_var, e_var) in enumerate(self.v_x_breaks):
+                    if i < len(x_breaks):
+                        s_var.set(x_breaks[i][0] if x_breaks[i][0] else "")
+                        e_var.set(x_breaks[i][1] if x_breaks[i][1] else "")
             
             # === RESTORE PADDING ===
             padding = session_data.get("padding", {})
