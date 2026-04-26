@@ -48,7 +48,7 @@ class ScanOrganizer:
             return
 
         try:
-            df = pl.read_csv(file_path)
+            df = pl.read_csv(file_path, infer_schema_length=10000)
 
             # Route to correct logic
             if "Smart Split" in mode:
@@ -127,7 +127,7 @@ class ScanOrganizer:
         midpoint_v = (global_max_v + global_min_v) / 2
 
         # 4. Loop through Segments and Classify
-        grouped = df.group_by('segment_id')
+        grouped = df.group_by('segment_id',maintain_order=True)
 
         for seg_id, segment in grouped:
             # Skip noise (very short segments, e.g. < 3 rows)
