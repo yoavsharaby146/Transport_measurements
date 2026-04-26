@@ -2001,7 +2001,7 @@ class InteractivePlotter:
                 xi, yi = np.meshgrid(np.linspace(X.min(), X.max(), 300), np.linspace(Y.min(), Y.max(), 300))
                 zi = griddata((X, Y), Z, (xi, yi), method='cubic')
                 im = self.ax.imshow(zi, extent=(X.min(), X.max(), Y.min(), Y.max()), origin='lower', aspect='auto',
-                                    cmap='seismic', vmin=z_min_val, vmax=z_max_val)
+                                    cmap=self.v_cmap_name.get(), vmin=z_min_val, vmax=z_max_val)
                 # Track ylabel_text for custom positioning
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
