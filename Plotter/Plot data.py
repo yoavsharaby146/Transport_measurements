@@ -2078,8 +2078,9 @@ class InteractivePlotter:
                         ax_curr.tick_params(axis='y', which='minor', direction=min_y_dir if min_y_dir != "none" else "out",
                             length=min_y_len,
                             left=self.v_y_tick_left.get(), right=self.v_y_tick_right.get())
-                    if not self.y_log.get() and ptype != "Color Map":
-                        apply_format(ax_curr, 'y', self.v_y_not.get())
+                    if not self.y_log.get():
+                        if  ptype != "Color Map":
+                            apply_format(ax_curr, 'y', self.v_y_not.get())
                         if y_maj: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y_maj))
                         if y_min > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y_min))
 
@@ -2185,6 +2186,9 @@ class InteractivePlotter:
                     ylabel_text.set_transform(self.fig.transFigure)
                 if val(self.v_y_min) and not has_y_breaks: self.ax.set_ylim(bottom=val(self.v_y_min))
                 if val(self.v_y_max) and not has_y_breaks: self.ax.set_ylim(top=val(self.v_y_max))
+            elif ptype == "Color Map":
+                if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
+                if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
 
             # --- ALWAYS track series keys for context menu toggle (even without legend) ---
             series_keys_all = [(fk, yc) for (fk, yc, _) in series_to_plot]
