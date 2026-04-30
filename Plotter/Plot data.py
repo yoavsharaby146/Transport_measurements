@@ -1191,14 +1191,165 @@ class InteractivePlotter:
         return pl.read_excel(filepath)
 
     def load_files(self):
-        filenames = filedialog.askopenfilenames(
-            title="Select data file(s)",
-            filetypes=[("Data files", "*.csv *.xlsx *.xls"),
-                       ("CSV files", "*.csv"),
-                       ("Excel files", "*.xlsx *.xls"),
-                       ("All files", "*.*")])
-        if not filenames: return
-        for filepath in filenames:
+        """Open the File Loading Wizard for multi-folder file selection."""
+        self.open_load_wizard()
+
+    def open_load_wizard(self):
+        """Open a File Loading Wizard that allows selecting files from multiple folders."""
+        w, h = self.get_dialog_size(0.55, 0.75, max_width=800, max_height=650, min_width=550, min_height=450)
+        
+        wizard = tk.Toplevel(self.root)
+        wizard.title("File Loading Wizard")
+        wizard.geometry(f"{w}x{h}")
+        wizard.transient(self.root)
+        
+        # Queue of file paths to load
+        file_queue = []
+        
+        # --- TOP FRAME: Instructions ---
+        top_frame = ttk.Frame(wizard, padding=(10, 10, 10, 5))
+        top_frame.pack(fill='x')
+        ttk.Label(top_frame, text="Add files from multiple folders, then click 'Load All' to import them.",
+                  font=('Arial', 10, 'italic'), foreground='gray').pack(anchor='w')
+        
+        # --- MIDDLE FRAME: Listbox with file queue ---
+        list_frame = ttk.Frame(wizard, padding=(10, 5, 10, 5))
+        list_frame.pack(fill='both', expand=True)
+        
+        # Columns: # | Filename | Folder Path
+        cols = ("#", "Filename", "Folder")
+        tree = ttk.Treeview(list_frame, columns=cols, show='headings', selectmode='extended')
+        tree.heading("#", text="#")
+        tree.heading("Filename", text="Filename")
+        tree.heading("Folder", text="Folder Path")
+        tree.column("#", width=40, anchor='center', stretch=False)
+        tree.column("Filename", width=200, minwidth=120)
+        tree.column("Folder", width=350, minwidth=200)
+        
+        tree_sb = ttk.Scrollbar(list_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=tree_sb.set)
+        tree.pack(side='left', fill='both', expand=True)
+        tree_sb.pack(side='right', fill='y')
+        
+        # --- INFO LABEL ---
+        info_var = tk.StringVar(value="No files queued.")
+        info_label = ttk.Label(wizard, textvariable=info_var, font=('Arial', 9), foreground='gray')
+        info_label.pack(fill='x', padx=10, pady=(0, 5))
+        
+        def refresh_tree():
+            """Refresh the treeview with current file_queue."""
+            tree.delete(*tree.get_children())
+            for i, fpath in enumerate(file_queue):
+                fname = os.path.basename(fpath)
+                folder = os.path.dirname(fpath)
+                tree.insert('', 'end', values=(i + 1, fname, folder))
+            info_var.set(f"{len(file_queue)} file(s) queued.")
+        
+        def add_files():
+            """Open file dialog to add files (can be called multiple times from different folders)."""
+            new_files = filedialog.askopenfilenames(
+                parent=wizard,
+                title="Select data file(s) from any folder",
+                filetypes=[("Data files", "*.csv *.xlsx *.xls"),
+                           ("CSV files", "*.csv"),
+                           ("Excel files", "*.xlsx *.xls"),
+                           ("All files", "*.*")])
+            if new_files:
+                # Avoid duplicates
+                existing = set(file_queue)
+                for f in new_files:
+                    if f not in existing:
+                        file_queue.append(f)
+                        existing.add(f)
+                refresh_tree()
+        
+        def add_folder():
+            """Select a folder and add all CSV/Excel files from it."""
+            folder = filedialog.askdirectory(parent=wizard, title="Select folder with data files")
+            if not folder:
+                return
+            valid_ext = {'.csv', '.xlsx', '.xls'}
+            existing = set(file_queue)
+            count = 0
+            for fname in os.listdir(folder):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext in valid_ext:
+                    full_path = os.path.join(folder, fname)
+                    if full_path not in existing:
+                        file_queue.append(full_path)
+                        existing.add(full_path)
+                        count += 1
+            refresh_tree()
+            if count == 0:
+                messagebox.showinfo("No Files Found", f"No CSV or Excel files found in:\n{folder}", parent=wizard)
+        
+        def remove_selected():
+            """Remove selected files from the queue."""
+            sel = tree.selection()
+            if not sel:
+                return
+            # Get indices of selected items (sorted descending to remove safely)
+            indices = sorted([tree.index(item) for item in sel], reverse=True)
+            for idx in indices:
+                if 0 <= idx < len(file_queue):
+                    file_queue.pop(idx)
+            refresh_tree()
+        
+        def clear_all():
+            """Clear the entire file queue."""
+            file_queue.clear()
+            refresh_tree()
+        
+        def load_all():
+            """Load all queued files into the plotter."""
+            if not file_queue:
+                messagebox.showinfo("No Files", "No files queued to load. Add files first.", parent=wizard)
+                return
+            wizard.destroy()
+            self._load_files_from_list(file_queue)
+        
+        def load_selected_only():
+            """Load only the selected files from the queue."""
+            sel = tree.selection()
+            if not sel:
+                messagebox.showinfo("No Selection", "Select files in the queue to load.", parent=wizard)
+                return
+            indices = sorted([tree.index(item) for item in sel])
+            selected_paths = [file_queue[i] for i in indices if i < len(file_queue)]
+            wizard.destroy()
+            self._load_files_from_list(selected_paths)
+        
+        # --- BUTTON FRAME ---
+        btn_frame = ttk.Frame(wizard, padding=(10, 5, 10, 10))
+        btn_frame.pack(fill='x')
+        
+        # Row 1: Add/Remove buttons
+        row1 = ttk.Frame(btn_frame)
+        row1.pack(fill='x', pady=(0, 5))
+        ttk.Button(row1, text="📁 Add Files", command=add_files, width=14).pack(side='left', padx=2)
+        ttk.Button(row1, text="📂 Add Folder", command=add_folder, width=14).pack(side='left', padx=2)
+        ttk.Button(row1, text="Remove Selected", command=remove_selected, width=14).pack(side='left', padx=2)
+        ttk.Button(row1, text="Clear All", command=clear_all, width=10).pack(side='left', padx=2)
+        
+        # Row 2: Load/Cancel buttons
+        row2 = ttk.Frame(btn_frame)
+        row2.pack(fill='x')
+        ttk.Button(row2, text="Load All", command=load_all, width=14).pack(side='left', padx=2, expand=True, fill='x')
+        ttk.Button(row2, text="Load Selected Only", command=load_selected_only, width=16).pack(side='left', padx=2, expand=True, fill='x')
+        ttk.Button(row2, text="Cancel", command=wizard.destroy, width=10).pack(side='left', padx=2, expand=True, fill='x')
+        
+        # Enable mousewheel scrolling on the tree
+        def on_mousewheel(event):
+            tree.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        tree.bind("<MouseWheel>", on_mousewheel)
+        wizard.protocol("WM_DELETE_WINDOW", lambda: (tree.unbind("<MouseWheel>"), wizard.destroy()))
+
+    def _load_files_from_list(self, filepaths):
+        """Load a list of file paths into the datasets dictionary."""
+        if not filepaths:
+            return
+        errors = []
+        for filepath in filepaths:
             try:
                 ext = os.path.splitext(filepath)[1].lower()
                 if ext in ('.xlsx', '.xls'):
@@ -1208,7 +1359,9 @@ class InteractivePlotter:
                 filename = os.path.basename(filepath)
                 self.datasets[filename] = df
             except Exception as e:
-                messagebox.showerror("Error", str(e))
+                errors.append(f"{os.path.basename(filepath)}: {e}")
+        if errors:
+            messagebox.showerror("Load Errors", "Errors loading files:\n\n" + "\n".join(errors))
         self.refresh_dataset_list(new_load=True)
 
     def unload_files(self):
