@@ -118,7 +118,7 @@ class InteractivePlotter:
         
         # --- LEGEND SETTINGS ---
         self.legend_columns = tk.StringVar(value="1")
-        self.legend_draggable = tk.BooleanVar(value=True)
+        self.legend_draggable = tk.BooleanVar(value=False)
         self.legend_position = tk.StringVar(value="Best")
         
         # --- LABEL POSITION SETTINGS (figure coordinates 0-1) ---
@@ -210,7 +210,7 @@ class InteractivePlotter:
         self.v_y_tick_right = tk.BooleanVar(value=False)
 
         # --- GRID SETTINGS ---
-        self.show_major_grid = tk.BooleanVar(value=True)
+        self.show_major_grid = tk.BooleanVar(value=False)
         self.show_minor_grid = tk.BooleanVar(value=False)
         self.v_grid_alpha = tk.StringVar(value="0.3")
         self.v_grid_linestyle = tk.StringVar(value="-")
@@ -357,8 +357,16 @@ class InteractivePlotter:
         c_map = ttk.Combobox(control_frame, textvariable=self.v_cmap_name, values=COLORMAPS,
                              state='readonly', width=12)
         c_map.grid(row=row, column=2, columnspan=2, sticky='ew', padx=2)
-        c_map.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
+        c_map.bind('<<ComboboxSelected>>', lambda e: (self._draw_cmap_preview(), self.update_plot()))
         row += 1
+
+        # --- Colormap Preview Bar (labels drawn inside canvas to avoid clipping on small screens) ---
+        self.cmap_preview_canvas = tk.Canvas(control_frame, height=20, highlightthickness=1, 
+                                              highlightbackground='#cccccc')
+        self.cmap_preview_canvas.grid(row=row, column=0, columnspan=4, sticky='ew', pady=(0, 5), padx=2)
+        self._cmap_preview_photo = None  # Keep reference to prevent garbage collection
+        # Bind resize to redraw the preview when control panel width changes
+        self.cmap_preview_canvas.bind('<Configure>', lambda e: self._draw_cmap_preview())
         row += 1
 
         ttk.Label(control_frame, text="X Axis:").grid(row=row, column=0, sticky='w')
@@ -462,6 +470,63 @@ class InteractivePlotter:
         
         # Bind right-click on canvas for context menu (works even when no legend is visible)
         self.canvas.mpl_connect('button_press_event', self._on_canvas_right_click)
+        
+        # Draw initial colormap preview
+        self.root.after(100, self._draw_cmap_preview)
+
+    def _draw_cmap_preview(self):
+        """Render the currently selected colormap as a horizontal gradient bar in the control panel."""
+        try:
+            canvas = self.cmap_preview_canvas
+            # Wait until the canvas is displayed to get its actual width
+            canvas.update_idletasks()
+            w = canvas.winfo_width()
+            h = canvas.winfo_height()
+            if w < 2 or h < 2:
+                # Canvas not yet rendered, retry after a short delay
+                self.root.after(100, self._draw_cmap_preview)
+                return
+            
+            # Get the colormap
+            cmap_name = self.v_cmap_name.get()
+            try:
+                cmap = plt.get_cmap(cmap_name)
+            except ValueError:
+                return
+            
+            # Build the gradient image pixel by pixel (full canvas width)
+            from tkinter import PhotoImage
+            img = PhotoImage(width=w, height=h)
+            
+            # Sample the colormap across the width
+            row_colors = []
+            for x in range(w):
+                val = x / max(w - 1, 1)
+                r, g, b, _ = cmap(val)
+                hex_color = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+                row_colors.append(hex_color)
+            
+            # Build a single row string and replicate for all rows
+            row_str = "{" + " ".join(row_colors) + "}"
+            img.put(" ".join([row_str] * h))
+            
+            # Keep reference to prevent garbage collection
+            self._cmap_preview_photo = img
+            
+            # Draw on canvas — full-width gradient with Min/Max text overlaid
+            canvas.delete("all")
+            canvas.create_image(0, 0, anchor='nw', image=img)
+            # Pick contrasting text color based on edge colors
+            r0, g0, b0, _ = cmap(0.0)
+            r1, g1, b1, _ = cmap(1.0)
+            lum0 = 0.299 * r0 + 0.587 * g0 + 0.114 * b0
+            lum1 = 0.299 * r1 + 0.587 * g1 + 0.114 * b1
+            col0 = 'white' if lum0 < 0.5 else 'black'
+            col1 = 'white' if lum1 < 0.5 else 'black'
+            canvas.create_text(4, h // 2, text="Min", anchor='w', font=('Arial', 7, 'bold'), fill=col0)
+            canvas.create_text(w - 4, h // 2, text="Max", anchor='e', font=('Arial', 7, 'bold'), fill=col1)
+        except Exception as e:
+            print(f"Colormap preview error: {e}")
 
     # --- HELPER METHODS FOR RESPONSIVE DESIGN ---
     
