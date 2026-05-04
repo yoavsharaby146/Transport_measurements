@@ -59,7 +59,7 @@ COLORMAPS = [
 class InteractivePlotter:
     def __init__(self, root):
         self.root = root
-        self.root.title("Interactive CSV Plotter (Fixed & Enhanced)")
+        self.root.title("Interactive  Plotter")
 
         # --- DYNAMIC WINDOW SIZING ---
         try:
@@ -287,7 +287,7 @@ class InteractivePlotter:
         ttk.Label(control_frame, text="DATA FILES", font=('Arial', 10, 'bold')).grid(row=row, column=0, columnspan=4,
                                                                                      sticky='w', pady=(0, 5))
         row += 1
-        ttk.Button(control_frame, text="Load Data File(s)", command=self.load_files).grid(row=row, column=0,
+        ttk.Button(control_frame, text="Load Data File", command=self.load_files).grid(row=row, column=0,
                                                                                           columnspan=4, sticky='ew',
                                                                                           pady=5)
         row += 1
@@ -463,7 +463,7 @@ class InteractivePlotter:
         # Then pack canvas with expand - this ensures toolbar stays visible
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
-        self.ax.text(0.5, 0.5, 'Load data file(s) to begin', ha='center', va='center', fontsize=16, color='gray')
+        self.ax.text(0.5, 0.5, 'Load data file to begin', ha='center', va='center', fontsize=16, color='gray')
         self.ax.set_xticks([]);
         self.ax.set_yticks([])
         self.canvas.draw()
@@ -1393,7 +1393,7 @@ class InteractivePlotter:
         row1.pack(fill='x', pady=(0, 5))
         ttk.Button(row1, text="📁 Add Files", command=add_files, width=14).pack(side='left', padx=2)
         ttk.Button(row1, text="📂 Add Folder", command=add_folder, width=14).pack(side='left', padx=2)
-        ttk.Button(row1, text="Remove Selected", command=remove_selected, width=14).pack(side='left', padx=2)
+        ttk.Button(row1, text="Remove Selected", command=remove_selected, width=16).pack(side='left', padx=2)
         ttk.Button(row1, text="Clear All", command=clear_all, width=10).pack(side='left', padx=2)
         
         # Row 2: Load/Cancel buttons
@@ -3013,7 +3013,7 @@ class InteractivePlotter:
         # Load buttons at top
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(fill='x', pady=(0, 10))
-        ttk.Button(btn_frame, text="Load Data File(s)", command=self.load_files).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="Load Data File", command=self.load_files).pack(side='left', padx=2)
         ttk.Button(btn_frame, text="Unload Selected", command=self.unload_files).pack(side='left', padx=2)
         ttk.Button(btn_frame, text="Refresh", command=lambda: self.refresh_dataset_window_list()).pack(side='left', padx=2)
         
