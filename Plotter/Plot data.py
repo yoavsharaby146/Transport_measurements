@@ -340,7 +340,7 @@ class InteractivePlotter:
         row += 1
         ttk.Label(control_frame, text="Plot Type:").grid(row=row, column=0, columnspan=2, sticky='w')
         self.plot_type = ttk.Combobox(control_frame,
-                                      values=["Line", "Scatter", "Broken Y-Axis", "Color Map", "Dual Y-Axis"],
+                                      values=["Line", "Scatter", "Broken Y-Axis","Color Map", "Dual Y-Axis"],
                                       state='readonly', width=20)
         self.plot_type.current(0)
         self.plot_type.grid(row=row, column=2, columnspan=2, sticky='ew', pady=5)

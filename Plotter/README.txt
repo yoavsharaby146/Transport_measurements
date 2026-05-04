@@ -24,7 +24,8 @@ RUNNING
     python "Plot data.py"
 
 The main window opens with a control panel on the left and a plot area on
-the right.
+the right. The window automatically sizes to 85% of your screen resolution
+(max 1400x980) and centers on screen.
 
 
 ================================================================================
@@ -32,10 +33,17 @@ QUICK START
 ================================================================================
 
 1. LOAD DATA
-   - Click "Load Data File(s)" to select one or more CSV or Excel files.
+   - Click "Load Data File" to open the File Loading Wizard.
+   - The wizard supports adding files from MULTIPLE folders in one session:
+       * "Add Files" — browse and select CSV/Excel files from any folder.
+       * "Add Folder" — batch-import all CSV/Excel files from a directory.
+       * Remove or clear queued files before loading.
+   - Click "Load All" to import the queued files, or select specific files
+     and click "Load Selected Only".
    - Files appear in the dataset listbox. Click to select (Ctrl+click for
      multiple).
-   - "Dataset Manager" opens a larger window for managing loaded files.
+   - "Dataset Manager" opens a larger window for managing loaded files
+     (shows row/column counts, syncs selection with main list).
    - "Unload" removes selected files from the list.
 
 2. SELECT COLUMNS
@@ -70,10 +78,13 @@ CONTROL PANEL REFERENCE
 ================================================================================
 
 DATA FILES section:
-  Load Data File(s)   Open file dialog (supports CSV, XLSX, XLS; multi-select).
+  Load Data File      Opens the File Loading Wizard (multi-folder, batch import
+                       of CSV, XLSX, XLS files). Add files from different
+                       folders, review the queue, then load all or selected.
   Dataset list        Click to select active datasets.
   Unload              Remove selected datasets.
-  Dataset Manager     Opens a separate management window.
+  Dataset Manager     Opens a separate management window with file details
+                       (row/column counts) and synced selection.
 
 SESSION section:
   Save Session        Saves ALL data + settings to a JSON file.
@@ -83,19 +94,26 @@ SESSION section:
 PLOT SETTINGS section:
   Plot Type           Line / Scatter / Broken Y-Axis / Color Map / Dual Y-Axis.
   Color Mode          "Cycle" (default colors) or "Gradient" (colormap spread).
-  Colormap dropdown   Select a matplotlib colormap (viridis, plasma, etc.).
+  Colormap dropdown   Select from 80+ matplotlib colormaps (viridis, plasma,
+                       jet, etc.).
+  Colormap Preview    A horizontal gradient bar below the dropdown shows the
+                       selected colormap with Min/Max labels (auto-updates on
+                       selection and resize).
   X Axis / Y Axis     Column selectors for axes.
   Z Axis (Color)      Column selector for Color Map Z values.
   X/Y Log Scale       Toggle logarithmic axis scaling.
 
 CONFIGURATION section:
-  Ranges & Data       Axis limits, data divisors, broken-axis settings.
-  Styles              Per-series color, line width, line style, legend name.
+  Ranges & Data       Axis limits, data divisors, Y and X axis breaks
+                       (tabbed dialog).
+  Styles              Per-series color, line width, line style, legend name,
+                       show/hide in legend.
   Labels & Titles     Title, axis labels, legend text, colors, positions,
-                       rotation, transparency (tabbed dialog).
+                       rotation, legend layout, secondary top X-axis,
+                       transparency (7-tab dialog).
   Ticks & Fonts       Tick spacing, notation, direction, font settings,
-                       grid control (tabbed dialog).
-  Legend Order         Drag-and-drop reorder of legend entries.
+                       grid control (4-tab dialog).
+  Legend Order         Reorder legend entries with Top/Up/Down/Bottom buttons.
 
 ACTION BUTTONS:
   Update Plot         Re-render the plot with current settings.
@@ -107,37 +125,61 @@ ACTION BUTTONS:
 CONFIGURATION DIALOGS
 ================================================================================
 
-RANGES & DATA
-  Divide X/Y/Y2/Z    Divide data by a constant (e.g., "1000" to convert
+RANGES & DATA (2 tabs: Ranges & Transform, Axis Breaks)
+
+  Tab: Ranges & Transform
+    Divide X/Y/Y2/Z  Divide data by a constant (e.g., "1000" to convert
                        mA to A). Y2 applies to the right axis in Dual Y-Axis.
-  Axis Ranges         Min/Max for X, Y, Z axes. Leave blank for auto.
-  Broken Axis         Break Start/End values for the Y-axis gap.
-  Y2 Ranges           Min/Max for the right Y axis (Dual Y-Axis mode).
-  Reset Ranges        Clear all range fields.
+    Axis Ranges       Min/Max for X, Y, Z axes. Leave blank for auto.
+    Y2 Ranges         Min/Max for the right Y axis (Dual Y-Axis mode).
+
+  Tab: Axis Breaks
+    Y Axis Break      Omit a range from the Y axis (Start/End). Works with
+                       Line, Scatter, and Dual Y-Axis plots. Data inside the
+                       break is hidden; data above is shifted down. A diagonal
+                       slash indicator is drawn on the spine.
+    X Axis Break      Same as Y break, but for the X axis. Works with Line,
+                       Scatter, and Dual Y-Axis plots.
+
+  Reset Ranges        Clear all range fields (both tabs).
 
 STYLES
-  A table showing each series (file + column) with controls for:
-  - Color      Click to pick a custom color. "Reset" reverts to default.
+  A scrollable table showing each series (file + column) with controls for:
+  - Color      Click to pick a custom color. "Reset" reverts to default
+               (uses Cycle or Gradient color).
   - Width      Line width (default: 2.0 for lines, 20 for scatter).
   - Type       Line style: solid (-), dashed (--), dash-dot (-.),
                dotted (:), or None.
   - Legend     Custom legend label for this series.
   - In Leg.    Toggle whether this series appears in the legend.
 
-LABELS & TITLES (6 tabs)
+LABELS & TITLES (7 tabs)
   Text Content    Title, axis labels, legend CSV, show legend toggle, padding.
   Colors          Label colors, tick colors, background colors, legend colors.
   Positions       Custom X/Y positions for each label (figure coordinates 0-1).
+                   Enable with "Use Custom Label Positions" checkbox.
+                   Coordinates: (0,0) = bottom-left, (1,1) = top-right.
   Rotation        Custom rotation angles for labels (degrees).
-  Legend          Column count, position, draggable toggle.
+                   Enable with "Use Custom Text Rotation" checkbox.
+                   Default: Title=0°, X label=0°, Y label=90° (vertical).
+  Legend          Column count (1-8), position (Best/Upper Right/etc.),
+                   draggable toggle. Positions include "Outside Right" and
+                   "Outside Bottom" for external placement.
+  Secondary X     Enable a secondary top X-axis with custom transformation.
+                   Forward formula maps bottom-axis values to top-axis values.
+                   Inverse formula is auto-derived for common transforms
+                   (x*K, x/K, x+K, x-K, 1/x, x**K, np.sqrt, np.log10, etc.).
+                   Supports numpy functions: np.sqrt(x), np.log10(x), x**2.
+                   Set top axis label, label color, tick size, major/minor
+                   tick settings.
   Transparency    Alpha values for plot background, figure background,
                    legend fill (0.0 = invisible, 1.0 = opaque).
 
 TICKS & FONTS (4 tabs)
   Tick Control    Major tick step, minor divisions, padding per axis.
                    Notation: Scientific / Plain / Engineering.
-  Font Settings   Font family (autocomplete dropdown), sizes for title,
-                   labels, legend, ticks.
+  Font Settings   Font family (autocomplete dropdown — type to filter), sizes
+                   for title, labels, legend, ticks.
   Tick Appearance Tick direction (in/out/inout/none) per axis for major
                    and minor ticks. Tick length. Per-side visibility
                    (bottom/top for X, left/right for Y).
@@ -150,9 +192,10 @@ INTERACTIVE FEATURES
 
 LEGEND TOGGLE
   - Left-click a legend entry to hide/show that line.
-  - Right-click the legend or the plot area for a context menu with
-    checkboxes for every series.
-  - "Show All Lines" button restores all hidden lines.
+  - Right-click anywhere on the plot canvas for a context menu listing all
+    series with checkmark (✓/✗) toggle. The menu stays open after each toggle.
+  - Right-click the legend for the same context menu.
+  - "Show All Lines" button in the control panel restores all hidden lines.
 
 DRAGGABLE LEGEND
   Enable in Labels & Titles > Legend tab. Click and drag the legend to
@@ -170,11 +213,16 @@ SESSION SAVE / LOAD
 SAVE SESSION
   Exports everything to a single JSON file:
   - All loaded datasets (data + column names)
-  - Per-series styles (colors, widths, legend labels)
-  - Legend order
+  - Per-series styles (colors, widths, legend labels, show/hide in legend)
+  - Legend order and legend settings (columns, position, draggable)
   - All axis ranges, tick settings, font settings
+  - Tick appearance (direction, length) and per-side visibility
+  - Grid settings (major/minor, alpha, style, width)
   - Title/label text, colors, positions, rotations
-  - Plot type, color mode, log scale settings
+  - Secondary X-axis settings (formulas, label, tick settings)
+  - Axis breaks (Y and X)
+  - Transparency (alpha) settings
+  - Plot type, color mode, colormap, log scale settings
   - Column selections (X, Y, Y1, Y2, Z)
   - Which datasets were selected
 
@@ -220,12 +268,21 @@ TIPS
 ================================================================================
 
 - Multiple Y columns: Select several in the Y-axis listbox (Ctrl+click).
-- Cross-file X axis: Check "Use X from Ref. File" to overlay datasets
-  with different X values onto a common axis.
+- Cross-file X axis: Check "Use X from Ref. File (Cross-File)" to overlay
+  datasets with different X values onto a common axis.
 - Origin Pro-style ticks: Set tick direction to "out" and adjust length
   in Ticks & Fonts > Tick Appearance.
 - Export at 300 DPI for publication-quality figures.
 - Use "Show All Columns (Union)" when loading files with different column
   names to see all available columns.
+- File Loading Wizard: Add files from multiple folders before loading.
+  Use "Add Folder" to batch-import all CSV/Excel files from a directory.
+- Axis Breaks: Omit a data range on X or Y axes (works with Line, Scatter,
+  Dual Y-Axis). The plotter collapses the gap and draws slash indicators.
+- Secondary Top X-Axis: Display a transformed scale on top (e.g., convert
+  wavelength to energy). The inverse formula is auto-derived for common
+  transforms.
+- Right-click context menu: Toggle individual line visibility without
+  opening any dialog. The menu stays open after each click.
 
 ================================================================================
