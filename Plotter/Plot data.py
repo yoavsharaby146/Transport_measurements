@@ -17,7 +17,6 @@ matplotlib.use("TkAgg")
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-import matplotlib.gridspec as gridspec
 from matplotlib import cm
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -340,7 +339,7 @@ class InteractivePlotter:
         row += 1
         ttk.Label(control_frame, text="Plot Type:").grid(row=row, column=0, columnspan=2, sticky='w')
         self.plot_type = ttk.Combobox(control_frame,
-                                      values=["Line", "Scatter", "Broken Y-Axis","Color Map", "Dual Y-Axis"],
+                                      values=["Line", "Scatter", "Color Map", "Dual Y-Axis"],
                                       state='readonly', width=20)
         self.plot_type.current(0)
         self.plot_type.grid(row=row, column=2, columnspan=2, sticky='ew', pady=5)
@@ -1515,12 +1514,9 @@ class InteractivePlotter:
         pairs_to_style = []
         if ptype == "Dual Y-Axis":
             y1, y2 = self.y1_combo.get(), self.y2_combo.get()
-            if len(sel_ds) > 1:
-                if y1: pairs_to_style.append((sel_ds[0][0], y1))
-                if y2: pairs_to_style.append((sel_ds[1][0], y2))
-            elif len(sel_ds) == 1:
-                if y1: pairs_to_style.append((sel_ds[0][0], y1))
-                if y2: pairs_to_style.append((sel_ds[0][0], y2))
+            for fk, _ in sel_ds:
+                if y1: pairs_to_style.append((fk, y1))
+                if y2: pairs_to_style.append((fk, y2))
         else:
             y_idxs = self.y_listbox.curselection()
             y_cols = [self.y_listbox.get(i) for i in y_idxs]
@@ -1646,12 +1642,9 @@ class InteractivePlotter:
         pairs_to_order = []
         if ptype == "Dual Y-Axis":
             y1, y2 = self.y1_combo.get(), self.y2_combo.get()
-            if len(sel_ds) > 1:
-                if y1: pairs_to_order.append((sel_ds[0][0], y1))
-                if y2: pairs_to_order.append((sel_ds[1][0], y2))
-            elif len(sel_ds) == 1:
-                if y1: pairs_to_order.append((sel_ds[0][0], y1))
-                if y2: pairs_to_order.append((sel_ds[0][0], y2))
+            for fk, _ in sel_ds:
+                if y1: pairs_to_order.append((fk, y1))
+                if y2: pairs_to_order.append((fk, y2))
         else:
             y_idxs = self.y_listbox.curselection()
             y_cols = [self.y_listbox.get(i) for i in y_idxs]
@@ -2068,13 +2061,11 @@ class InteractivePlotter:
             series_to_plot = []
             for fk, df in sel_ds:
                 if ptype == "Dual Y-Axis":
-                    if len(sel_ds) > 1:
-                        if fk == sel_ds[0][0] and ycols[0] in df.columns: series_to_plot.append((fk, ycols[0], 0))
-                        if fk == sel_ds[1][0] and len(ycols) > 1 and ycols[1] in df.columns: series_to_plot.append(
-                            (fk, ycols[1], 1))
-                    else:
-                        for i, yc in enumerate(ycols):
-                            if yc in df.columns: series_to_plot.append((fk, yc, i))
+                    # Each selected file contributes Y1 to left axis and Y2 to right axis
+                    if ycols and ycols[0] and ycols[0] in df.columns:
+                        series_to_plot.append((fk, ycols[0], 0))
+                    if len(ycols) > 1 and ycols[1] and ycols[1] in df.columns:
+                        series_to_plot.append((fk, ycols[1], 1))
                 else:
                     for yc in ycols:
                         if yc in df.columns: series_to_plot.append((fk, yc, 0))
@@ -2123,20 +2114,14 @@ class InteractivePlotter:
                 if ref in self.datasets and xcol in self.datasets[ref].columns:
                     X_master = self.datasets[ref][xcol].to_numpy() / xf
 
-            # --- PARSE AXIS BREAKS (universal — works with any plot type except Broken Y-Axis) ---
+            # --- PARSE AXIS BREAKS (universal — works with Line, Scatter, and Dual Y-Axis) ---
             y_breaks_orig = self._parse_breaks(self.v_y_breaks)
             x_breaks_orig = self._parse_breaks(self.v_x_breaks)
-            has_y_breaks = len(y_breaks_orig) > 0 and ptype not in ["Broken Y-Axis", "Color Map"]
-            has_x_breaks = len(x_breaks_orig) > 0 and ptype not in ["Broken Y-Axis", "Color Map"]
+            has_y_breaks = len(y_breaks_orig) > 0 and ptype != "Color Map"
+            has_x_breaks = len(x_breaks_orig) > 0 and ptype != "Color Map"
 
             axes_list = []
-            if ptype == "Broken Y-Axis":
-                gs = gridspec.GridSpec(2, 1, height_ratios=[1, 1], hspace=0.2)
-                ax1 = self.fig.add_subplot(gs[0]);
-                ax2 = self.fig.add_subplot(gs[1], sharex=ax1)
-                self.ax = ax1;
-                axes_list = [ax1, ax2]
-            elif ptype == "Dual Y-Axis":
+            if ptype == "Dual Y-Axis":
                 self.ax = self.fig.add_subplot(111);
                 ax_right = self.ax.twinx()
                 axes_list = [self.ax, ax_right]
@@ -2157,7 +2142,7 @@ class InteractivePlotter:
             y2label_text = None
             zlabel_text = None
 
-            if ptype in ["Line", "Scatter", "Broken Y-Axis", "Dual Y-Axis"]:
+            if ptype in ["Line", "Scatter", "Dual Y-Axis"]:
                 for (fk, yc, ax_idx) in series_to_plot:
                     df = self.datasets[fk]
                     curr_yf = yf if ax_idx == 0 else y2f
@@ -2191,7 +2176,7 @@ class InteractivePlotter:
                     else:
                         lbl = f"{fk}: {yc}"
 
-                    target_axes = axes_list if ptype == "Broken Y-Axis" else [axes_list[ax_idx]]
+                    target_axes = [axes_list[ax_idx]]
 
                     # Track all line objects for this series (for visibility toggling)
                     series_lines = []
@@ -2302,17 +2287,16 @@ class InteractivePlotter:
                         if y_maj: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y_maj))
                         if y_min > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y_min))
 
-            target_ax = axes_list[-1] if ptype == "Broken Y-Axis" else self.ax
+            target_ax = self.ax
             if self.x_log.get() and ptype != "Color Map":
                 target_ax.set_xscale('log')
-                if ptype == "Broken Y-Axis": axes_list[0].set_xscale('log')
 
             # Set xlabel with rotation
             xlabel_text = target_ax.set_xlabel(self.v_xlabel.get() or xcol, fontsize=l_sz, labelpad=x_lab_pad, fontname=font,
                                  color=self.xlabel_color, rotation=xlabel_rot)
             
             # Set title with rotation
-            title_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
+            title_ax = self.ax
             title_text = title_ax.set_title(self.v_title.get(), fontsize=t_sz,
                                                                               fontweight='bold', fontname=font,
                                                                               color=self.title_color, rotation=title_rot)
@@ -2350,32 +2334,8 @@ class InteractivePlotter:
 
             if val(self.v_x_min) and not has_x_breaks: target_ax.set_xlim(left=val(self.v_x_min))
             if val(self.v_x_max) and not has_x_breaks: target_ax.set_xlim(right=val(self.v_x_max))
-            if ptype == "Broken Y-Axis": axes_list[0].set_xlim(target_ax.get_xlim())
 
-            if ptype == "Broken Y-Axis":
-                b_s, b_e = val(self.v_break_start), val(self.v_break_end)
-                if b_s and b_e: axes_list[0].set_ylim(bottom=b_e); axes_list[1].set_ylim(top=b_s)
-                if val(self.v_y_max): axes_list[0].set_ylim(top=val(self.v_y_max))
-                if val(self.v_y_min): axes_list[1].set_ylim(bottom=val(self.v_y_min))
-                axes_list[0].spines['bottom'].set_visible(False);
-                axes_list[1].spines['top'].set_visible(False)
-                axes_list[0].xaxis.tick_top();
-                axes_list[0].tick_params(labeltop=False);
-                axes_list[1].xaxis.tick_bottom()
-                d = .015;
-                kw = dict(transform=axes_list[0].transAxes, color='k', clip_on=False)
-                axes_list[0].plot((-d, +d), (-d, +d), **kw);
-                axes_list[0].plot((1 - d, 1 + d), (-d, +d), **kw)
-                kw.update(transform=axes_list[1].transAxes)
-                axes_list[1].plot((-d, +d), (1 - d, 1 + d), **kw);
-                axes_list[1].plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
-                # Set Y label for broken axis - centered between the two subplots
-                ylabel_text = self.fig.supylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, 
-                                   x=0.04, y=0.5, fontname=font, color=self.ylabel_color)
-                if use_custom_pos:
-                    ylabel_text.set_position(custom_ylabel_pos)
-                    ylabel_text.set_transform(self.fig.transFigure)
-            elif ptype == "Dual Y-Axis":
+            if ptype == "Dual Y-Axis":
                 # Set Y1 (left axis) label with rotation
                 y1_label = self.v_ylabel.get() or (ycols[0] if ycols else "Y1")
                 ylabel_text = self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
@@ -2522,7 +2482,7 @@ class InteractivePlotter:
                     self.current_lines = lines
                     
                     # Create legend
-                    legend_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
+                    legend_ax = self.ax
                     legend = legend_ax.legend(lines, labels, loc=loc, ncol=ncol,
                                               bbox_to_anchor=bbox_to_anchor,
                                               prop={'size': leg_sz, 'family': font})
@@ -2559,7 +2519,7 @@ class InteractivePlotter:
                     a.grid(False, which='minor')
 
             # --- SECONDARY TOP X-AXIS ---
-            if self.enable_secondary_x.get() and ptype != "Broken Y-Axis":
+            if self.enable_secondary_x.get():
                 try:
                     fwd_formula = self.v_sec_x_forward.get().strip()
                     
@@ -3389,7 +3349,7 @@ class InteractivePlotter:
             plot_settings = session_data.get("plot_settings", {})
             if plot_settings:
                 plot_type = plot_settings.get("plot_type", "Line")
-                if plot_type in ["Line", "Scatter", "Broken Y-Axis", "Color Map", "Dual Y-Axis"]:
+                if plot_type in ["Line", "Scatter", "Color Map", "Dual Y-Axis"]:
                     self.plot_type.set(plot_type)
                 self.v_color_mode.set(plot_settings.get("color_mode", "Cycle"))
                 self.v_cmap_name.set(plot_settings.get("colormap", "viridis"))
@@ -3423,7 +3383,7 @@ class InteractivePlotter:
                 if z_col and z_col in self.z_combo['values']:
                     self.z_combo.set(z_col)
                 
-                # Restore Y listbox selections (for Line, Scatter, Broken Y-Axis, Color Map plots)
+                # Restore Y listbox selections
                 y_columns = axis_selections.get("y_column", [])
                 if y_columns:
                     self.y_listbox.selection_clear(0, tk.END)
