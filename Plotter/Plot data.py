@@ -1409,7 +1409,11 @@ class InteractivePlotter:
         wizard.protocol("WM_DELETE_WINDOW", lambda: (tree.unbind("<MouseWheel>"), wizard.destroy()))
 
     def _load_files_from_list(self, filepaths):
-        """Load a list of file paths into the datasets dictionary."""
+        """Load a list of file paths into the datasets dictionary.
+        
+        Same-name files from different folders are disambiguated by appending
+        the parent folder name, e.g. 'data.csv' and 'data.csv (folder_B)'.
+        """
         if not filepaths:
             return
         errors = []
@@ -1420,8 +1424,20 @@ class InteractivePlotter:
                     df = self._load_excel(filepath)
                 else:
                     df = self._load_csv(filepath)
+                
+                # Generate a unique key — disambiguate same-name files from different folders
                 filename = os.path.basename(filepath)
-                self.datasets[filename] = df
+                key = filename
+                if key in self.datasets:
+                    parent_folder = os.path.basename(os.path.dirname(filepath))
+                    key = f"{filename} ({parent_folder})"
+                    # If still a conflict (very rare), append counter
+                    counter = 2
+                    while key in self.datasets:
+                        key = f"{filename} ({parent_folder}_{counter})"
+                        counter += 1
+                
+                self.datasets[key] = df
             except Exception as e:
                 errors.append(f"{os.path.basename(filepath)}: {e}")
         if errors:
