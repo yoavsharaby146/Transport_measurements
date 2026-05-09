@@ -175,7 +175,12 @@ class Resistance_two_gate_mapping_measurement(Procedure):
         time.sleep(self.long_delay)
 
         for i, slow_v in enumerate(slow_range):
-            slow_gate.ramp_voltage(slow_v, 5, 0.001)
+            # To avoid voltage spikes, ramp slower for larger slow gate steps sizes.
+            #  Threshold of 50 mV is arbitrary and can be adjusted based on the specific device and requirements.
+            if self.slow_step > 50:
+                slow_gate.voltage_ramping(slow_v, 2, 0.001)
+            else:
+                slow_gate.ramp_voltage(slow_v, 5, 0.001)
             time.sleep(self.short_delay)
 
             if self.scan_mode == 'Snake':
