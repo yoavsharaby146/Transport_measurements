@@ -1,15 +1,126 @@
-import pandas as pd
+import polars as pl
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 
 
+def _ask_axis_and_threshold(df, root):
+    """Ask user to select an axis column and change threshold.
+    Returns (col_name, threshold) or (None, None) if cancelled."""
+    columns = df.columns
+    if not columns:
+        messagebox.showerror("Error", "CSV appears to be empty or has no headers.")
+        return None, None
+
+    # --- Column selection dialog ---
+    col_window = tk.Toplevel(root)
+    col_window.title("Select Axis Column")
+    col_window.geometry("320x180")
+    col_window.lift()
+
+    result = {'col': None}
+
+    tk.Label(col_window, text="Which column is the sweep axis?",
+             font=("Arial", 10)).pack(pady=10)
+    col_var = tk.StringVar()
+    col_box = ttk.Combobox(col_window, textvariable=col_var, values=columns,
+                           state="readonly", width=35)
+    col_box.current(0)
+    col_box.pack(pady=5)
+
+    def on_confirm():
+        result['col'] = col_var.get()
+        col_window.destroy()
+
+    tk.Button(col_window, text="Confirm", command=on_confirm, width=15).pack(pady=20)
+    root.wait_window(col_window)
+
+    if result['col'] is None:
+        return None, None
+
+    # --- Threshold dialog ---
+    col = result['col']
+    col_range = df[col].max() - df[col].min()
+    default_thresh = col_range * 0.01
+
+    threshold = simpledialog.askfloat(
+        "Change Threshold",
+        f"Enter change threshold for '{col}':\n"
+        f"(If |change| < this value, the axis is considered constant)\n"
+        f"Default (1% of range): {default_thresh:.6g}",
+        initialvalue=default_thresh, parent=root)
+
+    if threshold is None:
+        return None, None
+
+    return col, threshold
+
+
+def _auto_detect_blocks_by_direction(df, axis_col, threshold):
+    """Detect contiguous blocks by monitoring direction changes in axis_col.
+
+    How it works:
+    1. Compute diff of axis column
+    2. Classify each diff as +1 (increasing), -1 (decreasing), or 0 (below threshold)
+    3. Forward-fill zeros with previous real direction
+    4. Detect direction flips -> those are block boundaries
+    5. Each same-direction segment is one block
+
+    Returns a list of DataFrames, each being one contiguous block.
+    """
+    df = df.with_columns([
+        pl.col(axis_col).diff().alias("_diff")
+    ])
+
+    df = df.with_columns([
+        pl.when(pl.col("_diff") > threshold)
+        .then(1)
+        .when(pl.col("_diff") < -threshold)
+        .then(-1)
+        .otherwise(0)
+        .alias("_dir_raw")
+    ])
+
+    # Forward-fill 0s with the last known direction
+    # Replace leading 0s with the first non-zero direction found
+    df = df.with_columns([
+        pl.when(pl.col("_dir_raw") == 0)
+        .then(None)
+        .otherwise(pl.col("_dir_raw"))
+        .alias("_dir_ff")
+    ])
+
+    # Forward fill, then backward fill for any remaining nulls at the start
+    df = df.with_columns([
+        pl.col("_dir_ff").fill_null(strategy="forward").fill_null(strategy="backward").alias("_dir")
+    ])
+
+    # Detect direction changes (block boundaries)
+    df = df.with_columns([
+        (pl.col("_dir") != pl.col("_dir").shift(1))
+        .fill_null(True)
+        .cum_sum()
+        .alias("_block_id")
+    ])
+
+    # Split into blocks — keep ALL blocks (even single-row ones) to preserve row count
+    blocks = []
+    grouped = df.group_by('_block_id', maintain_order=True)
+    for block_id, block in grouped:
+        # Drop helper columns
+        clean_block = block.drop(['_diff', '_dir_raw', '_dir_ff', '_dir', '_block_id'])
+        blocks.append(clean_block)
+
+    return blocks
+
+
 def reverse_blocks():
+    """Main function: load CSV, auto-detect blocks by direction, reverse each block."""
     # 1. Setup GUI (hidden root window)
     root = tk.Tk()
     root.withdraw()
 
-    print("--- CSV ROW REVERSER ---")
+    print("--- CSV BLOCK REVERSER (Auto-Detect) ---")
     print("Please select your CSV file...")
 
     file_path = filedialog.askopenfilename(
@@ -23,58 +134,66 @@ def reverse_blocks():
 
     try:
         # 2. Read the CSV file
-        # Header is row 1 (automatically handled). Data starts at Excel Row 2 (Index 0).
-        df = pd.read_csv(file_path)
+        df = pl.read_csv(file_path, infer_schema_length=10000)
 
         total_rows = len(df)
-        period_size = 152 # Total rows per period (45 + 44)
-
         print(f"File loaded: {os.path.basename(file_path)}")
         print(f"Total rows: {total_rows}")
+        print(f"Columns: {df.columns}")
 
-        processed_chunks = []
+        # 3. Ask user for axis column and threshold
+        axis_col, threshold = _ask_axis_and_threshold(df, root)
+        if axis_col is None:
+            print("Cancelled.")
+            return
 
-        # 3. Iterate through the file in blocks of 89 rows
-        for i in range(0, total_rows, period_size):
-            # Define range for Part 1 (Excel Rows 2-46 relative to start of block)
-            # Length: 45 rows
-            start_p1 = i
-            end_p1 = i + 76
+        # 4. Auto-detect blocks by direction changes
+        blocks = _auto_detect_blocks_by_direction(df, axis_col, threshold)
 
-            # Define range for Part 2 (Excel Rows 47-90 relative to start of block)
-            # Length: 44 rows (Total 89)
-            start_p2 = end_p1
-            end_p2 = i + 152
+        if not blocks:
+            messagebox.showinfo("Info", "No sweep blocks detected.")
+            return
 
-            # Slice the parts
-            # Note: Pandas handles the last block gracefully even if it's shorter than 89
-            part1 = df.iloc[start_p1:end_p1]
-            part2 = df.iloc[start_p2:end_p2]
+        print(f"Detected {len(blocks)} blocks")
+        for i, block in enumerate(blocks):
+            start_val = block[axis_col][0]
+            end_val = block[axis_col][-1]
+            direction = "↑" if end_val > start_val else "↓"
+            print(f"  Block {i+1}: {len(block)} rows, "
+                  f"{axis_col} {start_val:.4g} → {end_val:.4g} {direction}")
 
-            # 4. REVERSE the order of rows in each part
-            part1_reversed = part1.iloc[::-1]
-            part2_reversed = part2.iloc[::-1]
+        # 5. Reverse each block independently
+        reversed_blocks = [block.reverse() for block in blocks]
 
-            # 5. Add to our list (Part 1 first, then Part 2)
-            processed_chunks.append(part1_reversed)
-            processed_chunks.append(part2_reversed)
+        # 6. Concatenate all reversed blocks (preserving block order)
+        final_df = pl.concat(reversed_blocks)
 
-        # 6. Concatenate all processed chunks
-        final_df = pd.concat(processed_chunks, ignore_index=True)
+        # 7. Validate row count
+        output_rows = len(final_df)
+        if output_rows != total_rows:
+            warning = (f"WARNING: Row count mismatch!\n"
+                       f"Original: {total_rows} rows\n"
+                       f"Output:   {output_rows} rows\n"
+                       f"Missing:  {total_rows - output_rows} rows")
+            print(warning)
+            messagebox.showwarning("Warning", warning)
 
-        # 7. Generate output filename
+        # 8. Generate output filename
         directory = os.path.dirname(file_path)
         filename = os.path.basename(file_path)
         name_no_ext = os.path.splitext(filename)[0]
 
         output_filename = os.path.join(directory, f"{name_no_ext}_reversed_blocks.csv")
 
-        # 8. Save
-        final_df.to_csv(output_filename, index=False)
+        # 9. Save
+        final_df.write_csv(output_filename)
 
         success_msg = (f"Processing Complete!\n\n"
-                       f"Original Rows: {total_rows}\n"
-                       f"Processed Rows: {len(final_df)}\n\n"
+                       f"Axis column: '{axis_col}'\n"
+                       f"Threshold: {threshold:.6g}\n"
+                       f"Blocks detected: {len(blocks)}\n"
+                       f"Original rows: {total_rows}\n"
+                       f"Output rows: {output_rows}\n\n"
                        f"Saved to:\n{output_filename}")
 
         print(success_msg)
