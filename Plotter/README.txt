@@ -32,7 +32,9 @@ QUICK START
 ================================================================================
 
 1. LOAD DATA
-   - Click "Load Data File(s)" to select one or more CSV or Excel files.
+   - Click "Load Data File" to open the File Loading Wizard.
+   - Add files from multiple folders, then click "Load All" or
+     "Load Selected Only".
    - Files appear in the dataset listbox. Click to select (Ctrl+click for
      multiple).
    - "Dataset Manager" opens a larger window for managing loaded files.
@@ -56,13 +58,12 @@ PLOT TYPES
 
 - Line            Standard line plot (default).
 - Scatter         Scatter plot with points.
-- Broken Y-Axis   Two vertically stacked subplots with a break in the Y axis.
-                   Set "Break Start" and "Break End" in Ranges & Data.
 - Color Map       2D heatmap using X, Y, Z columns with interpolation.
                    Requires exactly 1 file and 1 Y column + 1 Z column.
-- Dual Y-Axis     Left and right Y axes. Two Y columns are mapped to the
-                   two axes. If 2 files are selected, each goes to its own
-                   axis.
+- Dual Y-Axis     Left and right Y axes with independent scaling.
+                   Each selected file contributes its Y1 column to the
+                   left axis and Y2 column to the right axis.
+                   Select N files → N lines on each axis (2N total).
 
 
 ================================================================================
@@ -70,7 +71,8 @@ CONTROL PANEL REFERENCE
 ================================================================================
 
 DATA FILES section:
-  Load Data File(s)   Open file dialog (supports CSV, XLSX, XLS; multi-select).
+  Load Data File      Open the File Loading Wizard (supports CSV, XLSX, XLS;
+                       multi-folder selection).
   Dataset list        Click to select active datasets.
   Unload              Remove selected datasets.
   Dataset Manager     Opens a separate management window.
@@ -81,18 +83,19 @@ SESSION section:
   Set Cache Folder    Choose default folder for session files.
 
 PLOT SETTINGS section:
-  Plot Type           Line / Scatter / Broken Y-Axis / Color Map / Dual Y-Axis.
+  Plot Type           Line / Scatter / Color Map / Dual Y-Axis.
   Color Mode          "Cycle" (default colors) or "Gradient" (colormap spread).
   Colormap dropdown   Select a matplotlib colormap (viridis, plasma, etc.).
+                       A preview bar shows the gradient from Min to Max.
   X Axis / Y Axis     Column selectors for axes.
   Z Axis (Color)      Column selector for Color Map Z values.
   X/Y Log Scale       Toggle logarithmic axis scaling.
 
 CONFIGURATION section:
-  Ranges & Data       Axis limits, data divisors, broken-axis settings.
+  Ranges & Data       Axis limits, data divisors, axis breaks (X & Y).
   Styles              Per-series color, line width, line style, legend name.
   Labels & Titles     Title, axis labels, legend text, colors, positions,
-                       rotation, transparency (tabbed dialog).
+                       rotation, secondary X-axis, transparency (tabbed).
   Ticks & Fonts       Tick spacing, notation, direction, font settings,
                        grid control (tabbed dialog).
   Legend Order         Drag-and-drop reorder of legend entries.
@@ -107,13 +110,21 @@ ACTION BUTTONS:
 CONFIGURATION DIALOGS
 ================================================================================
 
-RANGES & DATA
-  Divide X/Y/Y2/Z    Divide data by a constant (e.g., "1000" to convert
-                       mA to A). Y2 applies to the right axis in Dual Y-Axis.
-  Axis Ranges         Min/Max for X, Y, Z axes. Leave blank for auto.
-  Broken Axis         Break Start/End values for the Y-axis gap.
-  Y2 Ranges           Min/Max for the right Y axis (Dual Y-Axis mode).
-  Reset Ranges        Clear all range fields.
+RANGES & DATA (2 tabs)
+  Tab: Ranges & Transform
+    Divide X/Y/Y2/Z    Divide data by a constant (e.g., "1000" to convert
+                         mA to A). Y2 applies to the right axis in Dual Y-Axis.
+    Axis Ranges         Min/Max for X, Y, Z axes. Leave blank for auto.
+    Y2 Ranges           Min/Max for the right Y axis (Dual Y-Axis mode).
+
+  Tab: Axis Breaks
+    Y Axis Break        Omit a range from the Y axis. Specify Start and End.
+                         Works with Line, Scatter, and Dual Y-Axis plots.
+    X Axis Break        Omit a range from the X axis. Specify Start and End.
+                         Leave blank to disable. Origin Pro-style slash
+                         indicators are drawn automatically.
+
+  Reset Ranges        Clear all range and break fields.
 
 STYLES
   A table showing each series (file + column) with controls for:
@@ -124,24 +135,33 @@ STYLES
   - Legend     Custom legend label for this series.
   - In Leg.    Toggle whether this series appears in the legend.
 
-LABELS & TITLES (6 tabs)
-  Text Content    Title, axis labels, legend CSV, show legend toggle, padding.
-  Colors          Label colors, tick colors, background colors, legend colors.
-  Positions       Custom X/Y positions for each label (figure coordinates 0-1).
-  Rotation        Custom rotation angles for labels (degrees).
-  Legend          Column count, position, draggable toggle.
-  Transparency    Alpha values for plot background, figure background,
-                   legend fill (0.0 = invisible, 1.0 = opaque).
+LABELS & TITLES (7 tabs)
+  Text Content      Title, axis labels, legend CSV, show legend toggle,
+                      label padding.
+  Colors            Label colors, tick colors, background colors, legend colors.
+  Positions         Custom X/Y positions for each label (figure coordinates
+                      0-1). Enable with "Use Custom Label Positions".
+  Rotation          Custom rotation angles for labels (degrees).
+                      Enable with "Use Custom Text Rotation".
+  Legend            Column count, position (12 options including outside
+                      right/bottom), draggable toggle.
+  Secondary X       Secondary top X-axis with transformation formulas.
+                      Supports arithmetic (x*K, x/K, x+K, x-K), powers
+                      (x**K), inverse (1/x), and numpy functions
+                      (np.sqrt, np.log10, np.exp). Inverse is auto-derived
+                      for common patterns.
+  Transparency      Alpha values for plot background, figure background,
+                      legend fill (0.0 = invisible, 1.0 = opaque).
 
 TICKS & FONTS (4 tabs)
-  Tick Control    Major tick step, minor divisions, padding per axis.
-                   Notation: Scientific / Plain / Engineering.
-  Font Settings   Font family (autocomplete dropdown), sizes for title,
-                   labels, legend, ticks.
-  Tick Appearance Tick direction (in/out/inout/none) per axis for major
-                   and minor ticks. Tick length. Per-side visibility
-                   (bottom/top for X, left/right for Y).
-  Grid Settings   Major/minor grid visibility, alpha, style, width.
+  Tick Control      Major tick step, minor divisions, padding per axis.
+                     Notation: Scientific / Plain / Engineering.
+  Font Settings     Font family (autocomplete dropdown), sizes for title,
+                     labels, legend, ticks.
+  Tick Appearance   Tick direction (in/out/inout/none) per axis for major
+                     and minor ticks. Tick length. Per-side visibility
+                     (bottom/top for X, left/right for Y).
+  Grid Settings     Major/minor grid visibility, alpha, style, width.
 
 
 ================================================================================
@@ -162,6 +182,10 @@ MATPLOTLIB TOOLBAR
   The bottom toolbar provides pan, zoom, home, forward/backward, and
   save-figure controls (standard matplotlib navigation).
 
+CONTEXT MENU
+  Right-click anywhere on the plot canvas to toggle individual series
+  visibility — even when no legend is displayed.
+
 
 ================================================================================
 SESSION SAVE / LOAD
@@ -176,11 +200,15 @@ SAVE SESSION
   - Title/label text, colors, positions, rotations
   - Plot type, color mode, log scale settings
   - Column selections (X, Y, Y1, Y2, Z)
+  - Axis breaks (X and Y)
+  - Grid settings, tick appearance, tick side visibility
+  - Secondary X-axis settings
   - Which datasets were selected
 
 LOAD SESSION
   Restores the full session from JSON. The cache folder is automatically
-  set to the directory of the loaded file.
+  set to the directory of the loaded file. Backward compatible with
+  sessions saved by older versions.
 
 
 ================================================================================
@@ -194,7 +222,24 @@ CYCLE (default)
 GRADIENT
   Distributes colors evenly across the selected colormap (e.g., viridis).
   Useful for visualizing a sequence of curves as a color progression.
-  Select from 80+ colormaps in the dropdown.
+  Select from 80+ colormaps in the dropdown. A preview bar shows the
+  gradient range.
+
+
+================================================================================
+AXIS BREAKS
+================================================================================
+
+Axis breaks allow you to omit a range of values from an axis, collapsing
+the gap so the remaining data is displayed continuously. This is useful
+when data has a large gap with no interesting values.
+
+- Works with Line, Scatter, and Dual Y-Axis plot types.
+- Available for both X and Y axes.
+- Set Start and End values in Ranges & Data > Axis Breaks tab.
+- Origin Pro-style diagonal slash indicators are drawn on the spines.
+- Data points inside the break range are hidden (NaN).
+- Tick labels automatically show the original (unbroken) values.
 
 
 ================================================================================
@@ -227,5 +272,7 @@ TIPS
 - Export at 300 DPI for publication-quality figures.
 - Use "Show All Columns (Union)" when loading files with different column
   names to see all available columns.
+- Use Axis Breaks instead of separate plot types to remove empty ranges
+  from your axes while keeping everything in one plot.
 
 ================================================================================

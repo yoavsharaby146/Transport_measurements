@@ -17,7 +17,6 @@ matplotlib.use("TkAgg")
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-import matplotlib.gridspec as gridspec
 from matplotlib import cm
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
@@ -59,7 +58,7 @@ COLORMAPS = [
 class InteractivePlotter:
     def __init__(self, root):
         self.root = root
-        self.root.title("Interactive CSV Plotter (Fixed & Enhanced)")
+        self.root.title("Interactive  Plotter")
 
         # --- DYNAMIC WINDOW SIZING ---
         try:
@@ -118,7 +117,7 @@ class InteractivePlotter:
         
         # --- LEGEND SETTINGS ---
         self.legend_columns = tk.StringVar(value="1")
-        self.legend_draggable = tk.BooleanVar(value=True)
+        self.legend_draggable = tk.BooleanVar(value=False)
         self.legend_position = tk.StringVar(value="Best")
         
         # --- LABEL POSITION SETTINGS (figure coordinates 0-1) ---
@@ -210,7 +209,7 @@ class InteractivePlotter:
         self.v_y_tick_right = tk.BooleanVar(value=False)
 
         # --- GRID SETTINGS ---
-        self.show_major_grid = tk.BooleanVar(value=True)
+        self.show_major_grid = tk.BooleanVar(value=False)
         self.show_minor_grid = tk.BooleanVar(value=False)
         self.v_grid_alpha = tk.StringVar(value="0.3")
         self.v_grid_linestyle = tk.StringVar(value="-")
@@ -287,7 +286,7 @@ class InteractivePlotter:
         ttk.Label(control_frame, text="DATA FILES", font=('Arial', 10, 'bold')).grid(row=row, column=0, columnspan=4,
                                                                                      sticky='w', pady=(0, 5))
         row += 1
-        ttk.Button(control_frame, text="Load Data File(s)", command=self.load_files).grid(row=row, column=0,
+        ttk.Button(control_frame, text="Load Data File", command=self.load_files).grid(row=row, column=0,
                                                                                           columnspan=4, sticky='ew',
                                                                                           pady=5)
         row += 1
@@ -340,7 +339,7 @@ class InteractivePlotter:
         row += 1
         ttk.Label(control_frame, text="Plot Type:").grid(row=row, column=0, columnspan=2, sticky='w')
         self.plot_type = ttk.Combobox(control_frame,
-                                      values=["Line", "Scatter", "Broken Y-Axis", "Color Map", "Dual Y-Axis"],
+                                      values=["Line", "Scatter", "Color Map", "Dual Y-Axis"],
                                       state='readonly', width=20)
         self.plot_type.current(0)
         self.plot_type.grid(row=row, column=2, columnspan=2, sticky='ew', pady=5)
@@ -357,8 +356,16 @@ class InteractivePlotter:
         c_map = ttk.Combobox(control_frame, textvariable=self.v_cmap_name, values=COLORMAPS,
                              state='readonly', width=12)
         c_map.grid(row=row, column=2, columnspan=2, sticky='ew', padx=2)
-        c_map.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
+        c_map.bind('<<ComboboxSelected>>', lambda e: (self._draw_cmap_preview(), self.update_plot()))
         row += 1
+
+        # --- Colormap Preview Bar (labels drawn inside canvas to avoid clipping on small screens) ---
+        self.cmap_preview_canvas = tk.Canvas(control_frame, height=20, highlightthickness=1, 
+                                              highlightbackground='#cccccc')
+        self.cmap_preview_canvas.grid(row=row, column=0, columnspan=4, sticky='ew', pady=(0, 5), padx=2)
+        self._cmap_preview_photo = None  # Keep reference to prevent garbage collection
+        # Bind resize to redraw the preview when control panel width changes
+        self.cmap_preview_canvas.bind('<Configure>', lambda e: self._draw_cmap_preview())
         row += 1
 
         ttk.Label(control_frame, text="X Axis:").grid(row=row, column=0, sticky='w')
@@ -455,13 +462,70 @@ class InteractivePlotter:
         # Then pack canvas with expand - this ensures toolbar stays visible
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
-        self.ax.text(0.5, 0.5, 'Load data file(s) to begin', ha='center', va='center', fontsize=16, color='gray')
+        self.ax.text(0.5, 0.5, 'Load data file to begin', ha='center', va='center', fontsize=16, color='gray')
         self.ax.set_xticks([]);
         self.ax.set_yticks([])
         self.canvas.draw()
         
         # Bind right-click on canvas for context menu (works even when no legend is visible)
         self.canvas.mpl_connect('button_press_event', self._on_canvas_right_click)
+        
+        # Draw initial colormap preview
+        self.root.after(100, self._draw_cmap_preview)
+
+    def _draw_cmap_preview(self):
+        """Render the currently selected colormap as a horizontal gradient bar in the control panel."""
+        try:
+            canvas = self.cmap_preview_canvas
+            # Wait until the canvas is displayed to get its actual width
+            canvas.update_idletasks()
+            w = canvas.winfo_width()
+            h = canvas.winfo_height()
+            if w < 2 or h < 2:
+                # Canvas not yet rendered, retry after a short delay
+                self.root.after(100, self._draw_cmap_preview)
+                return
+            
+            # Get the colormap
+            cmap_name = self.v_cmap_name.get()
+            try:
+                cmap = plt.get_cmap(cmap_name)
+            except ValueError:
+                return
+            
+            # Build the gradient image pixel by pixel (full canvas width)
+            from tkinter import PhotoImage
+            img = PhotoImage(width=w, height=h)
+            
+            # Sample the colormap across the width
+            row_colors = []
+            for x in range(w):
+                val = x / max(w - 1, 1)
+                r, g, b, _ = cmap(val)
+                hex_color = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+                row_colors.append(hex_color)
+            
+            # Build a single row string and replicate for all rows
+            row_str = "{" + " ".join(row_colors) + "}"
+            img.put(" ".join([row_str] * h))
+            
+            # Keep reference to prevent garbage collection
+            self._cmap_preview_photo = img
+            
+            # Draw on canvas — full-width gradient with Min/Max text overlaid
+            canvas.delete("all")
+            canvas.create_image(0, 0, anchor='nw', image=img)
+            # Pick contrasting text color based on edge colors
+            r0, g0, b0, _ = cmap(0.0)
+            r1, g1, b1, _ = cmap(1.0)
+            lum0 = 0.299 * r0 + 0.587 * g0 + 0.114 * b0
+            lum1 = 0.299 * r1 + 0.587 * g1 + 0.114 * b1
+            col0 = 'white' if lum0 < 0.5 else 'black'
+            col1 = 'white' if lum1 < 0.5 else 'black'
+            canvas.create_text(4, h // 2, text="Min", anchor='w', font=('Arial', 7, 'bold'), fill=col0)
+            canvas.create_text(w - 4, h // 2, text="Max", anchor='e', font=('Arial', 7, 'bold'), fill=col1)
+        except Exception as e:
+            print(f"Colormap preview error: {e}")
 
     # --- HELPER METHODS FOR RESPONSIVE DESIGN ---
     
@@ -1191,24 +1255,193 @@ class InteractivePlotter:
         return pl.read_excel(filepath)
 
     def load_files(self):
-        filenames = filedialog.askopenfilenames(
-            title="Select data file(s)",
-            filetypes=[("Data files", "*.csv *.xlsx *.xls"),
-                       ("CSV files", "*.csv"),
-                       ("Excel files", "*.xlsx *.xls"),
-                       ("All files", "*.*")])
-        if not filenames: return
-        for filepath in filenames:
+        """Open the File Loading Wizard for multi-folder file selection."""
+        self.open_load_wizard()
+
+    def open_load_wizard(self):
+        """Open a File Loading Wizard that allows selecting files from multiple folders."""
+        w, h = self.get_dialog_size(0.55, 0.75, max_width=800, max_height=650, min_width=550, min_height=450)
+        
+        wizard = tk.Toplevel(self.root)
+        wizard.title("File Loading Wizard")
+        wizard.geometry(f"{w}x{h}")
+        wizard.transient(self.root)
+        
+        # Queue of file paths to load
+        file_queue = []
+        
+        # --- TOP FRAME: Instructions ---
+        top_frame = ttk.Frame(wizard, padding=(10, 10, 10, 5))
+        top_frame.pack(fill='x')
+        ttk.Label(top_frame, text="Add files from multiple folders, then click 'Load All' to import them.",
+                  font=('Arial', 10, 'italic'), foreground='gray').pack(anchor='w')
+        
+        # --- MIDDLE FRAME: Listbox with file queue ---
+        list_frame = ttk.Frame(wizard, padding=(10, 5, 10, 5))
+        list_frame.pack(fill='both', expand=True)
+        
+        # Columns: # | Filename | Folder Path
+        cols = ("#", "Filename", "Folder")
+        tree = ttk.Treeview(list_frame, columns=cols, show='headings', selectmode='extended')
+        tree.heading("#", text="#")
+        tree.heading("Filename", text="Filename")
+        tree.heading("Folder", text="Folder Path")
+        tree.column("#", width=40, anchor='center', stretch=False)
+        tree.column("Filename", width=200, minwidth=120)
+        tree.column("Folder", width=350, minwidth=200)
+        
+        tree_sb = ttk.Scrollbar(list_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=tree_sb.set)
+        tree.pack(side='left', fill='both', expand=True)
+        tree_sb.pack(side='right', fill='y')
+        
+        # --- INFO LABEL ---
+        info_var = tk.StringVar(value="No files queued.")
+        info_label = ttk.Label(wizard, textvariable=info_var, font=('Arial', 9), foreground='gray')
+        info_label.pack(fill='x', padx=10, pady=(0, 5))
+        
+        def refresh_tree():
+            """Refresh the treeview with current file_queue."""
+            tree.delete(*tree.get_children())
+            for i, fpath in enumerate(file_queue):
+                fname = os.path.basename(fpath)
+                folder = os.path.dirname(fpath)
+                tree.insert('', 'end', values=(i + 1, fname, folder))
+            info_var.set(f"{len(file_queue)} file(s) queued.")
+        
+        def add_files():
+            """Open file dialog to add files (can be called multiple times from different folders)."""
+            new_files = filedialog.askopenfilenames(
+                parent=wizard,
+                title="Select data file(s) from any folder",
+                filetypes=[("Data files", "*.csv *.xlsx *.xls"),
+                           ("CSV files", "*.csv"),
+                           ("Excel files", "*.xlsx *.xls"),
+                           ("All files", "*.*")])
+            if new_files:
+                # Avoid duplicates
+                existing = set(file_queue)
+                for f in new_files:
+                    if f not in existing:
+                        file_queue.append(f)
+                        existing.add(f)
+                refresh_tree()
+        
+        def add_folder():
+            """Select a folder and add all CSV/Excel files from it."""
+            folder = filedialog.askdirectory(parent=wizard, title="Select folder with data files")
+            if not folder:
+                return
+            valid_ext = {'.csv', '.xlsx', '.xls'}
+            existing = set(file_queue)
+            count = 0
+            for fname in os.listdir(folder):
+                ext = os.path.splitext(fname)[1].lower()
+                if ext in valid_ext:
+                    full_path = os.path.join(folder, fname)
+                    if full_path not in existing:
+                        file_queue.append(full_path)
+                        existing.add(full_path)
+                        count += 1
+            refresh_tree()
+            if count == 0:
+                messagebox.showinfo("No Files Found", f"No CSV or Excel files found in:\n{folder}", parent=wizard)
+        
+        def remove_selected():
+            """Remove selected files from the queue."""
+            sel = tree.selection()
+            if not sel:
+                return
+            # Get indices of selected items (sorted descending to remove safely)
+            indices = sorted([tree.index(item) for item in sel], reverse=True)
+            for idx in indices:
+                if 0 <= idx < len(file_queue):
+                    file_queue.pop(idx)
+            refresh_tree()
+        
+        def clear_all():
+            """Clear the entire file queue."""
+            file_queue.clear()
+            refresh_tree()
+        
+        def load_all():
+            """Load all queued files into the plotter."""
+            if not file_queue:
+                messagebox.showinfo("No Files", "No files queued to load. Add files first.", parent=wizard)
+                return
+            wizard.destroy()
+            self._load_files_from_list(file_queue)
+        
+        def load_selected_only():
+            """Load only the selected files from the queue."""
+            sel = tree.selection()
+            if not sel:
+                messagebox.showinfo("No Selection", "Select files in the queue to load.", parent=wizard)
+                return
+            indices = sorted([tree.index(item) for item in sel])
+            selected_paths = [file_queue[i] for i in indices if i < len(file_queue)]
+            wizard.destroy()
+            self._load_files_from_list(selected_paths)
+        
+        # --- BUTTON FRAME ---
+        btn_frame = ttk.Frame(wizard, padding=(10, 5, 10, 10))
+        btn_frame.pack(fill='x')
+        
+        # Row 1: Add/Remove buttons
+        row1 = ttk.Frame(btn_frame)
+        row1.pack(fill='x', pady=(0, 5))
+        ttk.Button(row1, text="📁 Add Files", command=add_files, width=14).pack(side='left', padx=2)
+        ttk.Button(row1, text="📂 Add Folder", command=add_folder, width=14).pack(side='left', padx=2)
+        ttk.Button(row1, text="Remove Selected", command=remove_selected, width=16).pack(side='left', padx=2)
+        ttk.Button(row1, text="Clear All", command=clear_all, width=10).pack(side='left', padx=2)
+        
+        # Row 2: Load/Cancel buttons
+        row2 = ttk.Frame(btn_frame)
+        row2.pack(fill='x')
+        ttk.Button(row2, text="Load All", command=load_all, width=14).pack(side='left', padx=2, expand=True, fill='x')
+        ttk.Button(row2, text="Load Selected Only", command=load_selected_only, width=16).pack(side='left', padx=2, expand=True, fill='x')
+        ttk.Button(row2, text="Cancel", command=wizard.destroy, width=10).pack(side='left', padx=2, expand=True, fill='x')
+        
+        # Enable mousewheel scrolling on the tree
+        def on_mousewheel(event):
+            tree.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        tree.bind("<MouseWheel>", on_mousewheel)
+        wizard.protocol("WM_DELETE_WINDOW", lambda: (tree.unbind("<MouseWheel>"), wizard.destroy()))
+
+    def _load_files_from_list(self, filepaths):
+        """Load a list of file paths into the datasets dictionary.
+        
+        Same-name files from different folders are disambiguated by appending
+        the parent folder name, e.g. 'data.csv' and 'data.csv (folder_B)'.
+        """
+        if not filepaths:
+            return
+        errors = []
+        for filepath in filepaths:
             try:
                 ext = os.path.splitext(filepath)[1].lower()
                 if ext in ('.xlsx', '.xls'):
                     df = self._load_excel(filepath)
                 else:
                     df = self._load_csv(filepath)
+                
+                # Generate a unique key — disambiguate same-name files from different folders
                 filename = os.path.basename(filepath)
-                self.datasets[filename] = df
+                key = filename
+                if key in self.datasets:
+                    parent_folder = os.path.basename(os.path.dirname(filepath))
+                    key = f"{filename} ({parent_folder})"
+                    # If still a conflict (very rare), append counter
+                    counter = 2
+                    while key in self.datasets:
+                        key = f"{filename} ({parent_folder}_{counter})"
+                        counter += 1
+                
+                self.datasets[key] = df
             except Exception as e:
-                messagebox.showerror("Error", str(e))
+                errors.append(f"{os.path.basename(filepath)}: {e}")
+        if errors:
+            messagebox.showerror("Load Errors", "Errors loading files:\n\n" + "\n".join(errors))
         self.refresh_dataset_list(new_load=True)
 
     def unload_files(self):
@@ -1297,12 +1530,9 @@ class InteractivePlotter:
         pairs_to_style = []
         if ptype == "Dual Y-Axis":
             y1, y2 = self.y1_combo.get(), self.y2_combo.get()
-            if len(sel_ds) > 1:
-                if y1: pairs_to_style.append((sel_ds[0][0], y1))
-                if y2: pairs_to_style.append((sel_ds[1][0], y2))
-            elif len(sel_ds) == 1:
-                if y1: pairs_to_style.append((sel_ds[0][0], y1))
-                if y2: pairs_to_style.append((sel_ds[0][0], y2))
+            for fk, _ in sel_ds:
+                if y1: pairs_to_style.append((fk, y1))
+                if y2: pairs_to_style.append((fk, y2))
         else:
             y_idxs = self.y_listbox.curselection()
             y_cols = [self.y_listbox.get(i) for i in y_idxs]
@@ -1428,12 +1658,9 @@ class InteractivePlotter:
         pairs_to_order = []
         if ptype == "Dual Y-Axis":
             y1, y2 = self.y1_combo.get(), self.y2_combo.get()
-            if len(sel_ds) > 1:
-                if y1: pairs_to_order.append((sel_ds[0][0], y1))
-                if y2: pairs_to_order.append((sel_ds[1][0], y2))
-            elif len(sel_ds) == 1:
-                if y1: pairs_to_order.append((sel_ds[0][0], y1))
-                if y2: pairs_to_order.append((sel_ds[0][0], y2))
+            for fk, _ in sel_ds:
+                if y1: pairs_to_order.append((fk, y1))
+                if y2: pairs_to_order.append((fk, y2))
         else:
             y_idxs = self.y_listbox.curselection()
             y_cols = [self.y_listbox.get(i) for i in y_idxs]
@@ -1850,13 +2077,11 @@ class InteractivePlotter:
             series_to_plot = []
             for fk, df in sel_ds:
                 if ptype == "Dual Y-Axis":
-                    if len(sel_ds) > 1:
-                        if fk == sel_ds[0][0] and ycols[0] in df.columns: series_to_plot.append((fk, ycols[0], 0))
-                        if fk == sel_ds[1][0] and len(ycols) > 1 and ycols[1] in df.columns: series_to_plot.append(
-                            (fk, ycols[1], 1))
-                    else:
-                        for i, yc in enumerate(ycols):
-                            if yc in df.columns: series_to_plot.append((fk, yc, i))
+                    # Each selected file contributes Y1 to left axis and Y2 to right axis
+                    if ycols and ycols[0] and ycols[0] in df.columns:
+                        series_to_plot.append((fk, ycols[0], 0))
+                    if len(ycols) > 1 and ycols[1] and ycols[1] in df.columns:
+                        series_to_plot.append((fk, ycols[1], 1))
                 else:
                     for yc in ycols:
                         if yc in df.columns: series_to_plot.append((fk, yc, 0))
@@ -1905,20 +2130,14 @@ class InteractivePlotter:
                 if ref in self.datasets and xcol in self.datasets[ref].columns:
                     X_master = self.datasets[ref][xcol].to_numpy() / xf
 
-            # --- PARSE AXIS BREAKS (universal — works with any plot type except Broken Y-Axis) ---
+            # --- PARSE AXIS BREAKS (universal — works with Line, Scatter, and Dual Y-Axis) ---
             y_breaks_orig = self._parse_breaks(self.v_y_breaks)
             x_breaks_orig = self._parse_breaks(self.v_x_breaks)
-            has_y_breaks = len(y_breaks_orig) > 0 and ptype not in ["Broken Y-Axis", "Color Map"]
-            has_x_breaks = len(x_breaks_orig) > 0 and ptype not in ["Broken Y-Axis", "Color Map"]
+            has_y_breaks = len(y_breaks_orig) > 0 and ptype != "Color Map"
+            has_x_breaks = len(x_breaks_orig) > 0 and ptype != "Color Map"
 
             axes_list = []
-            if ptype == "Broken Y-Axis":
-                gs = gridspec.GridSpec(2, 1, height_ratios=[1, 1], hspace=0.2)
-                ax1 = self.fig.add_subplot(gs[0]);
-                ax2 = self.fig.add_subplot(gs[1], sharex=ax1)
-                self.ax = ax1;
-                axes_list = [ax1, ax2]
-            elif ptype == "Dual Y-Axis":
+            if ptype == "Dual Y-Axis":
                 self.ax = self.fig.add_subplot(111);
                 ax_right = self.ax.twinx()
                 axes_list = [self.ax, ax_right]
@@ -1939,7 +2158,7 @@ class InteractivePlotter:
             y2label_text = None
             zlabel_text = None
 
-            if ptype in ["Line", "Scatter", "Broken Y-Axis", "Dual Y-Axis"]:
+            if ptype in ["Line", "Scatter", "Dual Y-Axis"]:
                 for (fk, yc, ax_idx) in series_to_plot:
                     df = self.datasets[fk]
                     curr_yf = yf if ax_idx == 0 else y2f
@@ -1973,7 +2192,7 @@ class InteractivePlotter:
                     else:
                         lbl = f"{fk}: {yc}"
 
-                    target_axes = axes_list if ptype == "Broken Y-Axis" else [axes_list[ax_idx]]
+                    target_axes = [axes_list[ax_idx]]
 
                     # Track all line objects for this series (for visibility toggling)
                     series_lines = []
@@ -2084,17 +2303,16 @@ class InteractivePlotter:
                         if y_maj: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y_maj))
                         if y_min > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y_min))
 
-            target_ax = axes_list[-1] if ptype == "Broken Y-Axis" else self.ax
+            target_ax = self.ax
             if self.x_log.get() and ptype != "Color Map":
                 target_ax.set_xscale('log')
-                if ptype == "Broken Y-Axis": axes_list[0].set_xscale('log')
 
             # Set xlabel with rotation
             xlabel_text = target_ax.set_xlabel(self.v_xlabel.get() or xcol, fontsize=l_sz, labelpad=x_lab_pad, fontname=font,
                                  color=self.xlabel_color, rotation=xlabel_rot)
             
             # Set title with rotation
-            title_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
+            title_ax = self.ax
             title_text = title_ax.set_title(self.v_title.get(), fontsize=t_sz,
                                                                               fontweight='bold', fontname=font,
                                                                               color=self.title_color, rotation=title_rot)
@@ -2132,32 +2350,8 @@ class InteractivePlotter:
 
             if val(self.v_x_min) and not has_x_breaks: target_ax.set_xlim(left=val(self.v_x_min))
             if val(self.v_x_max) and not has_x_breaks: target_ax.set_xlim(right=val(self.v_x_max))
-            if ptype == "Broken Y-Axis": axes_list[0].set_xlim(target_ax.get_xlim())
 
-            if ptype == "Broken Y-Axis":
-                b_s, b_e = val(self.v_break_start), val(self.v_break_end)
-                if b_s and b_e: axes_list[0].set_ylim(bottom=b_e); axes_list[1].set_ylim(top=b_s)
-                if val(self.v_y_max): axes_list[0].set_ylim(top=val(self.v_y_max))
-                if val(self.v_y_min): axes_list[1].set_ylim(bottom=val(self.v_y_min))
-                axes_list[0].spines['bottom'].set_visible(False);
-                axes_list[1].spines['top'].set_visible(False)
-                axes_list[0].xaxis.tick_top();
-                axes_list[0].tick_params(labeltop=False);
-                axes_list[1].xaxis.tick_bottom()
-                d = .015;
-                kw = dict(transform=axes_list[0].transAxes, color='k', clip_on=False)
-                axes_list[0].plot((-d, +d), (-d, +d), **kw);
-                axes_list[0].plot((1 - d, 1 + d), (-d, +d), **kw)
-                kw.update(transform=axes_list[1].transAxes)
-                axes_list[1].plot((-d, +d), (1 - d, 1 + d), **kw);
-                axes_list[1].plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
-                # Set Y label for broken axis - centered between the two subplots
-                ylabel_text = self.fig.supylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, 
-                                   x=0.04, y=0.5, fontname=font, color=self.ylabel_color)
-                if use_custom_pos:
-                    ylabel_text.set_position(custom_ylabel_pos)
-                    ylabel_text.set_transform(self.fig.transFigure)
-            elif ptype == "Dual Y-Axis":
+            if ptype == "Dual Y-Axis":
                 # Set Y1 (left axis) label with rotation
                 y1_label = self.v_ylabel.get() or (ycols[0] if ycols else "Y1")
                 ylabel_text = self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
@@ -2304,7 +2498,7 @@ class InteractivePlotter:
                     self.current_lines = lines
                     
                     # Create legend
-                    legend_ax = axes_list[0] if ptype == "Broken Y-Axis" else self.ax
+                    legend_ax = self.ax
                     legend = legend_ax.legend(lines, labels, loc=loc, ncol=ncol,
                                               bbox_to_anchor=bbox_to_anchor,
                                               prop={'size': leg_sz, 'family': font})
@@ -2341,7 +2535,7 @@ class InteractivePlotter:
                     a.grid(False, which='minor')
 
             # --- SECONDARY TOP X-AXIS ---
-            if self.enable_secondary_x.get() and ptype != "Broken Y-Axis":
+            if self.enable_secondary_x.get():
                 try:
                     fwd_formula = self.v_sec_x_forward.get().strip()
                     
@@ -2795,7 +2989,7 @@ class InteractivePlotter:
         # Load buttons at top
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(fill='x', pady=(0, 10))
-        ttk.Button(btn_frame, text="Load Data File(s)", command=self.load_files).pack(side='left', padx=2)
+        ttk.Button(btn_frame, text="Load Data File", command=self.load_files).pack(side='left', padx=2)
         ttk.Button(btn_frame, text="Unload Selected", command=self.unload_files).pack(side='left', padx=2)
         ttk.Button(btn_frame, text="Refresh", command=lambda: self.refresh_dataset_window_list()).pack(side='left', padx=2)
         
@@ -3171,7 +3365,7 @@ class InteractivePlotter:
             plot_settings = session_data.get("plot_settings", {})
             if plot_settings:
                 plot_type = plot_settings.get("plot_type", "Line")
-                if plot_type in ["Line", "Scatter", "Broken Y-Axis", "Color Map", "Dual Y-Axis"]:
+                if plot_type in ["Line", "Scatter", "Color Map", "Dual Y-Axis"]:
                     self.plot_type.set(plot_type)
                 self.v_color_mode.set(plot_settings.get("color_mode", "Cycle"))
                 self.v_cmap_name.set(plot_settings.get("colormap", "viridis"))
@@ -3205,7 +3399,7 @@ class InteractivePlotter:
                 if z_col and z_col in self.z_combo['values']:
                     self.z_combo.set(z_col)
                 
-                # Restore Y listbox selections (for Line, Scatter, Broken Y-Axis, Color Map plots)
+                # Restore Y listbox selections
                 y_columns = axis_selections.get("y_column", [])
                 if y_columns:
                     self.y_listbox.selection_clear(0, tk.END)
