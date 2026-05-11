@@ -252,6 +252,10 @@ class InteractivePlotter:
         self._cmap_mouse_press_cid = None  # Event connection ID
         self._cmap_mouse_move_cid = None   # Event connection ID for preview line
         self._cmap_preview_line = None     # Preview line artist
+        self._cmap_completed_lines = []    # List of completed line dicts with color, name, points, profile_data
+        self._cmap_default_colors = ['#FF0000', '#00AAFF', '#00CC00', '#FF8800', '#AA00FF',
+                                      '#00CCCC', '#FF00FF', '#888800', '#FF4444', '#4444FF']
+        self._cmap_color_index = 0         # Index into default color cycle
         
         # --- SCREEN DIMENSIONS (for responsive design) ---
         self.screen_width = self.root.winfo_screenwidth()
@@ -466,7 +470,14 @@ class InteractivePlotter:
         self.draw_line_status = tk.StringVar(value="")
         self.draw_line_label = ttk.Label(control_frame, textvariable=self.draw_line_status, foreground='red', font=('Arial', 9, 'italic'))
         self.draw_line_label.grid(row=row+1, column=0, columnspan=4, sticky='w', pady=0)
-        row += 2
+        # Second row: Show Profiles + Line Colors buttons
+        cmap_btn_frame2 = ttk.Frame(control_frame)
+        cmap_btn_frame2.grid(row=row+2, column=0, columnspan=4, sticky='ew', pady=2)
+        self.btn_show_profiles = ttk.Button(cmap_btn_frame2, text="📊 Show Profiles", command=self._show_all_profiles)
+        self.btn_show_profiles.pack(side='left', expand=True, fill='x', padx=2)
+        self.btn_line_colors = ttk.Button(cmap_btn_frame2, text="🎨 Line Colors", command=self._open_line_config_dialog)
+        self.btn_line_colors.pack(side='left', expand=True, fill='x', padx=2)
+        row += 3
         control_frame.columnconfigure(2, weight=1)
         control_frame.columnconfigure(3, weight=1)
 
@@ -1533,6 +1544,10 @@ class InteractivePlotter:
 
     def on_plot_type_change(self, event):
         ptype = self.plot_type.get()
+        # Auto-disable line drawing if switching away from Color Map
+        if ptype != "Color Map" and self._cmap_draw_mode:
+            self.toggle_draw_line_mode(force_disconnect=True)
+            self._clear_cmap_lines()
         if ptype == "Dual Y-Axis":
             self.y_list_frame.pack_forget();
             self.y_dual_frame.pack(fill='both', expand=True)
@@ -3204,8 +3219,42 @@ class InteractivePlotter:
                 
     # --- LINE DRAWING ON COLOR MAP ---
     
-    def toggle_draw_line_mode(self):
-        """Toggle line drawing mode on the color map."""
+    def toggle_draw_line_mode(self, force_disconnect=False):
+        """Toggle line drawing mode on the color map.
+        
+        Args:
+            force_disconnect: If True, force disconnect regardless of plot type (used when switching plot types).
+        """
+        if force_disconnect:
+            # Force disable drawing mode and disconnect events
+            self._cmap_draw_mode = False
+            self.btn_draw_line.config(text="✏ Draw Line on Color Map")
+            self.draw_line_status.set("")
+            if self._cmap_mouse_press_cid is not None:
+                self.canvas.mpl_disconnect(self._cmap_mouse_press_cid)
+                self._cmap_mouse_press_cid = None
+            if self._cmap_mouse_move_cid is not None:
+                self.canvas.mpl_disconnect(self._cmap_mouse_move_cid)
+                self._cmap_mouse_move_cid = None
+            # Remove preview line if exists
+            if self._cmap_preview_line is not None:
+                try:
+                    self._cmap_preview_line.remove()
+                except:
+                    pass
+                self._cmap_preview_line = None
+            # Clean up temporary artists
+            for a in self._cmap_line_artists:
+                try: a.remove()
+                except: pass
+            self._cmap_line_artists = []
+            for a in self._cmap_point_artists:
+                try: a.remove()
+                except: pass
+            self._cmap_point_artists = []
+            self._cmap_line_points = []
+            return
+        
         ptype = self.plot_type.get()
         if ptype != "Color Map":
             messagebox.showinfo("Info", "Line drawing is only available for Color Map plots.")
@@ -3333,32 +3382,39 @@ class InteractivePlotter:
             except: pass
             self._cmap_preview_line = None
         
-        # Store the completed line as a persistent artist
+        # Assign color and name
+        line_color = self._cmap_default_colors[self._cmap_color_index % len(self._cmap_default_colors)]
+        line_num = len(self._cmap_completed_lines) + 1
+        line_name = f"Line {line_num}"
+        self._cmap_color_index += 1
+        
+        # Store the completed line as a persistent artist with color
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
-        persistent_line, = self.ax.plot(xs, ys, 'w-', linewidth=2.5, zorder=19)
+        persistent_line, = self.ax.plot(xs, ys, color=line_color, linestyle='-', linewidth=2.5, zorder=19)
         persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=3.5, zorder=18)
-        persistent_dots, = self.ax.plot(xs, ys, 'wo', markersize=5, zorder=20, markeredgecolor='k')
-        # Support multiple lines — each line is stored as a separate group
-        if not hasattr(self, '_cmap_completed_lines'):
-            self._cmap_completed_lines = []
+        persistent_dots, = self.ax.plot(xs, ys, 'o', color=line_color, markersize=5, zorder=20, markeredgecolor='k')
+        
+        # Extract data along the line
+        profile_data = self._extract_line_profile(points)
+        
         self._cmap_completed_lines.append({
             'artists': [persistent_outline, persistent_line, persistent_dots],
-            'points': points
+            'points': points,
+            'color': line_color,
+            'name': line_name,
+            'profile_data': profile_data
         })
         self._cmap_line_artists = []
         
         self.canvas.draw_idle()
         
-        # Extract data along the line
-        profile_data = self._extract_line_profile(points)
-        
-        # Show popup
-        self._show_line_profile_popup(profile_data)
+        # Show combined popup with all lines
+        self._show_all_profiles()
         
         # Reset drawing state for next line
         self._cmap_line_points = []
-        self.draw_line_status.set("Line completed! Click to draw another, or stop drawing.")
+        self.draw_line_status.set(f"{line_name} completed! Click to draw another, or stop drawing.")
     
     def _extract_line_profile(self, points):
         """Extract Z values along a polyline path on the color map.
@@ -3529,10 +3585,204 @@ class InteractivePlotter:
                 continue
             xs = [p[0] for p in points]
             ys = [p[1] for p in points]
-            persistent_line, = self.ax.plot(xs, ys, 'w-', linewidth=2.5, zorder=19)
+            color = line_data.get('color', 'white')
+            persistent_line, = self.ax.plot(xs, ys, color=color, linestyle='-', linewidth=2.5, zorder=19)
             persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=3.5, zorder=18)
-            persistent_dots, = self.ax.plot(xs, ys, 'wo', markersize=5, zorder=20, markeredgecolor='k')
+            persistent_dots, = self.ax.plot(xs, ys, 'o', color=color, markersize=5, zorder=20, markeredgecolor='k')
             line_data['artists'] = [persistent_outline, persistent_line, persistent_dots]
+    
+    def _show_all_profiles(self):
+        """Show a popup with all line profiles overlaid, with interactive legend."""
+        if not self._cmap_completed_lines:
+            messagebox.showinfo("Info", "No lines drawn yet. Draw a line on the color map first.")
+            return
+        
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as CanvasTkAgg
+        
+        popup = tk.Toplevel(self.root)
+        popup.title("Line Profiles — All Lines")
+        popup.geometry("850x600")
+        popup.transient(self.root)
+        
+        fig_profile = Figure(figsize=(8, 4.5), dpi=100)
+        ax_profile = fig_profile.add_subplot(111)
+        
+        plotted_lines = []
+        plotted_labels = []
+        
+        for line_data in self._cmap_completed_lines:
+            profile = line_data.get('profile_data', [])
+            if not profile:
+                continue
+            distances = [d['distance'] for d in profile]
+            z_vals = [d['z'] for d in profile]
+            color = line_data.get('color', 'blue')
+            name = line_data.get('name', 'Line')
+            ln, = ax_profile.plot(distances, z_vals, color=color, linewidth=1.5, label=name)
+            plotted_lines.append(ln)
+            plotted_labels.append(name)
+        
+        ax_profile.set_xlabel("Distance along line", fontsize=11)
+        ax_profile.set_ylabel(self.v_zlabel.get() or self.z_combo.get() or "Z Value", fontsize=11)
+        ax_profile.set_title("Line Profiles (Z vs Distance)", fontsize=13, fontweight='bold')
+        ax_profile.grid(True, alpha=0.3)
+        
+        # Add interactive legend
+        if plotted_lines:
+            legend = ax_profile.legend(plotted_lines, plotted_labels, loc='best',
+                                       prop={'size': 10})
+            legend.set_picker(10)
+        
+        fig_profile.tight_layout()
+        
+        canvas_profile = CanvasTkAgg(fig_profile, master=popup)
+        canvas_profile.draw()
+        canvas_profile.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Legend toggle via pick event on the popup's legend
+        def on_legend_pick(event):
+            leg = event.artist
+            if not hasattr(leg, 'get_texts'):
+                return
+            mouseevent = event.mouseevent
+            if mouseevent is None:
+                return
+            for i, text in enumerate(leg.get_texts()):
+                bbox = text.get_window_extent()
+                if bbox.contains(mouseevent.x, mouseevent.y):
+                    if i < len(plotted_lines):
+                        ln = plotted_lines[i]
+                        vis = ln.get_visible()
+                        ln.set_visible(not vis)
+                        # Gray out legend text
+                        text.set_alpha(1.0 if not vis else 0.3)
+                        canvas_profile.draw_idle()
+                    break
+        
+        canvas_profile.mpl_connect('pick_event', on_legend_pick)
+        
+        # Info label
+        total_pts = sum(len(ld.get('profile_data', [])) for ld in self._cmap_completed_lines)
+        info_frame = ttk.Frame(popup)
+        info_frame.pack(fill='x', padx=10, pady=2)
+        ttk.Label(info_frame, text=f"{len(self._cmap_completed_lines)} line(s), {total_pts} total sampled points. Click legend to toggle.",
+                  font=('Arial', 9), foreground='gray').pack(side='left')
+        
+        # Button frame
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(fill='x', padx=10, pady=5)
+        
+        def export_all_csv():
+            filepath = filedialog.asksaveasfilename(
+                parent=popup, defaultextension=".csv",
+                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+                title="Export All Line Profiles")
+            if not filepath:
+                return
+            try:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write("Line,Distance,X,Y,Z\n")
+                    for ld in self._cmap_completed_lines:
+                        name = ld.get('name', 'Line')
+                        for d in ld.get('profile_data', []):
+                            f.write(f"{name},{d['distance']:.6g},{d['x']:.6g},{d['y']:.6g},{d['z']:.6g}\n")
+                messagebox.showinfo("Exported", f"Data exported to:\n{filepath}", parent=popup)
+            except Exception as e:
+                messagebox.showerror("Export Error", str(e), parent=popup)
+        
+        def export_plot():
+            filepath = filedialog.asksaveasfilename(
+                parent=popup, defaultextension=".png",
+                filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
+                title="Export Profile Plot")
+            if filepath:
+                try:
+                    fig_profile.savefig(filepath, dpi=300, bbox_inches='tight')
+                    messagebox.showinfo("Exported", f"Plot saved to:\n{filepath}", parent=popup)
+                except Exception as e:
+                    messagebox.showerror("Error", str(e), parent=popup)
+        
+        ttk.Button(btn_frame, text="📊 Export All CSV", command=export_all_csv).pack(side='left', expand=True, fill='x', padx=3)
+        ttk.Button(btn_frame, text="🖼 Export Plot", command=export_plot).pack(side='left', expand=True, fill='x', padx=3)
+        ttk.Button(btn_frame, text="Close", command=popup.destroy).pack(side='left', expand=True, fill='x', padx=3)
+    
+    def _open_line_config_dialog(self):
+        """Open dialog to change line colors and names."""
+        if not self._cmap_completed_lines:
+            messagebox.showinfo("Info", "No lines drawn yet.")
+            return
+        
+        d = tk.Toplevel(self.root)
+        d.title("Line Colors & Names")
+        d.geometry("450x400")
+        d.transient(self.root)
+        
+        ttk.Label(d, text="Customize line colors and names.\nChanges apply immediately.", 
+                  font=('Arial', 10, 'italic'), foreground='gray').pack(pady=(10, 5), padx=10)
+        
+        # Scrollable frame for line entries
+        container = ttk.Frame(d)
+        container.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        canvas = tk.Canvas(container, highlightthickness=0)
+        sb = ttk.Scrollbar(container, orient='vertical', command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.create_window((0, 0), window=inner, anchor='nw')
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+        
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        canvas.bind('<MouseWheel>', on_mousewheel)
+        
+        for i, line_data in enumerate(self._cmap_completed_lines):
+            row_frame = ttk.Frame(inner)
+            row_frame.pack(fill='x', pady=3, padx=5)
+            
+            # Color button
+            color = line_data.get('color', 'white')
+            color_btn = tk.Button(row_frame, text="  ", bg=color, width=3)
+            color_btn.pack(side='left', padx=(0, 5))
+            
+            # Name entry
+            name_var = tk.StringVar(value=line_data.get('name', f'Line {i+1}'))
+            name_entry = ttk.Entry(row_frame, textvariable=name_var, width=15)
+            name_entry.pack(side='left', padx=5)
+            
+            # Color picker callback
+            def make_color_cb(btn, idx):
+                def cb():
+                    c = colorchooser.askcolor(parent=d, initialcolor=btn.cget('bg'))[1]
+                    if c:
+                        btn.config(bg=c)
+                        self._cmap_completed_lines[idx]['color'] = c
+                        self._redraw_after_color_change()
+                        d.lift()
+                return cb
+            color_btn.config(command=make_color_cb(color_btn, i))
+            
+            # Name change callback
+            def make_name_cb(var, idx):
+                def cb(*args):
+                    self._cmap_completed_lines[idx]['name'] = var.get()
+                return cb
+            name_var.trace('w', make_name_cb(name_var, i))
+        
+        # Buttons
+        btn_frame = ttk.Frame(d)
+        btn_frame.pack(fill='x', padx=10, pady=10)
+        ttk.Button(btn_frame, text="Done", command=d.destroy).pack(side='left', expand=True, fill='x', padx=3)
+    
+    def _redraw_after_color_change(self):
+        """Redraw lines on the color map after color changes (without full plot update)."""
+        for line_data in self._cmap_completed_lines:
+            for a in line_data.get('artists', []):
+                try: a.remove()
+                except: pass
+        self._redraw_cmap_lines()
+        self.canvas.draw_idle()
     
     def _clear_cmap_lines(self):
         """Clear all drawn lines from the color map."""
@@ -3555,6 +3805,7 @@ class InteractivePlotter:
                     try: a.remove()
                     except: pass
             self._cmap_completed_lines = []
+        self._cmap_color_index = 0  # Reset color cycle
         self._cmap_line_points = []
         self.canvas.draw_idle()
         self.draw_line_status.set("Lines cleared.")
