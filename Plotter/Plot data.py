@@ -242,6 +242,17 @@ class InteractivePlotter:
         # --- DATASET WINDOW ---
         self.dataset_window = None
         
+        # --- LINE DRAWING ON COLOR MAP ---
+        self._cmap_draw_mode = False  # Whether line drawing mode is active
+        self._cmap_line_points = []   # List of (x, y) data coordinates for the current line
+        self._cmap_line_artists = []  # Matplotlib artists for drawn lines
+        self._cmap_point_artists = [] # Matplotlib artists for drawn points
+        self._cmap_zi_data = None     # Stored interpolated Z data (2D array)
+        self._cmap_extent = None      # Stored extent (xmin, xmax, ymin, ymax)
+        self._cmap_mouse_press_cid = None  # Event connection ID
+        self._cmap_mouse_move_cid = None   # Event connection ID for preview line
+        self._cmap_preview_line = None     # Preview line artist
+        
         # --- SCREEN DIMENSIONS (for responsive design) ---
         self.screen_width = self.root.winfo_screenwidth()
         self.screen_height = self.root.winfo_screenheight()
@@ -444,6 +455,18 @@ class InteractivePlotter:
         ttk.Button(control_frame, text="Show All Lines", command=self.show_all_lines).grid(row=row, column=0, columnspan=4,
                                                                                      sticky='ew', pady=5)
         row += 1
+        
+        # --- LINE DRAWING ON COLOR MAP ---
+        cmap_line_frame = ttk.Frame(control_frame)
+        cmap_line_frame.grid(row=row, column=0, columnspan=4, sticky='ew', pady=5)
+        self.btn_draw_line = ttk.Button(cmap_line_frame, text="✏ Draw Line on Color Map", command=self.toggle_draw_line_mode)
+        self.btn_draw_line.pack(side='left', expand=True, fill='x', padx=2)
+        self.btn_clear_lines = ttk.Button(cmap_line_frame, text="✖ Clear Lines", command=self._clear_cmap_lines)
+        self.btn_clear_lines.pack(side='left', expand=True, fill='x', padx=2)
+        self.draw_line_status = tk.StringVar(value="")
+        self.draw_line_label = ttk.Label(control_frame, textvariable=self.draw_line_status, foreground='red', font=('Arial', 9, 'italic'))
+        self.draw_line_label.grid(row=row+1, column=0, columnspan=4, sticky='w', pady=0)
+        row += 2
         control_frame.columnconfigure(2, weight=1)
         control_frame.columnconfigure(3, weight=1)
 
@@ -2233,6 +2256,12 @@ class InteractivePlotter:
                 if z_maj: cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(z_maj))
                 if z_min > 1: cbar.ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(z_min))
                 cbar.ax.tick_params(labelsize=yt_sz, pad=z_pad_val)
+                
+                # --- Store interpolated data for line drawing feature ---
+                self._cmap_zi_data = zi.copy()
+                self._cmap_extent = (X.min(), X.max(), Y.min(), Y.max())
+                # Re-draw any previously drawn lines on the new color map
+                self._redraw_cmap_lines()
 
             # --- COMMON FORMATTING ---
             def apply_format(ax_obj, char, mode):
@@ -3173,6 +3202,363 @@ class InteractivePlotter:
         y = self.canvas.get_tk_widget().winfo_rooty() + int(mouseevent.y)
         self._show_line_toggle_menu(x, y)
                 
+    # --- LINE DRAWING ON COLOR MAP ---
+    
+    def toggle_draw_line_mode(self):
+        """Toggle line drawing mode on the color map."""
+        ptype = self.plot_type.get()
+        if ptype != "Color Map":
+            messagebox.showinfo("Info", "Line drawing is only available for Color Map plots.")
+            return
+        if self._cmap_zi_data is None:
+            messagebox.showinfo("Info", "Please create a Color Map first (load data & plot).")
+            return
+        
+        self._cmap_draw_mode = not self._cmap_draw_mode
+        
+        if self._cmap_draw_mode:
+            self.btn_draw_line.config(text="🔴 Drawing... (click to stop)")
+            self.draw_line_status.set("Click on plot to add points. Double-click to finish.")
+            self._cmap_line_points = []
+            # Connect mouse events
+            self._cmap_mouse_press_cid = self.canvas.mpl_connect('button_press_event', self._on_cmap_mouse_press)
+            self._cmap_mouse_move_cid = self.canvas.mpl_connect('motion_notify_event', self._on_cmap_mouse_move)
+        else:
+            self.btn_draw_line.config(text="✏ Draw Line on Color Map")
+            self.draw_line_status.set("")
+            # Disconnect mouse events
+            if self._cmap_mouse_press_cid is not None:
+                self.canvas.mpl_disconnect(self._cmap_mouse_press_cid)
+                self._cmap_mouse_press_cid = None
+            if self._cmap_mouse_move_cid is not None:
+                self.canvas.mpl_disconnect(self._cmap_mouse_move_cid)
+                self._cmap_mouse_move_cid = None
+            # Remove preview line if exists
+            if self._cmap_preview_line is not None:
+                try:
+                    self._cmap_preview_line.remove()
+                except:
+                    pass
+                self._cmap_preview_line = None
+                self.canvas.draw_idle()
+    
+    def _on_cmap_mouse_press(self, event):
+        """Handle mouse clicks during line drawing mode."""
+        if not self._cmap_draw_mode or event.inaxes != self.ax:
+            return
+        
+        if event.button == 1 and event.dblclick:  # Double-click: finish line
+            if len(self._cmap_line_points) >= 2:
+                self._finish_cmap_line()
+            else:
+                # Not enough points, just cancel
+                self._cmap_line_points = []
+                # Remove temporary artists
+                for a in self._cmap_point_artists:
+                    try: a.remove()
+                    except: pass
+                self._cmap_point_artists = []
+                if self._cmap_preview_line:
+                    try: self._cmap_preview_line.remove()
+                    except: pass
+                    self._cmap_preview_line = None
+                self.canvas.draw_idle()
+                self.draw_line_status.set("Need at least 2 points. Click to add points.")
+            return
+        
+        if event.button != 1 or event.dblclick:  # Only single left-click adds points
+            return
+        
+        # Add point
+        x, y = event.xdata, event.ydata
+        self._cmap_line_points.append((x, y))
+        
+        # Draw point marker
+        pt, = self.ax.plot(x, y, 'ro', markersize=6, zorder=20)
+        self._cmap_point_artists.append(pt)
+        
+        # If we have 2+ points, draw the line segments
+        if len(self._cmap_line_points) >= 2:
+            xs = [p[0] for p in self._cmap_line_points]
+            ys = [p[1] for p in self._cmap_line_points]
+            # Remove old line artists for this drawing session (but keep points)
+            for a in self._cmap_line_artists:
+                try: a.remove()
+                except: pass
+            self._cmap_line_artists = []
+            ln, = self.ax.plot(xs, ys, 'r-', linewidth=2, zorder=19)
+            self._cmap_line_artists.append(ln)
+        
+        n = len(self._cmap_line_points)
+        self.draw_line_status.set(f"{n} point(s). Left-click to add more, double-click to finish.")
+        self.canvas.draw_idle()
+    
+    def _on_cmap_mouse_move(self, event):
+        """Handle mouse movement for preview line while drawing."""
+        if not self._cmap_draw_mode or event.inaxes != self.ax or len(self._cmap_line_points) == 0:
+            return
+        
+        # Remove old preview line
+        if self._cmap_preview_line is not None:
+            try:
+                self._cmap_preview_line.remove()
+            except:
+                pass
+            self._cmap_preview_line = None
+        
+        # Draw preview line from last point to current mouse position
+        last_x, last_y = self._cmap_line_points[-1]
+        self._cmap_preview_line, = self.ax.plot(
+            [last_x, event.xdata], [last_y, event.ydata],
+            'r--', linewidth=1.5, alpha=0.6, zorder=18
+        )
+        self.canvas.draw_idle()
+    
+    def _finish_cmap_line(self):
+        """Finish the current line, extract data, and show popup."""
+        # Finalize the line: make it solid and persistent
+        points = list(self._cmap_line_points)
+        
+        # Clean up temporary drawing artists
+        for a in self._cmap_point_artists:
+            try: a.remove()
+            except: pass
+        self._cmap_point_artists = []
+        for a in self._cmap_line_artists:
+            try: a.remove()
+            except: pass
+        self._cmap_line_artists = []
+        if self._cmap_preview_line:
+            try: self._cmap_preview_line.remove()
+            except: pass
+            self._cmap_preview_line = None
+        
+        # Store the completed line as a persistent artist
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        persistent_line, = self.ax.plot(xs, ys, 'w-', linewidth=2.5, zorder=19)
+        persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=3.5, zorder=18)
+        persistent_dots, = self.ax.plot(xs, ys, 'wo', markersize=5, zorder=20, markeredgecolor='k')
+        # Support multiple lines — each line is stored as a separate group
+        if not hasattr(self, '_cmap_completed_lines'):
+            self._cmap_completed_lines = []
+        self._cmap_completed_lines.append({
+            'artists': [persistent_outline, persistent_line, persistent_dots],
+            'points': points
+        })
+        self._cmap_line_artists = []
+        
+        self.canvas.draw_idle()
+        
+        # Extract data along the line
+        profile_data = self._extract_line_profile(points)
+        
+        # Show popup
+        self._show_line_profile_popup(profile_data)
+        
+        # Reset drawing state for next line
+        self._cmap_line_points = []
+        self.draw_line_status.set("Line completed! Click to draw another, or stop drawing.")
+    
+    def _extract_line_profile(self, points):
+        """Extract Z values along a polyline path on the color map.
+        
+        Returns a list of dicts with keys: x, y, z, distance
+        """
+        if self._cmap_zi_data is None or self._cmap_extent is None:
+            return []
+        
+        zi = self._cmap_zi_data
+        xmin, xmax, ymin, ymax = self._cmap_extent
+        ny, nx = zi.shape
+        
+        # Sample points along the full path
+        all_sampled = []
+        cumulative_distance = 0.0
+        
+        for i in range(len(points) - 1):
+            x0, y0 = points[i]
+            x1, y1 = points[i + 1]
+            seg_len = np.sqrt((x1 - x0)**2 + (y1 - y0)**2)
+            
+            # Number of samples proportional to segment length relative to data range
+            n_samples = max(int(seg_len / max(xmax - xmin, ymax - ymin) * 500), 10)
+            
+            for j in range(n_samples):
+                t = j / n_samples
+                sx = x0 + t * (x1 - x0)
+                sy = y0 + t * (y1 - y0)
+                
+                # Convert data coordinates to pixel indices
+                px = (sx - xmin) / (xmax - xmin) * (nx - 1)
+                py = (sy - ymin) / (ymax - ymin) * (ny - 1)
+                
+                # Bilinear interpolation
+                px0 = int(np.floor(px))
+                py0 = int(np.floor(py))
+                px1 = px0 + 1
+                py1 = py0 + 1
+                
+                if 0 <= px0 < nx and 0 <= py0 < ny and 0 <= px1 < nx and 0 <= py1 < ny:
+                    fx = px - px0
+                    fy = py - py0
+                    z_val = (zi[py0, px0] * (1 - fx) * (1 - fy) +
+                             zi[py0, px1] * fx * (1 - fy) +
+                             zi[py1, px0] * (1 - fx) * fy +
+                             zi[py1, px1] * fx * fy)
+                else:
+                    z_val = np.nan
+                
+                all_sampled.append({
+                    'x': sx, 'y': sy, 'z': z_val,
+                    'distance': cumulative_distance + np.sqrt((sx - x0)**2 + (sy - y0)**2)
+                })
+            
+            cumulative_distance += seg_len
+        
+        # Add the last point
+        lx, ly = points[-1]
+        px = (lx - xmin) / (xmax - xmin) * (nx - 1)
+        py = (ly - ymin) / (ymax - ymin) * (ny - 1)
+        px0 = int(np.floor(px))
+        py0 = int(np.floor(py))
+        px1 = px0 + 1
+        py1 = py0 + 1
+        if 0 <= px0 < nx and 0 <= py0 < ny and 0 <= px1 < nx and 0 <= py1 < ny:
+            fx = px - px0
+            fy = py - py0
+            z_val = (zi[py0, px0] * (1 - fx) * (1 - fy) +
+                     zi[py0, px1] * fx * (1 - fy) +
+                     zi[py1, px0] * (1 - fx) * fy +
+                     zi[py1, px1] * fx * fy)
+        else:
+            z_val = np.nan
+        all_sampled.append({
+            'x': lx, 'y': ly, 'z': z_val,
+            'distance': cumulative_distance
+        })
+        
+        return all_sampled
+    
+    def _show_line_profile_popup(self, profile_data):
+        """Show a popup window with the line profile plot and export option."""
+        if not profile_data:
+            messagebox.showinfo("Info", "No data extracted along the line.")
+            return
+        
+        # Create popup window
+        popup = tk.Toplevel(self.root)
+        popup.title("Line Profile — Extracted Data")
+        popup.geometry("750x550")
+        popup.transient(self.root)
+        
+        # Create matplotlib figure for the profile plot
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as CanvasTkAgg
+        fig_profile = Figure(figsize=(7, 4), dpi=100)
+        ax_profile = fig_profile.add_subplot(111)
+        
+        distances = [d['distance'] for d in profile_data]
+        z_vals = [d['z'] for d in profile_data]
+        
+        ax_profile.plot(distances, z_vals, 'b-', linewidth=1.5)
+        ax_profile.set_xlabel("Distance along line", fontsize=11)
+        ax_profile.set_ylabel(self.v_zlabel.get() or self.z_combo.get() or "Z Value", fontsize=11)
+        ax_profile.set_title("Line Profile (Z vs Distance)", fontsize=13, fontweight='bold')
+        ax_profile.grid(True, alpha=0.3)
+        fig_profile.tight_layout()
+        
+        # Embed in popup
+        canvas_profile = CanvasTkAgg(fig_profile, master=popup)
+        canvas_profile.draw()
+        canvas_profile.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Info label
+        n_pts = len(profile_data)
+        info_frame = ttk.Frame(popup)
+        info_frame.pack(fill='x', padx=10, pady=2)
+        ttk.Label(info_frame, text=f"Sampled {n_pts} points along the line", 
+                  font=('Arial', 9), foreground='gray').pack(side='left')
+        
+        # Button frame
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(fill='x', padx=10, pady=5)
+        
+        def export_csv():
+            filepath = filedialog.asksaveasfilename(
+                parent=popup,
+                defaultextension=".csv",
+                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+                title="Export Line Profile Data"
+            )
+            if not filepath:
+                return
+            try:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write("Distance,X,Y,Z\n")
+                    for d in profile_data:
+                        f.write(f"{d['distance']:.6g},{d['x']:.6g},{d['y']:.6g},{d['z']:.6g}\n")
+                messagebox.showinfo("Exported", f"Data exported to:\n{filepath}", parent=popup)
+            except Exception as e:
+                messagebox.showerror("Export Error", str(e), parent=popup)
+        
+        def export_plot():
+            filepath = filedialog.asksaveasfilename(
+                parent=popup,
+                defaultextension=".png",
+                filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
+                title="Export Profile Plot"
+            )
+            if filepath:
+                try:
+                    fig_profile.savefig(filepath, dpi=300, bbox_inches='tight')
+                    messagebox.showinfo("Exported", f"Plot saved to:\n{filepath}", parent=popup)
+                except Exception as e:
+                    messagebox.showerror("Error", str(e), parent=popup)
+        
+        ttk.Button(btn_frame, text="📊 Export Data to CSV", command=export_csv).pack(side='left', expand=True, fill='x', padx=3)
+        ttk.Button(btn_frame, text="🖼 Export Profile Plot", command=export_plot).pack(side='left', expand=True, fill='x', padx=3)
+        ttk.Button(btn_frame, text="Close", command=popup.destroy).pack(side='left', expand=True, fill='x', padx=3)
+    
+    def _redraw_cmap_lines(self):
+        """Redraw persistent line artists on the color map after update_plot."""
+        if not hasattr(self, '_cmap_completed_lines'):
+            return
+        for line_data in self._cmap_completed_lines:
+            points = line_data['points']
+            if not points or len(points) < 2:
+                continue
+            xs = [p[0] for p in points]
+            ys = [p[1] for p in points]
+            persistent_line, = self.ax.plot(xs, ys, 'w-', linewidth=2.5, zorder=19)
+            persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=3.5, zorder=18)
+            persistent_dots, = self.ax.plot(xs, ys, 'wo', markersize=5, zorder=20, markeredgecolor='k')
+            line_data['artists'] = [persistent_outline, persistent_line, persistent_dots]
+    
+    def _clear_cmap_lines(self):
+        """Clear all drawn lines from the color map."""
+        for a in self._cmap_line_artists:
+            try: a.remove()
+            except: pass
+        self._cmap_line_artists = []
+        for a in self._cmap_point_artists:
+            try: a.remove()
+            except: pass
+        self._cmap_point_artists = []
+        if self._cmap_preview_line:
+            try: self._cmap_preview_line.remove()
+            except: pass
+            self._cmap_preview_line = None
+        # Clear all completed (persistent) lines
+        if hasattr(self, '_cmap_completed_lines'):
+            for line_data in self._cmap_completed_lines:
+                for a in line_data.get('artists', []):
+                    try: a.remove()
+                    except: pass
+            self._cmap_completed_lines = []
+        self._cmap_line_points = []
+        self.canvas.draw_idle()
+        self.draw_line_status.set("Lines cleared.")
+
     def load_session(self):
         """Load a session from a JSON cache file."""
         # Determine where to look
