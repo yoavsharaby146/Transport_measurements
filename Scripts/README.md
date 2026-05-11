@@ -97,18 +97,45 @@ python reverser.py
 
 ---
 
+### 4. `map_splitter.py` — Slow Axis Sweep Extractor
+
+Splits a map measurement CSV into individual files — one per slow-axis setpoint — so you can examine a single sweep at a time.
+
+**Features:**
+- **Slow axis selection** — pick which column is the slow sweep axis (e.g., gate voltage)
+- **Auto-detected tolerance** — automatically computes a sensible tolerance for grouping nearby values into distinct setpoints (half the minimum gap between unique values)
+- **Adjustable tolerance** — user can tweak the tolerance before splitting
+- **Output folder picker** — choose where all the split files are saved
+- **Descriptive filenames** — each file is named with the original filename, axis, and setpoint value (e.g., `data_Vg(V)_at_-3.csv`)
+
+**Usage:**
+```bash
+python map_splitter.py
+```
+
+**Workflow:**
+1. Select a map measurement CSV file
+2. Choose the slow sweep axis column
+3. Review/adjust the auto-detected setpoint tolerance
+4. Choose an output folder
+5. The script creates one CSV per slow-axis setpoint, each containing all rows at that setpoint value
+
+---
+
 ## Typical Workflow
 
 ```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  csv_merger │ ──► │  smart orginizer │ ──► │  reverser   │
-│             │     │                  │     │             │
-│ Merge multi │     │ Split into       │     │ Reverse     │
-│ CSV files   │     │ Fwd / Bwd sweeps │     │ blocks if   │
-│ into one    │     │ by scan type     │     │ needed      │
-└─────────────┘     └──────────────────┘     └─────────────┘
+┌─────────────┐     ┌──────────────────┐     ┌─────────────┐     ┌──────────────┐
+│  csv_merger │ ──► │  smart orginizer │ ──► │  reverser   │     │ map_splitter │
+│             │     │                  │     │             │     │              │
+│ Merge multi │     │ Split into       │     │ Reverse     │     │ Split map    │
+│ CSV files   │     │ Fwd / Bwd sweeps │     │ blocks if   │     │ into single  │
+│ into one    │     │ by scan type     │     │ needed      │     │ slow-axis    │
+└─────────────┘     └──────────────────┘     └─────────────┘     │ sweeps       │
+                                                                └──────────────┘
 ```
 
 1. **Merge** — Combine multiple measurement CSV files into one using `csv_merger.py`
 2. **Organize** — Split the merged data into forward/backward sweep files using `smart orginizer.py`
 3. **Reverse** — Flip sweep direction of any output file using `reverser.py`
+4. **Map Split** — Extract individual slow-axis sweeps from a map measurement using `map_splitter.py`
