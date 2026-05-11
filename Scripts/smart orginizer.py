@@ -23,6 +23,7 @@ class ScanOrganizer:
         self.mode_combo = ttk.Combobox(self.root, textvariable=self.mode_var, state="readonly", width=40)
         self.mode_combo['values'] = (
             "Smart Split (Fast & Slow Axis - Auto Detect)",
+            "Gate Map - Direction Split (Fwd/Bwd)",
             "Hysteresis - Auto Detect (0 -> SP1 -> SP2 -> 0)",
             "Standard Loop - Auto Detect (0 -> Max -> 0)",
             "Snake - Auto Detect (Alternating)"
@@ -53,6 +54,8 @@ class ScanOrganizer:
             # Route to correct logic
             if "Smart Split" in mode:
                 self.process_smart_axis_split(df, file_path)
+            elif "Gate Map" in mode:
+                self.process_gate_map(df, file_path)
             elif "Hysteresis" in mode:
                 self.process_hysteresis(df, file_path)
             elif "Standard Loop" in mode:
@@ -117,6 +120,37 @@ class ScanOrganizer:
 
         return col, threshold
 
+    def _ask_axis_column(self, df, title_prefix="Axis"):
+        """Ask user to select an axis column only. Returns col_name or None."""
+        columns = df.columns
+        if not columns:
+            messagebox.showerror("Error", "CSV appears to be empty or has no headers.")
+            return None
+
+        col_window = tk.Toplevel(self.root)
+        col_window.title(f"Select {title_prefix} Column")
+        col_window.geometry("320x180")
+        col_window.lift()
+
+        result = {'col': None}
+
+        tk.Label(col_window, text=f"Which column is the {title_prefix}?",
+                 font=("Arial", 10)).pack(pady=10)
+        col_var = tk.StringVar()
+        col_box = ttk.Combobox(col_window, textvariable=col_var, values=columns,
+                               state="readonly", width=35)
+        col_box.current(0)
+        col_box.pack(pady=5)
+
+        def on_confirm():
+            result['col'] = col_var.get()
+            col_window.destroy()
+
+        tk.Button(col_window, text="Confirm", command=on_confirm, width=15).pack(pady=20)
+        self.root.wait_window(col_window)
+
+        return result['col']
+
     def _auto_detect_sweeps(self, df, axis_col, threshold):
         """Detect sweep segments where the axis is changing (not constant).
         Returns a list of DataFrames, each being one sweep segment,
@@ -139,6 +173,120 @@ class ScanOrganizer:
                 sweeps.append(segment.drop(['axis_is_constant', 'segment_id']))
 
         return sweeps
+
+    # =========================================================
+    # MODE: Gate Map - Direction Split (Fwd/Bwd)
+    # =========================================================
+    def _detect_direction_segments(self, df, axis_col, threshold):
+        """Detect sweep segments based on direction (sign) of change.
+
+        Uses backward-fill for zero-diff rows so that boundary repetitions
+        are correctly assigned to the *upcoming* sweep direction.
+        E.g. at the forward→backward turn-around where the value 3 repeats:
+            ..., 2.995, 3, 3, 2.995, ...
+        the first 3 (arriving via +0.005 diff) stays Forward,
+        the second 3 (diff=0, back-filled with next non-zero = -1) goes Backward.
+
+        Returns list of (segment_df, direction_str) tuples.
+        direction_str is 'forward', 'backward', or 'flat'.
+        """
+        values = df[axis_col].to_numpy()
+        n = len(values)
+
+        if n < 2:
+            return [(df, 'forward')]
+
+        # 1. Compute diffs: diffs[i] = values[i+1] - values[i]
+        diffs = np.diff(values)                       # length n-1
+
+        # 2. Compute raw signs; zero out near-zero diffs
+        signs = np.sign(diffs).astype(int)
+        signs[np.abs(diffs) < threshold] = 0
+
+        # 3. Backward-fill zeros (propagate next non-zero direction backward)
+        for i in range(len(signs) - 2, -1, -1):
+            if signs[i] == 0:
+                signs[i] = signs[i + 1]
+
+        # 4. Forward-fill any remaining leading zeros
+        if len(signs) > 0 and signs[0] == 0:
+            for i in range(1, len(signs)):
+                if signs[i] != 0:
+                    signs[:i + 1] = signs[i]
+                    break
+
+        # 5. Assign a direction to every row:
+        #    row 0 inherits signs[0]; row j (j>0) inherits signs[j-1]
+        row_dirs = np.zeros(n, dtype=int)
+        row_dirs[0] = signs[0] if len(signs) > 0 else 0
+        row_dirs[1:] = signs
+
+        # 6. Detect direction changes → segment boundaries
+        changes = np.where(np.diff(row_dirs) != 0)[0] + 1
+        boundaries = np.concatenate([[0], changes, [n]])
+
+        segments = []
+        for i in range(len(boundaries) - 1):
+            start = int(boundaries[i])
+            end = int(boundaries[i + 1])
+            segment = df.slice(start, end - start)
+            d = int(row_dirs[start])
+            if d > 0:
+                dir_str = 'forward'
+            elif d < 0:
+                dir_str = 'backward'
+            else:
+                dir_str = 'flat'
+            segments.append((segment, dir_str))
+
+        return segments
+
+    def process_gate_map(self, df, file_path):
+        """Split gate map data into forward and backward sweeps using
+        direction (sign) detection instead of magnitude thresholding."""
+        axis_col = self._ask_axis_column(df, title_prefix="Gate Map Axis")
+        if axis_col is None:
+            return
+
+        # Auto-compute a sensible threshold from the data:
+        #   half the median absolute non-zero diff
+        values = df[axis_col].to_numpy()
+        abs_diffs = np.abs(np.diff(values))
+        non_zero = abs_diffs[abs_diffs > 0]
+        if len(non_zero) > 0:
+            auto_threshold = float(np.median(non_zero)) * 0.5
+        else:
+            auto_threshold = float(values.max() - values.min()) * 0.01
+
+        threshold = simpledialog.askfloat(
+            "Direction Threshold",
+            f"Auto-detected step threshold: {auto_threshold:.6g}\n"
+            f"(Diffs smaller than this are treated as flat/zero)\n\n"
+            f"Adjust if needed:",
+            initialvalue=auto_threshold, parent=self.root)
+        if threshold is None:
+            return
+
+        segments = self._detect_direction_segments(df, axis_col, threshold)
+
+        if not segments:
+            messagebox.showinfo("Info", "No sweep segments detected.")
+            return
+
+        fwd, bwd = [], []
+        for segment, direction in segments:
+            if direction == 'forward':
+                fwd.append(segment)
+            elif direction == 'backward':
+                bwd.append(segment)
+            # 'flat' segments (if any) are discarded
+
+        fwd_rows = sum(len(s) for s in fwd)
+        bwd_rows = sum(len(s) for s in bwd)
+        print(f"Gate Map Split: {len(df)} total rows → {fwd_rows} fwd, {bwd_rows} bwd "
+              f"({len(df) - fwd_rows - bwd_rows} flat discarded)")
+
+        self.save_simple(file_path, fwd, bwd, f"GateMap_{axis_col}")
 
     # =========================================================
     # MODE: Smart Split (Fast & Slow Axis - Auto Detect)
@@ -185,7 +333,9 @@ class ScanOrganizer:
         self.root.wait_window(col_window)
 
     def run_smart_split_logic(self, df, file_path, fast_col, slow_col):
-        """Detect segments and classify into Fast Fwd/Bwd and Slow@setpoint groups."""
+        """Detect segments and classify into Fast Fwd/Bwd and Slow@setpoint groups.
+        Uses direction-sign-based detection to correctly handle repeated boundary
+        values at sweep turnarounds (no data loss)."""
         # --- Threshold Settings ---
         fast_range = df[fast_col].max() - df[fast_col].min()
         default_fast_thresh = fast_range * 0.01
@@ -193,7 +343,7 @@ class ScanOrganizer:
         fast_threshold = simpledialog.askfloat(
             "Fast Axis Threshold",
             f"Enter Fast Axis ('{fast_col}') Change Threshold:\n"
-            f"(If |change| < this value, fast axis is considered constant)\n"
+            f"(Diffs smaller than this are treated as flat/zero)\n"
             f"Default (1% of range): {default_fast_thresh:.6g}",
             initialvalue=default_fast_thresh, parent=self.root)
         if fast_threshold is None:
@@ -211,41 +361,23 @@ class ScanOrganizer:
         if slow_tolerance is None:
             return
 
-        # --- Segment Detection on Fast Axis ---
-        df = df.with_columns([
-            (pl.col(fast_col).diff().abs() < fast_threshold).alias("fast_is_constant")
-        ])
-        df = df.with_columns([
-            (pl.col("fast_is_constant") != pl.col("fast_is_constant").shift(1))
-            .cum_sum().alias("segment_id")
-        ])
-
-        # --- Classify fast-sweep vs slow-sweep segments ---
-        grouped = df.group_by('segment_id', maintain_order=True)
+        # --- Segment Detection using direction-sign method ---
+        segments = self._detect_direction_segments(df, fast_col, fast_threshold)
 
         fast_fwd_segments = []
         fast_bwd_segments = []
         slow_segments = []
         slow_mean_values = []
 
-        for seg_id, segment in grouped:
-            if len(segment) < 3:
-                continue
-
-            is_constant = segment["fast_is_constant"].mode()[0]
-
-            if is_constant:
+        for segment, direction in segments:
+            if direction == 'forward':
+                fast_fwd_segments.append(segment)
+            elif direction == 'backward':
+                fast_bwd_segments.append(segment)
+            elif direction == 'flat':
                 avg_slow = segment[slow_col].mean()
                 slow_segments.append(segment)
                 slow_mean_values.append(avg_slow)
-            else:
-                start_val = segment[fast_col][0]
-                end_val = segment[fast_col][-1]
-
-                if end_val > start_val:
-                    fast_fwd_segments.append(segment)
-                else:
-                    fast_bwd_segments.append(segment)
 
         # --- Cluster Slow Axis Setpoints ---
         setpoint_map = self._cluster_setpoints(slow_mean_values, slow_tolerance)
@@ -254,11 +386,6 @@ class ScanOrganizer:
         for segment, mean_val in zip(slow_segments, slow_mean_values):
             sp_key = setpoint_map[mean_val]
             slow_by_setpoint[sp_key].append(segment)
-
-        # --- Clean up helper columns ---
-        for seg_list in [fast_fwd_segments, fast_bwd_segments] + list(slow_by_setpoint.values()):
-            for i, chunk in enumerate(seg_list):
-                seg_list[i] = chunk.drop(['fast_is_constant', 'segment_id'])
 
         # --- Save Files ---
         self.save_files_smart(file_path, fast_col, slow_col,
