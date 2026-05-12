@@ -3391,8 +3391,10 @@ class InteractivePlotter:
         # Store the completed line as a persistent artist with color
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
-        persistent_line, = self.ax.plot(xs, ys, color=line_color, linestyle='-', linewidth=2.5, zorder=19)
-        persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=3.5, zorder=18)
+        line_width = 2.5
+        line_style = '-'
+        persistent_line, = self.ax.plot(xs, ys, color=line_color, linestyle=line_style, linewidth=line_width, zorder=19)
+        persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=line_width + 1, zorder=18)
         persistent_dots, = self.ax.plot(xs, ys, 'o', color=line_color, markersize=5, zorder=20, markeredgecolor='k')
         
         # Extract data along the line
@@ -3403,7 +3405,9 @@ class InteractivePlotter:
             'points': points,
             'color': line_color,
             'name': line_name,
-            'profile_data': profile_data
+            'profile_data': profile_data,
+            'linestyle': line_style,
+            'width': line_width
         })
         self._cmap_line_artists = []
         
@@ -3586,8 +3590,10 @@ class InteractivePlotter:
             xs = [p[0] for p in points]
             ys = [p[1] for p in points]
             color = line_data.get('color', 'white')
-            persistent_line, = self.ax.plot(xs, ys, color=color, linestyle='-', linewidth=2.5, zorder=19)
-            persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=3.5, zorder=18)
+            ls = line_data.get('linestyle', '-')
+            lw = line_data.get('width', 2.5)
+            persistent_line, = self.ax.plot(xs, ys, color=color, linestyle=ls, linewidth=lw, zorder=19)
+            persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=lw + 1, zorder=18)
             persistent_dots, = self.ax.plot(xs, ys, 'o', color=color, markersize=5, zorder=20, markeredgecolor='k')
             line_data['artists'] = [persistent_outline, persistent_line, persistent_dots]
     
@@ -3618,7 +3624,9 @@ class InteractivePlotter:
             z_vals = [d['z'] for d in profile]
             color = line_data.get('color', 'blue')
             name = line_data.get('name', 'Line')
-            ln, = ax_profile.plot(distances, z_vals, color=color, linewidth=1.5, label=name)
+            ls = line_data.get('linestyle', '-')
+            lw = line_data.get('width', 1.5)
+            ln, = ax_profile.plot(distances, z_vals, color=color, linestyle=ls, linewidth=lw, label=name)
             plotted_lines.append(ln)
             plotted_labels.append(name)
         
@@ -3707,35 +3715,39 @@ class InteractivePlotter:
         ttk.Button(btn_frame, text="Close", command=popup.destroy).pack(side='left', expand=True, fill='x', padx=3)
     
     def _open_line_config_dialog(self):
-        """Open dialog to change line colors and names."""
+        """Open dialog to change line colors, names, types, and widths."""
         if not self._cmap_completed_lines:
             messagebox.showinfo("Info", "No lines drawn yet.")
             return
         
         d = tk.Toplevel(self.root)
-        d.title("Line Colors & Names")
-        d.geometry("450x400")
+        d.title("Line Settings")
+        d.geometry("650x450")
         d.transient(self.root)
         
-        ttk.Label(d, text="Customize line colors and names.\nChanges apply immediately.", 
+        ttk.Label(d, text="Customize line color, name, type, and width.\nChanges apply immediately.", 
                   font=('Arial', 10, 'italic'), foreground='gray').pack(pady=(10, 5), padx=10)
         
         # Scrollable frame for line entries
         container = ttk.Frame(d)
         container.pack(fill='both', expand=True, padx=10, pady=5)
         
-        canvas = tk.Canvas(container, highlightthickness=0)
-        sb = ttk.Scrollbar(container, orient='vertical', command=canvas.yview)
-        inner = ttk.Frame(canvas)
-        inner.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
-        canvas.create_window((0, 0), window=inner, anchor='nw')
-        canvas.configure(yscrollcommand=sb.set)
+        scroll_canvas = tk.Canvas(container, highlightthickness=0)
+        sb = ttk.Scrollbar(container, orient='vertical', command=scroll_canvas.yview)
+        inner = ttk.Frame(scroll_canvas)
+        inner.bind('<Configure>', lambda e: scroll_canvas.configure(scrollregion=scroll_canvas.bbox('all')))
+        scroll_canvas.create_window((0, 0), window=inner, anchor='nw')
+        scroll_canvas.configure(yscrollcommand=sb.set)
         sb.pack(side='right', fill='y')
-        canvas.pack(side='left', fill='both', expand=True)
+        scroll_canvas.pack(side='left', fill='both', expand=True)
         
         def on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
-        canvas.bind('<MouseWheel>', on_mousewheel)
+            scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        scroll_canvas.bind('<MouseWheel>', on_mousewheel)
+        
+        # Line style options
+        line_style_options = ['-', '--', '-.', ':']
+        line_style_labels = {'-': 'Solid (—)', '--': 'Dashed (---)', '-.': 'Dash-dot (-.-)', ':': 'Dotted (···)'}
         
         for i, line_data in enumerate(self._cmap_completed_lines):
             row_frame = ttk.Frame(inner)
@@ -3748,8 +3760,23 @@ class InteractivePlotter:
             
             # Name entry
             name_var = tk.StringVar(value=line_data.get('name', f'Line {i+1}'))
-            name_entry = ttk.Entry(row_frame, textvariable=name_var, width=15)
+            name_entry = ttk.Entry(row_frame, textvariable=name_var, width=12)
             name_entry.pack(side='left', padx=5)
+            
+            # Line type combobox
+            current_ls = line_data.get('linestyle', '-')
+            ls_var = tk.StringVar(value=line_style_labels.get(current_ls, 'Solid (—)'))
+            ls_combo = ttk.Combobox(row_frame, textvariable=ls_var, 
+                                     values=list(line_style_labels.values()), 
+                                     state='readonly', width=14)
+            ls_combo.pack(side='left', padx=5)
+            
+            # Width entry
+            current_w = line_data.get('width', 2.5)
+            w_var = tk.StringVar(value=str(current_w))
+            ttk.Label(row_frame, text="W:", font=('Arial', 9)).pack(side='left', padx=(5, 0))
+            w_entry = ttk.Entry(row_frame, textvariable=w_var, width=5)
+            w_entry.pack(side='left', padx=(2, 5))
             
             # Color picker callback
             def make_color_cb(btn, idx):
@@ -3769,6 +3796,30 @@ class InteractivePlotter:
                     self._cmap_completed_lines[idx]['name'] = var.get()
                 return cb
             name_var.trace('w', make_name_cb(name_var, i))
+            
+            # Line style change callback
+            def make_ls_cb(var, idx):
+                def cb(*args):
+                    label_to_style = {v: k for k, v in line_style_labels.items()}
+                    chosen = var.get()
+                    if chosen in label_to_style:
+                        self._cmap_completed_lines[idx]['linestyle'] = label_to_style[chosen]
+                        self._redraw_after_color_change()
+                return cb
+            ls_var.trace('w', make_ls_cb(ls_var, i))
+            
+            # Width change callback
+            def make_width_cb(var, idx):
+                def cb(*args):
+                    try:
+                        w = float(var.get())
+                        if w > 0:
+                            self._cmap_completed_lines[idx]['width'] = w
+                            self._redraw_after_color_change()
+                    except ValueError:
+                        pass
+                return cb
+            w_var.trace('w', make_width_cb(w_var, i))
         
         # Buttons
         btn_frame = ttk.Frame(d)
