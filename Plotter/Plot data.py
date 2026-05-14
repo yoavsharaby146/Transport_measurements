@@ -2483,17 +2483,21 @@ class InteractivePlotter:
                         st = self.styles.get(key, {})
                         # Default to TRUE if show_in_legend is not set
                         # Also check if item is in hidden_legend_items
-                        if st.get('show_in_legend', True) and key not in self.hidden_legend_items:
-                            filtered_lines.append(ln)
-                            filtered_labels.append(lbl)
-                            filtered_keys.append(key)
-                        else:
-                            # Hide ALL lines for this series (important for broken Y-axis)
+                        if key in self.hidden_legend_items:
+                            # Hide ALL lines for this series (toggled via legend click / context menu)
                             if key in self._series_line_groups:
                                 for line_obj in self._series_line_groups[key]:
                                     line_obj.set_visible(False)
                             else:
                                 ln.set_visible(False)
+                        elif st.get('show_in_legend', True):
+                            # Show in legend — include in legend entries
+                            filtered_lines.append(ln)
+                            filtered_labels.append(lbl)
+                            filtered_keys.append(key)
+                        else:
+                            # show_in_legend=False — keep line visible but exclude from legend
+                            pass
                     else:
                         # Keep items we can't map (shouldn't happen, but safety)
                         filtered_lines.append(ln)
