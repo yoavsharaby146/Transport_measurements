@@ -90,6 +90,7 @@ class InteractivePlotter:
         self.v_y_div = tk.StringVar(value="1")
         self.v_y2_div = tk.StringVar(value="1")
         self.v_z_div = tk.StringVar(value="1")
+        self.v_x2_div = tk.StringVar(value="1")
 
         self.v_x_min = tk.StringVar()
         self.v_x_max = tk.StringVar()
@@ -97,6 +98,8 @@ class InteractivePlotter:
         self.v_y_max = tk.StringVar()
         self.v_y2_min = tk.StringVar()
         self.v_y2_max = tk.StringVar()
+        self.v_x2_min = tk.StringVar()
+        self.v_x2_max = tk.StringVar()
         self.v_z_min = tk.StringVar()
         self.v_z_max = tk.StringVar()
         self.v_break_start = tk.StringVar()  # Backward compat → Y Break 1 Start
@@ -110,6 +113,7 @@ class InteractivePlotter:
         self.v_xlabel = tk.StringVar()
         self.v_ylabel = tk.StringVar()
         self.v_y2label = tk.StringVar()
+        self.v_x2label = tk.StringVar()
         self.v_zlabel = tk.StringVar()
         self.v_legend = tk.StringVar()
         self.show_legend = tk.BooleanVar(value=True)
@@ -129,6 +133,8 @@ class InteractivePlotter:
         self.ylabel_y = tk.StringVar(value="0.5")  # Default center
         self.y2label_x = tk.StringVar(value="0.96")  # Default right
         self.y2label_y = tk.StringVar(value="0.5")  # Default center
+        self.x2label_x = tk.StringVar(value="0.5")  # Default center for top X2
+        self.x2label_y = tk.StringVar(value="0.98")  # Default top
         self.zlabel_x = tk.StringVar(value="0.96")  # Default right (for colorbar)
         self.zlabel_y = tk.StringVar(value="0.5")  # Default center
         self.use_custom_label_positions = tk.BooleanVar(value=False)  # Enable custom positions
@@ -138,6 +144,7 @@ class InteractivePlotter:
         self.xlabel_rotation = tk.StringVar(value="0")
         self.ylabel_rotation = tk.StringVar(value="90")  # 90 = vertical
         self.y2label_rotation = tk.StringVar(value="90")  # 90 = vertical (inverted for right side)
+        self.x2label_rotation = tk.StringVar(value="0")  # 0 = horizontal (for top X2 axis)
         self.zlabel_rotation = tk.StringVar(value="90")  # 90 = vertical (for colorbar)
         self.use_custom_rotation = tk.BooleanVar(value=False)  # Enable custom rotation
 
@@ -150,8 +157,10 @@ class InteractivePlotter:
         self.xlabel_color = 'black'
         self.ylabel_color = 'black'
         self.zlabel_color = 'black'
+        self.x2label_color = 'black'
         self.xtick_color = 'black'
         self.ytick_color = 'black'
+        self.x2tick_color = 'black'
         self.plot_bg_color = 'white'
         self.fig_bg_color = 'white'
         self.legend_fill_color = 'white'
@@ -166,17 +175,20 @@ class InteractivePlotter:
         self.v_y_maj = tk.StringVar()
         self.v_y1_maj = tk.StringVar()
         self.v_y2_maj = tk.StringVar()
+        self.v_x2_maj = tk.StringVar()
         self.v_z_maj = tk.StringVar()
         self.v_x_min_div = tk.StringVar()
         self.v_y_min_div = tk.StringVar()
         self.v_y1_min_div = tk.StringVar()
         self.v_y2_min_div = tk.StringVar()
+        self.v_x2_min_div = tk.StringVar()
         self.v_z_min_div = tk.StringVar()
 
         self.v_x_tick_pad = tk.StringVar(value="3.5")
         self.v_y_tick_pad = tk.StringVar(value="3.5")
         self.v_y1_pad = tk.StringVar(value="3.5")
         self.v_y2_pad = tk.StringVar(value="3.5")
+        self.v_x2_tick_pad = tk.StringVar(value="3.5")
         self.v_z_tick_pad = tk.StringVar(value="3.5")
 
         self.v_font_fam = tk.StringVar(value="Arial")
@@ -195,10 +207,12 @@ class InteractivePlotter:
         self.v_tick_dir_y = tk.StringVar(value="out")
         self.v_tick_dir_y2 = tk.StringVar(value="out")
         self.v_tick_dir_z = tk.StringVar(value="out")
+        self.v_tick_dir_x2 = tk.StringVar(value="out")
         self.v_minor_tick_dir_x = tk.StringVar(value="out")
         self.v_minor_tick_dir_y = tk.StringVar(value="out")
         self.v_minor_tick_dir_y2 = tk.StringVar(value="out")
         self.v_minor_tick_dir_z = tk.StringVar(value="out")
+        self.v_minor_tick_dir_x2 = tk.StringVar(value="out")
         self.v_major_tick_length = tk.StringVar(value="4.0")
         self.v_minor_tick_length = tk.StringVar(value="2.0")
 
@@ -354,7 +368,7 @@ class InteractivePlotter:
         row += 1
         ttk.Label(control_frame, text="Plot Type:").grid(row=row, column=0, columnspan=2, sticky='w')
         self.plot_type = ttk.Combobox(control_frame,
-                                      values=["Line", "Scatter", "Color Map", "Dual Y-Axis"],
+                                      values=["Line", "Scatter", "Color Map", "Dual Y-Axis", "XXY (Dual X)", "XYXY (Dual X+Y)"],
                                       state='readonly', width=20)
         self.plot_type.current(0)
         self.plot_type.grid(row=row, column=2, columnspan=2, sticky='ew', pady=5)
@@ -412,6 +426,92 @@ class InteractivePlotter:
         ttk.Label(self.y_dual_frame, text="Right Axis Y:", foreground="red").pack(anchor='w', pady=(5, 0))
         self.y2_combo = ttk.Combobox(self.y_dual_frame, state='readonly')
         self.y2_combo.pack(fill='x', pady=2)
+
+
+        # --- XXY (Dual X) frame ---
+        self.xxy_frame = ttk.Frame(self.y_container_frame)
+        # Shared Y
+        y_row = ttk.Frame(self.xxy_frame)
+        y_row.pack(fill='x', pady=2)
+        ttk.Label(y_row, text="Y Column:", width=10).pack(side='left')
+        self.xxy_y_combo = ttk.Combobox(y_row, state='readonly')
+        self.xxy_y_combo.pack(side='left', fill='x', expand=True)
+        # X1 section
+        ttk.Separator(self.xxy_frame, orient='horizontal').pack(fill='x', pady=4)
+        ttk.Label(self.xxy_frame, text="X1 (Bottom):", foreground="blue", font=('Arial', 9, 'bold')).pack(anchor='w')
+        x1_f = ttk.Frame(self.xxy_frame)
+        x1_f.pack(fill='x', pady=1)
+        ttk.Label(x1_f, text="Files:", width=10).pack(side='left')
+        x1_sb = ttk.Scrollbar(x1_f, orient='vertical')
+        self.xxy_x1_files = tk.Listbox(x1_f, selectmode='multiple', height=3, yscrollcommand=x1_sb.set, exportselection=False)
+        x1_sb.config(command=self.xxy_x1_files.yview)
+        self.xxy_x1_files.pack(side='left', fill='both', expand=True)
+        x1_sb.pack(side='right', fill='y')
+        x1c = ttk.Frame(self.xxy_frame)
+        x1c.pack(fill='x', pady=1)
+        ttk.Label(x1c, text="X Col:", width=10).pack(side='left')
+        self.xxy_x1_col = ttk.Combobox(x1c, state='readonly')
+        self.xxy_x1_col.pack(side='left', fill='x', expand=True)
+        # X2 section
+        ttk.Separator(self.xxy_frame, orient='horizontal').pack(fill='x', pady=4)
+        ttk.Label(self.xxy_frame, text="X2 (Top):", foreground="red", font=('Arial', 9, 'bold')).pack(anchor='w')
+        x2_f = ttk.Frame(self.xxy_frame)
+        x2_f.pack(fill='x', pady=1)
+        ttk.Label(x2_f, text="Files:", width=10).pack(side='left')
+        x2_sb = ttk.Scrollbar(x2_f, orient='vertical')
+        self.xxy_x2_files = tk.Listbox(x2_f, selectmode='multiple', height=3, yscrollcommand=x2_sb.set, exportselection=False)
+        x2_sb.config(command=self.xxy_x2_files.yview)
+        self.xxy_x2_files.pack(side='left', fill='both', expand=True)
+        x2_sb.pack(side='right', fill='y')
+        x2c = ttk.Frame(self.xxy_frame)
+        x2c.pack(fill='x', pady=1)
+        ttk.Label(x2c, text="X Col:", width=10).pack(side='left')
+        self.xxy_x2_col = ttk.Combobox(x2c, state='readonly')
+        self.xxy_x2_col.pack(side='left', fill='x', expand=True)
+
+        # --- XYXY (Dual X+Y) frame ---
+        self.xyxy_frame = ttk.Frame(self.y_container_frame)
+        # X1 Y1 section
+        ttk.Label(self.xyxy_frame, text="X1 Y1 (Bottom-Left):", foreground="blue", font=('Arial', 9, 'bold')).pack(anchor='w')
+        xy1_f = ttk.Frame(self.xyxy_frame)
+        xy1_f.pack(fill='x', pady=1)
+        ttk.Label(xy1_f, text="Files:", width=10).pack(side='left')
+        xy1_sb = ttk.Scrollbar(xy1_f, orient='vertical')
+        self.xyxy_x1y1_files = tk.Listbox(xy1_f, selectmode='multiple', height=3, yscrollcommand=xy1_sb.set, exportselection=False)
+        xy1_sb.config(command=self.xyxy_x1y1_files.yview)
+        self.xyxy_x1y1_files.pack(side='left', fill='both', expand=True)
+        xy1_sb.pack(side='right', fill='y')
+        xy1c = ttk.Frame(self.xyxy_frame)
+        xy1c.pack(fill='x', pady=1)
+        ttk.Label(xy1c, text="X Col:", width=10).pack(side='left')
+        self.xyxy_x1_col = ttk.Combobox(xy1c, state='readonly')
+        self.xyxy_x1_col.pack(side='left', fill='x', expand=True)
+        xy1y = ttk.Frame(self.xyxy_frame)
+        xy1y.pack(fill='x', pady=1)
+        ttk.Label(xy1y, text="Y Col:", width=10).pack(side='left')
+        self.xyxy_y1_col = ttk.Combobox(xy1y, state='readonly')
+        self.xyxy_y1_col.pack(side='left', fill='x', expand=True)
+        # X2 Y2 section
+        ttk.Separator(self.xyxy_frame, orient='horizontal').pack(fill='x', pady=4)
+        ttk.Label(self.xyxy_frame, text="X2 Y2 (Top-Right):", foreground="red", font=('Arial', 9, 'bold')).pack(anchor='w')
+        xy2_f = ttk.Frame(self.xyxy_frame)
+        xy2_f.pack(fill='x', pady=1)
+        ttk.Label(xy2_f, text="Files:", width=10).pack(side='left')
+        xy2_sb = ttk.Scrollbar(xy2_f, orient='vertical')
+        self.xyxy_x2y2_files = tk.Listbox(xy2_f, selectmode='multiple', height=3, yscrollcommand=xy2_sb.set, exportselection=False)
+        xy2_sb.config(command=self.xyxy_x2y2_files.yview)
+        self.xyxy_x2y2_files.pack(side='left', fill='both', expand=True)
+        xy2_sb.pack(side='right', fill='y')
+        xy2c = ttk.Frame(self.xyxy_frame)
+        xy2c.pack(fill='x', pady=1)
+        ttk.Label(xy2c, text="X Col:", width=10).pack(side='left')
+        self.xyxy_x2_col = ttk.Combobox(xy2c, state='readonly')
+        self.xyxy_x2_col.pack(side='left', fill='x', expand=True)
+        xy2y = ttk.Frame(self.xyxy_frame)
+        xy2y.pack(fill='x', pady=1)
+        ttk.Label(xy2y, text="Y Col:", width=10).pack(side='left')
+        self.xyxy_y2_col = ttk.Combobox(xy2y, state='readonly')
+        self.xyxy_y2_col.pack(side='left', fill='x', expand=True)
 
         ttk.Label(control_frame, text="Z Axis (Color):").grid(row=row, column=0, sticky='w')
         self.z_combo = ttk.Combobox(control_frame, state='readonly', width=20)
@@ -730,6 +830,7 @@ class InteractivePlotter:
         add_entry(tab_ranges, "Divide Y:", self.v_y_div)
         add_entry(tab_ranges, "Divide Y2:", self.v_y2_div)
         add_entry(tab_ranges, "Divide Z:", self.v_z_div)
+        add_entry(tab_ranges, "Divide X2:", self.v_x2_div)
 
         ttk.Separator(tab_ranges, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_ranges, text="Axis Ranges", font=('Arial', 10, 'bold')).pack(pady=5)
@@ -741,9 +842,13 @@ class InteractivePlotter:
         add_entry(tab_ranges, "Z Max (Color):", self.v_z_max)
 
         ttk.Separator(tab_ranges, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(tab_ranges, text="Dual Y-Axis Ranges", font=('Arial', 10, 'bold')).pack(pady=5)
+        ttk.Label(tab_ranges, text="Secondary Axis Ranges", font=('Arial', 10, 'bold')).pack(pady=5)
         add_entry(tab_ranges, "Y2 Min:", self.v_y2_min)
         add_entry(tab_ranges, "Y2 Max:", self.v_y2_max)
+        ttk.Separator(tab_ranges, orient='horizontal').pack(fill='x', pady=5)
+        ttk.Label(tab_ranges, text="Dual X-Axis Ranges (XXY/XYXY)", font=('Arial', 10, 'bold')).pack(pady=5)
+        add_entry(tab_ranges, "X2 Min:", self.v_x2_min)
+        add_entry(tab_ranges, "X2 Max:", self.v_x2_max)
 
         # ============================================
         # TAB 2: Axis Breaks
@@ -861,6 +966,7 @@ class InteractivePlotter:
         add_entry(tab_text, "Y Label:", self.v_ylabel)
         add_entry(tab_text, "Y2 Label:", self.v_y2label)
         add_entry(tab_text, "Z Label (Color):", self.v_zlabel)
+        add_entry(tab_text, "X2 Label (Top):", self.v_x2label)
         
         ttk.Separator(tab_text, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_text, text="Legend Text", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
@@ -885,11 +991,13 @@ class InteractivePlotter:
         add_col(tab_colors, "X Label Color:", "xlabel_color", self.xlabel_color)
         add_col(tab_colors, "Y Label Color:", "ylabel_color", self.ylabel_color)
         add_col(tab_colors, "Z Label Color:", "zlabel_color", self.zlabel_color)
+        add_col(tab_colors, "X2 Label Color:", "x2label_color", self.x2label_color)
         
         ttk.Separator(tab_colors, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_colors, text="Tick Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_col(tab_colors, "X Tick Color:", "xtick_color", self.xtick_color)
         add_col(tab_colors, "Y Tick Color:", "ytick_color", self.ytick_color)
+        add_col(tab_colors, "X2 Tick Color:", "x2tick_color", self.x2tick_color)
         
         ttk.Separator(tab_colors, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_colors, text="Background Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
@@ -931,6 +1039,10 @@ class InteractivePlotter:
         ttk.Label(tab_positions, text="Z Label Position (Color Map)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_pos_entry(tab_positions, "Z Label:", self.zlabel_x, self.zlabel_y)
         
+        ttk.Separator(tab_positions, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_positions, text="X2 Label Position (XXY/XYXY)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_pos_entry(tab_positions, "X2 Label:", self.x2label_x, self.x2label_y)
+        
         # ============================================
         # TAB 4: Rotation
         # ============================================
@@ -965,6 +1077,12 @@ class InteractivePlotter:
         ttk.Label(tab_rotation, text="Z Label Rotation (Color Map)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_rot_entry(tab_rotation, "Z Label Rotation:", self.zlabel_rotation)
         ttk.Label(tab_rotation, text="(Default: 90° = vertical, for colorbar label)", 
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
+        
+        ttk.Separator(tab_rotation, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rotation, text="X2 Label Rotation (XXY/XYXY)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_rot_entry(tab_rotation, "X2 Label Rotation:", self.x2label_rotation)
+        ttk.Label(tab_rotation, text="(Default: 0° = horizontal, for top X2 axis label)",
                   font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
         
         # ============================================
@@ -1114,9 +1232,10 @@ class InteractivePlotter:
             ttk.Entry(gf, textvariable=v_pad, width=10).grid(row=r, column=3, padx=2)
 
         add_t_row("X", self.v_x_maj, self.v_x_min_div, self.v_x_tick_pad, 1)
-        add_t_row("Y1 (Left)", self.v_y1_maj, self.v_y1_min_div, self.v_y1_pad, 2)
-        add_t_row("Y2 (Right)", self.v_y2_maj, self.v_y2_min_div, self.v_y2_pad, 3)
-        add_t_row("Z (Color)", self.v_z_maj, self.v_z_min_div, self.v_z_tick_pad, 4)
+        add_t_row("X2 (Top)", self.v_x2_maj, self.v_x2_min_div, self.v_x2_tick_pad, 2)
+        add_t_row("Y1 (Left)", self.v_y1_maj, self.v_y1_min_div, self.v_y1_pad, 3)
+        add_t_row("Y2 (Right)", self.v_y2_maj, self.v_y2_min_div, self.v_y2_pad, 4)
+        add_t_row("Z (Color)", self.v_z_maj, self.v_z_min_div, self.v_z_tick_pad, 5)
 
         ttk.Separator(tab_tick, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_tick, text="Notation", font=('Arial', 10, 'bold')).pack(pady=5)
@@ -1160,6 +1279,7 @@ class InteractivePlotter:
         add_sz(tab_font, "Legend Size:", self.v_leg_size)
         add_sz(tab_font, "X Tick Size:", self.v_xtick_size)
         add_sz(tab_font, "Y Tick Size:", self.v_ytick_size)
+        add_sz(tab_font, "X2 Tick Size:", self.v_sec_x_tick_size)
 
         # ============================================
         # TAB 3: Tick Appearance
@@ -1178,6 +1298,8 @@ class InteractivePlotter:
         ttk.Combobox(dir_frame, textvariable=self.v_tick_dir_y2, values=dir_options, width=8, state='readonly').grid(row=1, column=1, padx=2)
         ttk.Label(dir_frame, text="Z:", width=8).grid(row=1, column=2)
         ttk.Combobox(dir_frame, textvariable=self.v_tick_dir_z, values=dir_options, width=8, state='readonly').grid(row=1, column=3, padx=2)
+        ttk.Label(dir_frame, text="X2:", width=8).grid(row=2, column=0)
+        ttk.Combobox(dir_frame, textvariable=self.v_tick_dir_x2, values=dir_options, width=8, state='readonly').grid(row=2, column=1, padx=2)
 
         ttk.Label(tab_appear, text="Minor Tick Direction:", font=('Arial', 9, 'bold')).pack(anchor='w', pady=(10, 2))
         mdir_frame = ttk.Frame(tab_appear)
@@ -1190,6 +1312,8 @@ class InteractivePlotter:
         ttk.Combobox(mdir_frame, textvariable=self.v_minor_tick_dir_y2, values=dir_options, width=8, state='readonly').grid(row=1, column=1, padx=2)
         ttk.Label(mdir_frame, text="Z:", width=8).grid(row=1, column=2)
         ttk.Combobox(mdir_frame, textvariable=self.v_minor_tick_dir_z, values=dir_options, width=8, state='readonly').grid(row=1, column=3, padx=2)
+        ttk.Label(mdir_frame, text="X2:", width=8).grid(row=2, column=0)
+        ttk.Combobox(mdir_frame, textvariable=self.v_minor_tick_dir_x2, values=dir_options, width=8, state='readonly').grid(row=2, column=1, padx=2)
 
         ttk.Label(tab_appear, text="Tick Length (points):", font=('Arial', 9, 'bold')).pack(anchor='w', pady=(10, 2))
         len_frame = ttk.Frame(tab_appear)
@@ -1529,6 +1653,9 @@ class InteractivePlotter:
         for c in columns: self.y_listbox.insert(tk.END, c)
         self.y1_combo['values'] = columns;
         self.y2_combo['values'] = columns
+        # Update XXY/XYXY combos
+        if hasattr(self, '_update_xxy_xyxy_combos'):
+            self._update_xxy_xyxy_combos()
         if columns:
             self.y1_combo.current(0)
             if len(columns) > 1:
@@ -1548,13 +1675,64 @@ class InteractivePlotter:
         if ptype != "Color Map" and self._cmap_draw_mode:
             self.toggle_draw_line_mode(force_disconnect=True)
             self._clear_cmap_lines()
+        # Hide all frames first
+        self.y_dual_frame.pack_forget()
+        self.xxy_frame.pack_forget()
+        self.xyxy_frame.pack_forget()
+        self.y_list_frame.pack_forget()
         if ptype == "Dual Y-Axis":
-            self.y_list_frame.pack_forget();
             self.y_dual_frame.pack(fill='both', expand=True)
+        elif ptype == "XXY (Dual X)":
+            self.xxy_frame.pack(fill='both', expand=True)
+        elif ptype == "XYXY (Dual X+Y)":
+            self.xyxy_frame.pack(fill='both', expand=True)
         else:
-            self.y_dual_frame.pack_forget();
             self.y_list_frame.pack(fill='both', expand=True)
         self.update_plot()
+
+    def _sync_file_listbox(self, listbox):
+        """Sync a file listbox with current datasets, preserving selection."""
+        old_sel_indices = listbox.curselection()
+        keys = list(self.datasets.keys())
+        old_sel = {keys[i] for i in old_sel_indices if i < len(keys)}
+        listbox.delete(0, tk.END)
+        for key in self.datasets:
+            listbox.insert(tk.END, key)
+            if key in old_sel:
+                listbox.selection_set(tk.END)
+
+    def _get_selected_files(self, listbox):
+        """Get list of file keys selected in a listbox."""
+        sel = listbox.curselection()
+        keys = list(self.datasets.keys())
+        return [keys[i] for i in sel if i < len(keys)]
+
+    def _update_xxy_xyxy_combos(self):
+        """Update all XXY/XYXY file listboxes and column combos."""
+        columns = list(self.datasets[list(self.datasets.keys())[0]].columns) if self.datasets else []
+        # Sync file listboxes
+        for lb in [self.xxy_x1_files, self.xxy_x2_files, self.xyxy_x1y1_files, self.xyxy_x2y2_files]:
+            self._sync_file_listbox(lb)
+        # Update column combos
+        for combo in [self.xxy_y_combo, self.xxy_x1_col, self.xxy_x2_col,
+                      self.xyxy_x1_col, self.xyxy_y1_col, self.xyxy_x2_col, self.xyxy_y2_col]:
+            combo['values'] = columns
+        # Auto-set defaults if empty
+        x_col = self.x_combo.get()
+        for combo in [self.xxy_x1_col, self.xxy_x2_col, self.xyxy_x1_col, self.xyxy_x2_col]:
+            if not combo.get() and x_col in columns:
+                combo.set(x_col)
+            elif not combo.get() and columns:
+                combo.set(columns[0])
+        y_col = self.y_listbox.curselection()
+        if y_col:
+            y_name = self.y_listbox.get(y_col[0])
+            for combo in [self.xxy_y_combo, self.xyxy_y1_col]:
+                if not combo.get() and y_name in columns:
+                    combo.set(y_name)
+        if columns:
+            if not self.xyxy_y2_col.get():
+                self.xyxy_y2_col.set(columns[0] if not y_col else self.y_listbox.get(y_col[0]))
 
     def get_selected_datasets(self):
         idxs = self.dataset_listbox.curselection()
@@ -2102,11 +2280,21 @@ class InteractivePlotter:
             if ptype == "Dual Y-Axis":
                 if self.y1_combo.get(): ycols.append(self.y1_combo.get())
                 if self.y2_combo.get(): ycols.append(self.y2_combo.get())
+            elif ptype == "XYXY (Dual X+Y)":
+                if self.y1_combo.get(): ycols.append(self.y1_combo.get())
+                if self.y2_combo.get(): ycols.append(self.y2_combo.get())
             else:
                 y_idxs = self.y_listbox.curselection()
                 ycols = [self.y_listbox.get(i) for i in y_idxs]
 
-            if not xcol or not ycols: raise ValueError("Select X and Y axes.")
+            # XXY/XYXY use their own column selectors, skip ycols check
+            if ptype not in ["XXY (Dual X)", "XYXY (Dual X+Y)"]:
+                if not xcol or not ycols: raise ValueError("Select X and Y axes.")
+            elif ptype == "XXY (Dual X)":
+                if not self.xxy_y_combo.get(): raise ValueError("Select a Y column for XXY plot.")
+            elif ptype == "XYXY (Dual X+Y)":
+                if not self.xyxy_y1_col.get() or not self.xyxy_y2_col.get():
+                    raise ValueError("Select Y columns for both X1Y1 and X2Y2.")
 
             l_txt = self.v_legend.get().strip()
             cust_legs = [l.strip() for l in l_txt.split(',')] if l_txt else []
@@ -2115,11 +2303,16 @@ class InteractivePlotter:
             series_to_plot = []
             for fk, df in sel_ds:
                 if ptype == "Dual Y-Axis":
-                    # Each selected file contributes Y1 to left axis and Y2 to right axis
                     if ycols and ycols[0] and ycols[0] in df.columns:
                         series_to_plot.append((fk, ycols[0], 0))
                     if len(ycols) > 1 and ycols[1] and ycols[1] in df.columns:
                         series_to_plot.append((fk, ycols[1], 1))
+                elif ptype == "XXY (Dual X)":
+                    # XXY uses its own file lists - skip the normal iteration
+                    pass
+                elif ptype == "XYXY (Dual X+Y)":
+                    # XYXY uses its own file lists - skip the normal iteration
+                    pass
                 else:
                     for yc in ycols:
                         if yc in df.columns: series_to_plot.append((fk, yc, 0))
@@ -2151,17 +2344,6 @@ class InteractivePlotter:
                 if ordered_series:
                     series_to_plot = ordered_series
 
-            # --- COLOR LOGIC: GRADIENT vs CYCLE ---
-            total_lines = len(series_to_plot)
-            generated_colors = []
-            if self.v_color_mode.get() == "Gradient" and total_lines > 0:
-                cmap = plt.get_cmap(self.v_cmap_name.get())
-                generated_colors = [cmap(x) for x in np.linspace(0.0, 1.0, total_lines)] if total_lines > 1 else [
-                    cmap(0.5)]
-            else:
-                cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
-                generated_colors = [cycle[i % len(cycle)] for i in range(total_lines)]
-
             X_master = None
             if self.use_ref_x_var.get():
                 ref = self.axis_ref_combo.get()
@@ -2174,11 +2356,66 @@ class InteractivePlotter:
             has_y_breaks = len(y_breaks_orig) > 0 and ptype != "Color Map"
             has_x_breaks = len(x_breaks_orig) > 0 and ptype != "Color Map"
 
+            # Build series for XXY/XYXY (uses its own file lists, not selected datasets)
+            if ptype == "XXY (Dual X)":
+                for fk in self._get_selected_files(self.xxy_x1_files):
+                    if fk in self.datasets:
+                        df = self.datasets[fk]
+                        y_col = self.xxy_y_combo.get()
+                        x1_col = self.xxy_x1_col.get()
+                        if y_col and x1_col and y_col in df.columns and x1_col in df.columns:
+                            series_to_plot.append((fk, y_col, 0))
+                for fk in self._get_selected_files(self.xxy_x2_files):
+                    if fk in self.datasets:
+                        df = self.datasets[fk]
+                        y_col = self.xxy_y_combo.get()
+                        x2_col = self.xxy_x2_col.get()
+                        if y_col and x2_col and y_col in df.columns and x2_col in df.columns:
+                            series_to_plot.append((fk, y_col, 1))
+            elif ptype == "XYXY (Dual X+Y)":
+                for fk in self._get_selected_files(self.xyxy_x1y1_files):
+                    if fk in self.datasets:
+                        df = self.datasets[fk]
+                        x1_col = self.xyxy_x1_col.get()
+                        y1_col = self.xyxy_y1_col.get()
+                        if x1_col and y1_col and x1_col in df.columns and y1_col in df.columns:
+                            series_to_plot.append((fk, y1_col, 0))
+                for fk in self._get_selected_files(self.xyxy_x2y2_files):
+                    if fk in self.datasets:
+                        df = self.datasets[fk]
+                        x2_col = self.xyxy_x2_col.get()
+                        y2_col = self.xyxy_y2_col.get()
+                        if x2_col and y2_col and x2_col in df.columns and y2_col in df.columns:
+                            series_to_plot.append((fk, y2_col, 1))
+
+            # --- COLOR LOGIC: GRADIENT vs CYCLE (must be AFTER all series are built) ---
+            total_lines = len(series_to_plot)
+            generated_colors = []
+            if self.v_color_mode.get() == "Gradient" and total_lines > 0:
+                cmap = plt.get_cmap(self.v_cmap_name.get())
+                generated_colors = [cmap(x) for x in np.linspace(0.0, 1.0, total_lines)] if total_lines > 1 else [
+                    cmap(0.5)]
+            else:
+                cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                generated_colors = [cycle[i % len(cycle)] for i in range(total_lines)]
+
             axes_list = []
             if ptype == "Dual Y-Axis":
                 self.ax = self.fig.add_subplot(111);
                 ax_right = self.ax.twinx()
                 axes_list = [self.ax, ax_right]
+            elif ptype == "XXY (Dual X)":
+                self.ax = self.fig.add_subplot(111);
+                ax_top = self.ax.twiny()
+                axes_list = [self.ax, ax_top]
+            elif ptype == "XYXY (Dual X+Y)":
+                self.ax = self.fig.add_subplot(111);
+                ax_right = self.ax.twinx()   # Independent right Y, shared bottom X
+                ax2 = ax_right.twiny()       # Independent top X, shares right Y
+                ax2.tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
+                ax2.yaxis.tick_right()
+                ax2.xaxis.tick_top()
+                axes_list = [self.ax, ax2]
             else:
                 self.ax = self.fig.add_subplot(111);
                 axes_list = [self.ax]
@@ -2196,14 +2433,40 @@ class InteractivePlotter:
             y2label_text = None
             zlabel_text = None
 
-            if ptype in ["Line", "Scatter", "Dual Y-Axis"]:
+            if ptype in ["Line", "Scatter", "Dual Y-Axis", "XXY (Dual X)", "XYXY (Dual X+Y)"]:
                 for (fk, yc, ax_idx) in series_to_plot:
                     df = self.datasets[fk]
                     curr_yf = yf if ax_idx == 0 else y2f
 
+                    x2f = val(self.v_x2_div, 1.0)
+                    
                     if X_master is not None:
                         X_plot = X_master[:min(len(X_master), len(df))]
                         Y_plot = (df[yc].to_numpy() / curr_yf)[:len(X_plot)]
+                    elif ptype == "XXY (Dual X)" and ax_idx == 0:
+                        x1c = self.xxy_x1_col.get()
+                        X_plot = df[x1c].to_numpy() / xf if x1c and x1c in df.columns else df[xcol].to_numpy() / xf if xcol in df.columns else None
+                        Y_plot = df[yc].to_numpy() / curr_yf if yc in df.columns else None
+                        if X_plot is None or Y_plot is None: continue
+                    elif ptype == "XXY (Dual X)" and ax_idx == 1:
+                        x2c = self.xxy_x2_col.get()
+                        if x2c and x2c in df.columns:
+                            X_plot = df[x2c].to_numpy() / x2f
+                        else: continue
+                        Y_plot = df[yc].to_numpy() / curr_yf if yc in df.columns else None
+                        if Y_plot is None: continue
+                    elif ptype == "XYXY (Dual X+Y)" and ax_idx == 0:
+                        x1c = self.xyxy_x1_col.get()
+                        X_plot = df[x1c].to_numpy() / xf if x1c and x1c in df.columns else df[xcol].to_numpy() / xf if xcol in df.columns else None
+                        Y_plot = df[yc].to_numpy() / curr_yf if yc in df.columns else None
+                        if X_plot is None or Y_plot is None: continue
+                    elif ptype == "XYXY (Dual X+Y)" and ax_idx == 1:
+                        x2c = self.xyxy_x2_col.get()
+                        if x2c and x2c in df.columns:
+                            X_plot = df[x2c].to_numpy() / x2f
+                        else: continue
+                        Y_plot = df[yc].to_numpy() / curr_yf if yc in df.columns else None
+                        if Y_plot is None: continue
                     elif xcol in df.columns:
                         X_plot = df[xcol].to_numpy() / xf
                         Y_plot = df[yc].to_numpy() / curr_yf
@@ -2302,15 +2565,18 @@ class InteractivePlotter:
             except:
                 plot_alpha = 1.0
             
+            # Determine which axes are "top" axes (skip bottom-X formatting for them)
+            is_top_x_axis = set()
+            if ptype == "XXY (Dual X)" and len(axes_list) > 1:
+                is_top_x_axis.add(id(axes_list[1]))
+            elif ptype == "XYXY (Dual X+Y)" and len(axes_list) > 1:
+                is_top_x_axis.add(id(axes_list[1]))
+
             for ax_curr in axes_list:
                 # Apply background color with alpha
                 ax_curr.set_facecolor(self.plot_bg_color)
                 ax_curr.patch.set_alpha(plot_alpha)
-                
-                if not self.x_log.get():
-                    apply_format(ax_curr, 'x', self.v_x_not.get())
-                    if x_maj: ax_curr.xaxis.set_major_locator(ticker.MultipleLocator(x_maj))
-                    if x_min > 1: ax_curr.xaxis.set_minor_locator(ticker.AutoMinorLocator(x_min))
+
                 # Tick direction, length, and side visibility
                 x_dir = self.v_tick_dir_x.get()
                 y_dir = self.v_tick_dir_y.get()
@@ -2319,18 +2585,61 @@ class InteractivePlotter:
                 min_x_dir = self.v_minor_tick_dir_x.get()
                 min_y_dir = self.v_minor_tick_dir_y.get()
 
-                x_tick_len = 0 if x_dir == "none" else maj_len
-                ax_curr.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
-                    length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.xtick_color,
-                    bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
-                # Apply minor tick direction for X (also apply side visibility)
-                if x_min > 1:
-                    min_x_len = 0 if min_x_dir == "none" else min_len
-                    ax_curr.tick_params(axis='x', which='minor', direction=min_x_dir if min_x_dir != "none" else "out",
-                        length=min_x_len,
+                # --- X-axis formatting (skip for top axes in XXY/XYXY) ---
+                is_top = id(ax_curr) in is_top_x_axis
+                if is_top:
+                    # Top axis: only top ticks, apply same formatting as bottom but on top side
+                    if not self.x_log.get():
+                        apply_format(ax_curr, 'x', self.v_x_not.get())
+                        x2_maj_val = val(self.v_x2_maj)
+                        if x2_maj_val: ax_curr.xaxis.set_major_locator(ticker.MultipleLocator(x2_maj_val))
+                        x2_min_div = int(val(self.v_x2_min_div, 0))
+                        if x2_min_div > 1: ax_curr.xaxis.set_minor_locator(ticker.AutoMinorLocator(x2_min_div))
+                    x_tick_len = 0 if x_dir == "none" else maj_len
+                    ax_curr.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
+                        length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.xtick_color,
+                        bottom=False, top=True, labeltop=True, labelbottom=False)
+                    # Minor ticks on top
+                    x2_min_div = int(val(self.v_x2_min_div, 0))
+                    if x2_min_div > 1:
+                        min_x_len = 0 if min_x_dir == "none" else min_len
+                        ax_curr.tick_params(axis='x', which='minor', direction=min_x_dir if min_x_dir != "none" else "out",
+                            length=min_x_len, bottom=False, top=True)
+                elif not self.x_log.get():
+                    apply_format(ax_curr, 'x', self.v_x_not.get())
+                    if x_maj: ax_curr.xaxis.set_major_locator(ticker.MultipleLocator(x_maj))
+                    if x_min > 1: ax_curr.xaxis.set_minor_locator(ticker.AutoMinorLocator(x_min))
+                    x_tick_len = 0 if x_dir == "none" else maj_len
+                    ax_curr.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
+                        length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.xtick_color,
                         bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
+                    # Apply minor tick direction for X (also apply side visibility)
+                    if x_min > 1:
+                        min_x_len = 0 if min_x_dir == "none" else min_len
+                        ax_curr.tick_params(axis='x', which='minor', direction=min_x_dir if min_x_dir != "none" else "out",
+                            length=min_x_len,
+                            bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
 
-                if ptype != "Dual Y-Axis":
+                if ptype == "XYXY (Dual X+Y)" and id(ax_curr) in is_top_x_axis:
+                    # Right Y-axis for XYXY: ticks on right side only, apply formatting
+                    y_dir_y2 = self.v_tick_dir_y2.get()
+                    min_y_dir_y2 = self.v_minor_tick_dir_y2.get()
+                    y2_maj_val = val(self.v_y2_maj)
+                    y2_min_div = int(val(self.v_y2_min_div, 0))
+                    y2_pad_val = val(self.v_y2_pad, 3.5)
+                    if not self.y_log.get():
+                        apply_format(ax_curr, 'y', self.v_y_not.get())
+                        if y2_maj_val: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y2_maj_val))
+                        if y2_min_div > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y2_min_div))
+                    y_tick_len = 0 if y_dir_y2 == "none" else maj_len
+                    ax_curr.tick_params(axis='y', direction=y_dir_y2 if y_dir_y2 != "none" else "out",
+                        length=y_tick_len, labelsize=yt_sz, pad=y2_pad_val, labelcolor=self.ytick_color,
+                        left=False, right=True, labelright=True, labelleft=False)
+                    if y2_min_div > 1:
+                        min_y_len = 0 if min_y_dir_y2 == "none" else min_len
+                        ax_curr.tick_params(axis='y', which='minor', direction=min_y_dir_y2 if min_y_dir_y2 != "none" else "out",
+                            length=min_y_len, left=False, right=True)
+                elif ptype not in ["Dual Y-Axis"]:
                     y_tick_len = 0 if y_dir == "none" else maj_len
                     ax_curr.tick_params(axis='y', direction=y_dir if y_dir != "none" else "out",
                         length=y_tick_len, labelsize=yt_sz, pad=y_pad_val, labelcolor=self.ytick_color,
@@ -2342,7 +2651,7 @@ class InteractivePlotter:
                             length=min_y_len,
                             left=self.v_y_tick_left.get(), right=self.v_y_tick_right.get())
                     if not self.y_log.get():
-                        if  ptype != "Color Map":
+                        if ptype != "Color Map":
                             apply_format(ax_curr, 'y', self.v_y_not.get())
                         if y_maj: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y_maj))
                         if y_min > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y_min))
@@ -2351,8 +2660,14 @@ class InteractivePlotter:
             if self.x_log.get() and ptype != "Color Map":
                 target_ax.set_xscale('log')
 
-            # Set xlabel with rotation
-            xlabel_text = target_ax.set_xlabel(self.v_xlabel.get() or xcol, fontsize=l_sz, labelpad=x_lab_pad, fontname=font,
+            # Set xlabel with rotation (use mode-specific column name for XXY/XYXY)
+            if ptype == "XXY (Dual X)":
+                x_fallback = self.xxy_x1_col.get() or xcol
+            elif ptype == "XYXY (Dual X+Y)":
+                x_fallback = self.xyxy_x1_col.get() or xcol
+            else:
+                x_fallback = xcol
+            xlabel_text = target_ax.set_xlabel(self.v_xlabel.get() or x_fallback, fontsize=l_sz, labelpad=x_lab_pad, fontname=font,
                                  color=self.xlabel_color, rotation=xlabel_rot)
             
             # Set title with rotation
@@ -2396,24 +2711,79 @@ class InteractivePlotter:
             if val(self.v_x_max) and not has_x_breaks: target_ax.set_xlim(right=val(self.v_x_max))
 
             if ptype == "Dual Y-Axis":
-                # Set Y1 (left axis) label with rotation
                 y1_label = self.v_ylabel.get() or (ycols[0] if ycols else "Y1")
                 ylabel_text = self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
                 if use_custom_pos:
                     ylabel_text.set_position(custom_ylabel_pos)
                     ylabel_text.set_transform(self.fig.transFigure)
-                # Set Y2 (right axis) label with rotation
                 y2_label = self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2")
                 y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                         color=self.ylabel_color, rotation=y2label_rot)
                 if use_custom_pos:
                     y2label_text.set_position(custom_y2label_pos)
                     y2label_text.set_transform(self.fig.transFigure)
-                # Set Y1 axis range
                 if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
                 if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
-                # Set Y2 axis range
+                if val(self.v_y2_min): axes_list[1].set_ylim(bottom=val(self.v_y2_min))
+                if val(self.v_y2_max): axes_list[1].set_ylim(top=val(self.v_y2_max))
+            elif ptype == "XXY (Dual X)":
+                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                                   color=self.ylabel_color, rotation=ylabel_rot)
+                if use_custom_pos:
+                    ylabel_text.set_position(custom_ylabel_pos)
+                    ylabel_text.set_transform(self.fig.transFigure)
+                # Set X2 (top axis) label
+                x2_fallback = self.xxy_x2_col.get() if self.xxy_x2_col.get() else "X2"
+                x2_label = self.v_x2label.get() or x2_fallback
+                x2_lbl_rot = float(self.x2label_rotation.get() or 0) if use_custom_rot else 0
+                axes_list[1].set_xlabel(x2_label, fontsize=l_sz, fontname=font, color=self.x2label_color, rotation=x2_lbl_rot)
+                # Apply custom X2 label position if enabled
+                if use_custom_pos:
+                    try:
+                        axes_list[1].xaxis.set_label_coords(float(self.x2label_x.get()), float(self.x2label_y.get()))
+                    except (ValueError, TypeError):
+                        pass
+                # Set X1 range
+                if val(self.v_x_min) and not has_x_breaks: self.ax.set_xlim(left=val(self.v_x_min))
+                if val(self.v_x_max) and not has_x_breaks: self.ax.set_xlim(right=val(self.v_x_max))
+                # Set X2 range
+                if val(self.v_x2_min): axes_list[1].set_xlim(left=val(self.v_x2_min))
+                if val(self.v_x2_max): axes_list[1].set_xlim(right=val(self.v_x2_max))
+                if val(self.v_y_min) and not has_y_breaks: self.ax.set_ylim(bottom=val(self.v_y_min))
+                if val(self.v_y_max) and not has_y_breaks: self.ax.set_ylim(top=val(self.v_y_max))
+            elif ptype == "XYXY (Dual X+Y)":
+                y1_label = self.v_ylabel.get() or "Y1"
+                ylabel_text = self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                                   color=self.ylabel_color, rotation=ylabel_rot)
+                if use_custom_pos:
+                    ylabel_text.set_position(custom_ylabel_pos)
+                    ylabel_text.set_transform(self.fig.transFigure)
+                y2_label = self.v_y2label.get() or "Y2"
+                y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                                        color=self.ylabel_color, rotation=y2label_rot)
+                if use_custom_pos:
+                    y2label_text.set_position(custom_y2label_pos)
+                    y2label_text.set_transform(self.fig.transFigure)
+                # Set X2 (top axis) label
+                x2_fallback_xyxy = self.xyxy_x2_col.get() if self.xyxy_x2_col.get() else "X2"
+                x2_label = self.v_x2label.get() or x2_fallback_xyxy
+                x2_lbl_rot = float(self.x2label_rotation.get() or 0) if use_custom_rot else 0
+                axes_list[1].set_xlabel(x2_label, fontsize=l_sz, fontname=font, color=self.x2label_color, rotation=x2_lbl_rot)
+                # Apply custom X2 label position if enabled
+                if use_custom_pos:
+                    try:
+                        axes_list[1].xaxis.set_label_coords(float(self.x2label_x.get()), float(self.x2label_y.get()))
+                    except (ValueError, TypeError):
+                        pass
+                # Set X1 range
+                if val(self.v_x_min) and not has_x_breaks: self.ax.set_xlim(left=val(self.v_x_min))
+                if val(self.v_x_max) and not has_x_breaks: self.ax.set_xlim(right=val(self.v_x_max))
+                # Set X2 range
+                if val(self.v_x2_min): axes_list[1].set_xlim(left=val(self.v_x2_min))
+                if val(self.v_x2_max): axes_list[1].set_xlim(right=val(self.v_x2_max))
+                if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
+                if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
                 if val(self.v_y2_min): axes_list[1].set_ylim(bottom=val(self.v_y2_min))
                 if val(self.v_y2_max): axes_list[1].set_ylim(top=val(self.v_y2_max))
             elif ptype != "Color Map":
@@ -4057,7 +4427,7 @@ class InteractivePlotter:
             plot_settings = session_data.get("plot_settings", {})
             if plot_settings:
                 plot_type = plot_settings.get("plot_type", "Line")
-                if plot_type in ["Line", "Scatter", "Color Map", "Dual Y-Axis"]:
+                if plot_type in ["Line", "Scatter", "Color Map", "Dual Y-Axis", "XXY (Dual X)", "XYXY (Dual X+Y)"]:
                     self.plot_type.set(plot_type)
                 self.v_color_mode.set(plot_settings.get("color_mode", "Cycle"))
                 self.v_cmap_name.set(plot_settings.get("colormap", "viridis"))
