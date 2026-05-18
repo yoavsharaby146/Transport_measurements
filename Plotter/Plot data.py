@@ -23,7 +23,10 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 
 # --- Third-Party: Tkinter GUI ---
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, colorchooser
+from tkinter import ttk, filedialog, messagebox, colorchooser, PhotoImage
+
+# --- Standard Library (additional) ---
+import re
 
 # ==================== CONSTANTS ====================
 
@@ -71,7 +74,7 @@ class InteractivePlotter:
             x_pos = (screen_width - w) // 2
             y_pos = (screen_height - h) // 2
             self.root.geometry(f"{w}x{h}+{x_pos}+{y_pos}")
-        except:
+        except Exception:
             self.root.geometry("1200x800")
         self.root.deiconify()
 
@@ -293,8 +296,6 @@ class InteractivePlotter:
         canvas_scroll.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         canvas_scroll.pack(side="left", fill="both", expand=True)
-        #canvas_scroll.bind_all("<MouseWheel>", lambda e: canvas_scroll.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-
         #plot_frame = ttk.Frame(main_container)
         def _on_main_mousewheel(event):
             canvas_scroll.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -2226,7 +2227,7 @@ class InteractivePlotter:
                 print(f"Error parsing custom positions: {e}")
                 use_custom_pos = False
         
-         # Get custom rotation settings if enabled
+        # Get custom rotation settings if enabled
         use_custom_rot = self.use_custom_rotation.get()
         title_rot = 0
         xlabel_rot = 0
@@ -3341,7 +3342,7 @@ class InteractivePlotter:
                 "plot_type": self.plot_type.get(),
                 "color_mode": self.v_color_mode.get(),
                 "colormap": self.v_cmap_name.get(),
-                "show_grid": self.show_grid.get(),
+                "show_grid": self.show_major_grid.get(),
                 "x_log": self.x_log.get(),
                 "y_log": self.y_log.get(),
             }
@@ -4431,7 +4432,7 @@ class InteractivePlotter:
                     self.plot_type.set(plot_type)
                 self.v_color_mode.set(plot_settings.get("color_mode", "Cycle"))
                 self.v_cmap_name.set(plot_settings.get("colormap", "viridis"))
-                self.show_grid.set(plot_settings.get("show_grid", True))
+                self.show_major_grid.set(plot_settings.get("show_grid", True))
                 self.x_log.set(plot_settings.get("x_log", False))
                 self.y_log.set(plot_settings.get("y_log", False))
             

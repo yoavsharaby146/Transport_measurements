@@ -55,6 +55,8 @@ The plot renders in the right panel. You can also press **"Export Plot"** to sav
 | **Scatter** | Scatter plot with points. |
 | **Color Map** | 2D heatmap using X, Y, Z columns with interpolation. Requires exactly 1 file and 1 Y column + 1 Z column. |
 | **Dual Y-Axis** | Left and right Y axes with independent scaling. Each selected file contributes its Y1 column to the left axis and Y2 column to the right axis. Select N files → N lines on each axis (2N total). |
+| **XXY (Dual X)** | Shared Y axis with independent bottom (X1) and top (X2) axes. Select separate files and X columns for each axis via the XXY panel. |
+| **XYXY (Dual X+Y)** | Fully independent axes: bottom-left (X1, Y1) and top-right (X2, Y2). Select separate files and columns for each pair via the XYXY panel. |
 
 ---
 
@@ -78,7 +80,7 @@ The plot renders in the right panel. You can also press **"Export Plot"** to sav
 ### PLOT SETTINGS Section
 | Control | Description |
 |---------|-------------|
-| **Plot Type** | Line / Scatter / Color Map / Dual Y-Axis. |
+| **Plot Type** | Line / Scatter / Color Map / Dual Y-Axis / XXY (Dual X) / XYXY (Dual X+Y). |
 | **Color Mode** | "Cycle" (default colors) or "Gradient" (colormap spread). |
 | **Colormap dropdown** | Select a matplotlib colormap (viridis, plasma, etc.). A preview bar shows the gradient from Min to Max. |
 | **X Axis / Y Axis** | Column selectors for axes. |
