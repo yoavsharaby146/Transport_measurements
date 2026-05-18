@@ -159,11 +159,14 @@ class InteractivePlotter:
         self.title_color = 'black'
         self.xlabel_color = 'black'
         self.ylabel_color = 'black'
+        self.y2label_color = 'black'
         self.zlabel_color = 'black'
         self.x2label_color = 'black'
         self.xtick_color = 'black'
         self.ytick_color = 'black'
         self.x2tick_color = 'black'
+        self.y2tick_color = 'black'
+        self.z_tick_color = 'black'
         self.plot_bg_color = 'white'
         self.fig_bg_color = 'white'
         self.legend_fill_color = 'white'
@@ -991,6 +994,7 @@ class InteractivePlotter:
         add_col(tab_colors, "Title Color:", "title_color", self.title_color)
         add_col(tab_colors, "X Label Color:", "xlabel_color", self.xlabel_color)
         add_col(tab_colors, "Y Label Color:", "ylabel_color", self.ylabel_color)
+        add_col(tab_colors, "Y2 Label Color:", "y2label_color", self.y2label_color)
         add_col(tab_colors, "Z Label Color:", "zlabel_color", self.zlabel_color)
         add_col(tab_colors, "X2 Label Color:", "x2label_color", self.x2label_color)
         
@@ -998,7 +1002,9 @@ class InteractivePlotter:
         ttk.Label(tab_colors, text="Tick Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_col(tab_colors, "X Tick Color:", "xtick_color", self.xtick_color)
         add_col(tab_colors, "Y Tick Color:", "ytick_color", self.ytick_color)
+        add_col(tab_colors, "Y2 Tick Color:", "y2tick_color", self.y2tick_color)
         add_col(tab_colors, "X2 Tick Color:", "x2tick_color", self.x2tick_color)
+        add_col(tab_colors, "Z Tick Color:", "z_tick_color", self.z_tick_color)
         
         ttk.Separator(tab_colors, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_colors, text="Background Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
@@ -2534,7 +2540,7 @@ class InteractivePlotter:
                 zlabel_text = cbar.ax.yaxis.label
                 if z_maj: cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(z_maj))
                 if z_min > 1: cbar.ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(z_min))
-                cbar.ax.tick_params(labelsize=yt_sz, pad=z_pad_val)
+                cbar.ax.tick_params(labelsize=yt_sz, pad=z_pad_val, labelcolor=self.z_tick_color, color=self.z_tick_color)
                 
                 # --- Store interpolated data for line drawing feature ---
                 self._cmap_zi_data = zi.copy()
@@ -2598,7 +2604,8 @@ class InteractivePlotter:
                         if x2_min_div > 1: ax_curr.xaxis.set_minor_locator(ticker.AutoMinorLocator(x2_min_div))
                     x_tick_len = 0 if x_dir == "none" else maj_len
                     ax_curr.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
-                        length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.xtick_color,
+                        length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.x2tick_color,
+                        color=self.x2tick_color,
                         bottom=False, top=True, labeltop=True, labelbottom=False)
                     # Minor ticks on top
                     x2_min_div = int(val(self.v_x2_min_div, 0))
@@ -2613,6 +2620,7 @@ class InteractivePlotter:
                     x_tick_len = 0 if x_dir == "none" else maj_len
                     ax_curr.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
                         length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.xtick_color,
+                        color=self.xtick_color,
                         bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
                     # Apply minor tick direction for X (also apply side visibility)
                     if x_min > 1:
@@ -2634,7 +2642,8 @@ class InteractivePlotter:
                         if y2_min_div > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y2_min_div))
                     y_tick_len = 0 if y_dir_y2 == "none" else maj_len
                     ax_curr.tick_params(axis='y', direction=y_dir_y2 if y_dir_y2 != "none" else "out",
-                        length=y_tick_len, labelsize=yt_sz, pad=y2_pad_val, labelcolor=self.ytick_color,
+                        length=y_tick_len, labelsize=yt_sz, pad=y2_pad_val, labelcolor=self.y2tick_color,
+                        color=self.y2tick_color,
                         left=False, right=True, labelright=True, labelleft=False)
                     if y2_min_div > 1:
                         min_y_len = 0 if min_y_dir_y2 == "none" else min_len
@@ -2644,6 +2653,7 @@ class InteractivePlotter:
                     y_tick_len = 0 if y_dir == "none" else maj_len
                     ax_curr.tick_params(axis='y', direction=y_dir if y_dir != "none" else "out",
                         length=y_tick_len, labelsize=yt_sz, pad=y_pad_val, labelcolor=self.ytick_color,
+                        color=self.ytick_color,
                         left=self.v_y_tick_left.get(), right=self.v_y_tick_right.get())
                     # Apply minor tick direction for Y (also apply side visibility)
                     if y_min > 1:
@@ -2720,7 +2730,7 @@ class InteractivePlotter:
                     ylabel_text.set_transform(self.fig.transFigure)
                 y2_label = self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2")
                 y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
-                                        color=self.ylabel_color, rotation=y2label_rot)
+                                        color=self.y2label_color, rotation=y2label_rot)
                 if use_custom_pos:
                     y2label_text.set_position(custom_y2label_pos)
                     y2label_text.set_transform(self.fig.transFigure)
@@ -2762,7 +2772,7 @@ class InteractivePlotter:
                     ylabel_text.set_transform(self.fig.transFigure)
                 y2_label = self.v_y2label.get() or "Y2"
                 y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
-                                        color=self.ylabel_color, rotation=y2label_rot)
+                                        color=self.y2label_color, rotation=y2label_rot)
                 if use_custom_pos:
                     y2label_text.set_position(custom_y2label_pos)
                     y2label_text.set_transform(self.fig.transFigure)
@@ -2984,7 +2994,7 @@ class InteractivePlotter:
                             
                             # Apply tick settings
                             sec_xt_sz = val(self.v_sec_x_tick_size, 10)
-                            sec_x_ax.tick_params(axis='x', labelsize=sec_xt_sz, labelcolor=self.xtick_color)
+                            sec_x_ax.tick_params(axis='x', labelsize=sec_xt_sz, labelcolor=self.x2tick_color, color=self.x2tick_color)
                             
                             # Apply major tick step if specified
                             sec_x_maj_val = val(self.v_sec_x_maj)
@@ -3042,7 +3052,7 @@ class InteractivePlotter:
                     y2label_text.set_visible(False)
                     self.fig.text(custom_y2label_pos[0], custom_y2label_pos[1],
                                   self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2"), 
-                                  fontsize=l_sz, fontname=font, color=self.ylabel_color, ha='right', va='center', rotation=y2label_rot)
+                                  fontsize=l_sz, fontname=font, color=self.y2label_color, ha='right', va='center', rotation=y2label_rot)
                 # Z label (for Color Map)
                 if zlabel_text is not None:
                     zlabel_text.set_visible(False)
