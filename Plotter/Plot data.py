@@ -196,6 +196,13 @@ class InteractivePlotter:
         self.v_y2_pad = tk.StringVar(value="3.5")
         self.v_x2_tick_pad = tk.StringVar(value="3.5")
         self.v_z_tick_pad = tk.StringVar(value="3.5")
+        
+        # --- DECIMAL PLACES PER AXIS (blank = auto) ---
+        self.v_x_dec = tk.StringVar()
+        self.v_y_dec = tk.StringVar()
+        self.v_y2_dec = tk.StringVar()
+        self.v_x2_dec = tk.StringVar()
+        self.v_z_dec = tk.StringVar()
 
         self.v_font_fam = tk.StringVar(value="Arial")
         self.v_t_size = tk.StringVar(value="14")
@@ -280,6 +287,9 @@ class InteractivePlotter:
         # --- SCREEN DIMENSIONS (for responsive design) ---
         self.screen_width = self.root.winfo_screenwidth()
         self.screen_height = self.root.winfo_screenheight()
+        
+        # --- MARGIN PERSISTENCE (saves toolbar adjustments across Update Plot) ---
+        self._plot_initialized = False
 
         self.setup_ui()
 
@@ -554,9 +564,6 @@ class InteractivePlotter:
         ttk.Separator(control_frame, orient='horizontal').grid(row=row, column=0, columnspan=4, sticky='ew', pady=10)
         row += 1
         ttk.Button(control_frame, text="Update Plot", command=self.update_plot).grid(row=row, column=0, columnspan=4,
-                                                                                     sticky='ew', pady=5)
-        row += 1
-        ttk.Button(control_frame, text="Export Plot", command=self.export_plot).grid(row=row, column=0, columnspan=4,
                                                                                      sticky='ew', pady=5)
         row += 1
         # Show All button for restoring hidden lines
@@ -1231,18 +1238,20 @@ class InteractivePlotter:
         ttk.Label(gf, text="Maj Step", width=10, font=('Arial', 10, 'bold')).grid(row=0, column=1)
         ttk.Label(gf, text="Min Divs", width=10, font=('Arial', 10, 'bold')).grid(row=0, column=2)
         ttk.Label(gf, text="Pad", width=10, font=('Arial', 10, 'bold')).grid(row=0, column=3)
+        ttk.Label(gf, text="Dec", width=6, font=('Arial', 10, 'bold')).grid(row=0, column=4)
 
-        def add_t_row(txt, v_maj, v_min, v_pad, r):
+        def add_t_row(txt, v_maj, v_min, v_pad, v_dec, r):
             ttk.Label(gf, text=txt).grid(row=r, column=0)
             ttk.Entry(gf, textvariable=v_maj, width=10).grid(row=r, column=1, padx=2)
             ttk.Entry(gf, textvariable=v_min, width=10).grid(row=r, column=2, padx=2)
             ttk.Entry(gf, textvariable=v_pad, width=10).grid(row=r, column=3, padx=2)
+            ttk.Entry(gf, textvariable=v_dec, width=6).grid(row=r, column=4, padx=2)
 
-        add_t_row("X", self.v_x_maj, self.v_x_min_div, self.v_x_tick_pad, 1)
-        add_t_row("X2 (Top)", self.v_x2_maj, self.v_x2_min_div, self.v_x2_tick_pad, 2)
-        add_t_row("Y1 (Left)", self.v_y1_maj, self.v_y1_min_div, self.v_y1_pad, 3)
-        add_t_row("Y2 (Right)", self.v_y2_maj, self.v_y2_min_div, self.v_y2_pad, 4)
-        add_t_row("Z (Color)", self.v_z_maj, self.v_z_min_div, self.v_z_tick_pad, 5)
+        add_t_row("X", self.v_x_maj, self.v_x_min_div, self.v_x_tick_pad, self.v_x_dec, 1)
+        add_t_row("X2 (Top)", self.v_x2_maj, self.v_x2_min_div, self.v_x2_tick_pad, self.v_x2_dec, 2)
+        add_t_row("Y1 (Left)", self.v_y1_maj, self.v_y1_min_div, self.v_y1_pad, self.v_y_dec, 3)
+        add_t_row("Y2 (Right)", self.v_y2_maj, self.v_y2_min_div, self.v_y2_pad, self.v_y2_dec, 4)
+        add_t_row("Z (Color)", self.v_z_maj, self.v_z_min_div, self.v_z_tick_pad, self.v_z_dec, 5)
 
         ttk.Separator(tab_tick, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_tick, text="Notation", font=('Arial', 10, 'bold')).pack(pady=5)
@@ -1756,6 +1765,23 @@ class InteractivePlotter:
             for fk, _ in sel_ds:
                 if y1: pairs_to_style.append((fk, y1))
                 if y2: pairs_to_style.append((fk, y2))
+        elif ptype == "XXY (Dual X)":
+            y_col = self.xxy_y_combo.get()
+            x1_files = self._get_selected_files(self.xxy_x1_files)
+            x2_files = self._get_selected_files(self.xxy_x2_files)
+            for fk in x1_files:
+                if y_col: pairs_to_style.append((fk, y_col))
+            for fk in x2_files:
+                if y_col: pairs_to_style.append((fk, y_col))
+        elif ptype == "XYXY (Dual X+Y)":
+            y1_col = self.xyxy_y1_col.get()
+            y2_col = self.xyxy_y2_col.get()
+            x1y1_files = self._get_selected_files(self.xyxy_x1y1_files)
+            x2y2_files = self._get_selected_files(self.xyxy_x2y2_files)
+            for fk in x1y1_files:
+                if y1_col: pairs_to_style.append((fk, y1_col))
+            for fk in x2y2_files:
+                if y2_col: pairs_to_style.append((fk, y2_col))
         else:
             y_idxs = self.y_listbox.curselection()
             y_cols = [self.y_listbox.get(i) for i in y_idxs]
@@ -1884,6 +1910,23 @@ class InteractivePlotter:
             for fk, _ in sel_ds:
                 if y1: pairs_to_order.append((fk, y1))
                 if y2: pairs_to_order.append((fk, y2))
+        elif ptype == "XXY (Dual X)":
+            y_col = self.xxy_y_combo.get()
+            x1_files = self._get_selected_files(self.xxy_x1_files)
+            x2_files = self._get_selected_files(self.xxy_x2_files)
+            for fk in x1_files:
+                if y_col: pairs_to_order.append((fk, y_col))
+            for fk in x2_files:
+                if y_col: pairs_to_order.append((fk, y_col))
+        elif ptype == "XYXY (Dual X+Y)":
+            y1_col = self.xyxy_y1_col.get()
+            y2_col = self.xyxy_y2_col.get()
+            x1y1_files = self._get_selected_files(self.xyxy_x1y1_files)
+            x2y2_files = self._get_selected_files(self.xyxy_x2y2_files)
+            for fk in x1y1_files:
+                if y1_col: pairs_to_order.append((fk, y1_col))
+            for fk in x2y2_files:
+                if y2_col: pairs_to_order.append((fk, y2_col))
         else:
             y_idxs = self.y_listbox.curselection()
             y_cols = [self.y_listbox.get(i) for i in y_idxs]
@@ -2206,6 +2249,18 @@ class InteractivePlotter:
     def update_plot(self):
         sel_ds = self.get_selected_datasets()
         if not sel_ds or self.current_dataset_key is None: return
+        
+        # Save current subplot margins before clearing (preserves user toolbar adjustments)
+        saved_margins = None
+        try:
+            sp = self.fig.subplotpars
+            saved_margins = {
+                'left': sp.left, 'right': sp.right,
+                'top': sp.top, 'bottom': sp.bottom
+            }
+        except Exception:
+            pass
+        
         self.fig.clear()
 
         def val(var, default=None, type_fn=float):
@@ -2419,6 +2474,7 @@ class InteractivePlotter:
                 self.ax = self.fig.add_subplot(111);
                 ax_right = self.ax.twinx()   # Independent right Y, shared bottom X
                 ax2 = ax_right.twiny()       # Independent top X, shares right Y
+                ax2.patch.set_visible(False)  # Transparent background so ax_right's ylabel is visible
                 ax2.tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
                 ax2.yaxis.tick_right()
                 ax2.xaxis.tick_top()
@@ -2443,7 +2499,11 @@ class InteractivePlotter:
             if ptype in ["Line", "Scatter", "Dual Y-Axis", "XXY (Dual X)", "XYXY (Dual X+Y)"]:
                 for (fk, yc, ax_idx) in series_to_plot:
                     df = self.datasets[fk]
-                    curr_yf = yf if ax_idx == 0 else y2f
+                    # XXY shares same Y axis — always use Y divisor (not Y2)
+                    if ptype == "XXY (Dual X)":
+                        curr_yf = yf
+                    else:
+                        curr_yf = yf if ax_idx == 0 else y2f
 
                     x2f = val(self.v_x2_div, 1.0)
                     
@@ -2667,6 +2727,32 @@ class InteractivePlotter:
                         if y_maj: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y_maj))
                         if y_min > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y_min))
 
+            # --- APPLY DECIMAL PLACES PER AXIS ---
+            # Parse decimal settings
+            x_dec = val(self.v_x_dec, None, type_fn=int)
+            y_dec = val(self.v_y_dec, None, type_fn=int)
+            y2_dec = val(self.v_y2_dec, None, type_fn=int)
+            x2_dec = val(self.v_x2_dec, None, type_fn=int)
+            z_dec = val(self.v_z_dec, None, type_fn=int)
+            
+            for ax_curr in axes_list:
+                is_top = id(ax_curr) in is_top_x_axis
+                # X axis decimals
+                if is_top and x2_dec is not None and not has_x_breaks:
+                    ax_curr.xaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{x2_dec}f'))
+                elif not is_top and x_dec is not None and not has_x_breaks:
+                    ax_curr.xaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{x_dec}f'))
+                # Y axis decimals
+                if ptype == "XYXY (Dual X+Y)" and is_top:
+                    if y2_dec is not None and not has_y_breaks:
+                        ax_curr.yaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{y2_dec}f'))
+                elif ptype == "Dual Y-Axis" and ax_curr == axes_list[1]:
+                    if y2_dec is not None and not has_y_breaks:
+                        ax_curr.yaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{y2_dec}f'))
+                elif ptype not in ["Dual Y-Axis", "XYXY (Dual X+Y)"] or ax_curr == axes_list[0]:
+                    if y_dec is not None and not has_y_breaks:
+                        ax_curr.yaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{y_dec}f'))
+
             target_ax = self.ax
             if self.x_log.get() and ptype != "Color Map":
                 target_ax.set_xscale('log')
@@ -2771,7 +2857,10 @@ class InteractivePlotter:
                     ylabel_text.set_position(custom_ylabel_pos)
                     ylabel_text.set_transform(self.fig.transFigure)
                 y2_label = self.v_y2label.get() or "Y2"
-                y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                # XYXY: ax2 = ax_right.twiny() shares the y-axis with ax_right
+                # Must set ylabel on ax_right (the twinx owner of the right Y axis)
+                # ax2's yaxis is shared and won't properly render the label
+                y2label_text = ax_right.set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                         color=self.y2label_color, rotation=y2label_rot)
                 if use_custom_pos:
                     y2label_text.set_position(custom_y2label_pos)
@@ -3023,7 +3112,28 @@ class InteractivePlotter:
                 except Exception as sec_e:
                     print(f"Secondary X-Axis error: {sec_e}")
 
-            self.fig.tight_layout()
+            self.fig.tight_layout(pad=3.0)
+            
+            # For XYXY and Dual Y-Axis, ensure room for right-side labels
+            # Must come AFTER tight_layout since tight_layout overrides subplots_adjust
+            if ptype in ["XYXY (Dual X+Y)", "Dual Y-Axis"]:
+                self.fig.subplots_adjust(right=0.82)
+            
+            # Restore saved subplot margins (preserves user toolbar adjustments across Update Plot)
+            # Only restore if the plot has been initialized at least once (first call uses default layout)
+            if self._plot_initialized and saved_margins is not None:
+                try:
+                    self.fig.subplots_adjust(
+                        left=saved_margins['left'],
+                        right=saved_margins['right'],
+                        top=saved_margins['top'],
+                        bottom=saved_margins['bottom']
+                    )
+                except Exception:
+                    pass
+            
+            # Mark plot as initialized so future updates preserve user margin adjustments
+            self._plot_initialized = True
             
             # Apply custom label positions AFTER tight_layout
             if use_custom_pos:
