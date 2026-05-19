@@ -82,7 +82,7 @@ def block_summary(block: dict) -> str:
 def block_to_file_params(block: dict) -> list[tuple[str, Union[int, float, str], int]]:
     """Convert a block dict to the params list expected by write_block()."""
     t = block['type']
-    mag = 'True' if block['use_magnet'] else 'False'
+    mag = block['use_magnet']   # already stored as the string 'True' or 'False'
     if t == 'RH':
         return [
             ('Target field (T)',  block['field_t'],   1),
@@ -149,7 +149,13 @@ class BlockDialog(tk.Toplevel):
 
         def add_check(row, label, key, default=True):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky='w', **pad)
-            v = tk.BooleanVar(value=existing[key] if existing else default)
+            # existing[key] may be stored as the string 'True'/'False' — convert back to bool
+            if existing:
+                raw_val = existing[key]
+                init = (raw_val == 'True') if isinstance(raw_val, str) else bool(raw_val)
+            else:
+                init = default
+            v = tk.BooleanVar(value=init)
             ttk.Checkbutton(form, variable=v).grid(row=row, column=1, sticky='w', **pad)
             self._vars[key] = v
 
@@ -210,7 +216,9 @@ class BlockDialog(tk.Toplevel):
                                          parent=self)
                     return
             else:
-                block[key] = var.get()  # BooleanVar → bool
+                # Store as the explicit string 'True'/'False' so _format_value
+                # never falls through to numeric formatting (which would give 1/0)
+                block[key] = "'"'True'"'" if var.get() else "'"'False'"'"
 
         # Extra validation
         if self.block_type == 'RV' and block.get('step_mv', 0) <= 0:
