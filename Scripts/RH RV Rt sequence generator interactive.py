@@ -43,8 +43,8 @@ def write_block(f, measurement_type: str,
 # Each block is a dict describing one measurement step.
 # Keys depend on block type:
 #
-# RH  → { type, field_t, voltage_v, use_magnet }
-# RV  → { type, voltage_v, field_t, step_mv, use_magnet }
+# RH  → { type, field_t, use_magnet }
+# RV  → { type, smu, voltage_v, step_mv, use_magnet }
 # Rt  → { type, acq_s, voltage_v, field_t, use_magnet }
 
 BLOCK_COLORS = {
@@ -65,11 +65,11 @@ def block_summary(block: dict) -> str:
     t = block['type']
     if t == 'RH':
         mag = '✓ magnet' if block['use_magnet'] else '✗ magnet'
-        return f"RH  |  H = {_format_value(block['field_t'])} T   V = {_format_value(block['voltage_v'])} V   ({mag})"
+        return f"RH  |  H = {_format_value(block['field_t'])} T   ({mag})"
     if t == 'RV':
         mag = '✓ magnet' if block['use_magnet'] else '✗ magnet'
-        return (f"RV  |  V → {_format_value(block['voltage_v'])} V   "
-                f"H = {_format_value(block['field_t'])} T   "
+        return (f"RV  |  SMU = {block['smu']}   "
+                f"V → {_format_value(block['voltage_v'])} V   "
                 f"step = {_format_value(block['step_mv'])} mV   ({mag})")
     if t == 'Rt':
         mag = '✓ magnet' if block['use_magnet'] else '✗ magnet'
@@ -86,13 +86,12 @@ def block_to_file_params(block: dict) -> list[tuple[str, Union[int, float, str],
     if t == 'RH':
         return [
             ('Target field (T)',  block['field_t'],   1),
-            ('Target Voltage(V)', block['voltage_v'], 2),
-            ('Use Magnet',        mag,                3),
+            ('Use Magnet',        mag,                2),
         ]
     if t == 'RV':
         return [
-            ('Target Voltage(V)', block['voltage_v'], 1),
-            ('Target field (T)',  block['field_t'],   2),
+            ('User defined SMU',  block['smu'],       1),
+            ('Target Voltage(V)', block['voltage_v'], 2),
             ('Step size(mV)',     block['step_mv'],   3),
             ('Use Magnet',        mag,                4),
         ]
@@ -162,12 +161,19 @@ class BlockDialog(tk.Toplevel):
         r = 0
         if block_type == 'RH':
             add_float(r, 'Target field (T):', 'field_t', 0.0);   r += 1
-            add_float(r, 'Target Voltage (V):', 'voltage_v', 0.0); r += 1
             add_check(r, 'Use Magnet:', 'use_magnet', True);       r += 1
 
         elif block_type == 'RV':
+            SMU_OPTIONS = ['smua', 'smub', 'Gate_1', 'Gate_2']
+            ttk.Label(form, text='User defined SMU:').grid(row=r, column=0, sticky='w', **pad)
+            smu_default = existing['smu'].strip("'") if existing else 'Gate_1'
+            smu_var = tk.StringVar(value=smu_default)
+            smu_combo = ttk.Combobox(form, textvariable=smu_var, values=SMU_OPTIONS,
+                                     state='readonly', width=14)
+            smu_combo.grid(row=r, column=1, sticky='ew', **pad)
+            self._vars['smu'] = smu_var
+            r += 1
             add_float(r, 'Target Voltage (V):', 'voltage_v', 5.0); r += 1
-            add_float(r, 'Target field (T):', 'field_t', 0.0);     r += 1
             add_float(r, 'Step size (mV):', 'step_mv', 10.0);      r += 1
             add_check(r, 'Use Magnet:', 'use_magnet', False);       r += 1
 
@@ -199,14 +205,16 @@ class BlockDialog(tk.Toplevel):
     def _ok(self):
         # Parse and validate all float fields
         float_keys = {
-            'RH':  ['field_t', 'voltage_v'],
-            'RV':  ['voltage_v', 'field_t', 'step_mv'],
+            'RH':  ['field_t'],
+            'RV':  ['voltage_v', 'step_mv'],
             'Rt':  ['acq_s', 'voltage_v', 'field_t'],
         }[self.block_type]
 
         block = {'type': self.block_type}
         for key, var in self._vars.items():
-            if key in float_keys:
+            if key == 'smu':
+                block[key] = f"'{var.get()}'"
+            elif key in float_keys:
                 raw = var.get().strip()
                 try:
                     block[key] = float(raw)
