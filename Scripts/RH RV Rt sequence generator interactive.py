@@ -64,15 +64,15 @@ def block_summary(block: dict) -> str:
     """One-line human-readable summary shown in the sequence list."""
     t = block['type']
     if t == 'RH':
-        mag = '✓ magnet' if block['use_magnet'] else '✗ magnet'
+        mag = '✓ magnet' if block['use_magnet'] == "'True'" else '✗ magnet'
         return f"RH  |  H = {_format_value(block['field_t'])} T   ({mag})"
     if t == 'RV':
-        mag = '✓ magnet' if block['use_magnet'] else '✗ magnet'
+        mag = '✓ magnet' if block['use_magnet'] == "'True'" else '✗ magnet'
         return (f"RV  |  SMU = {block['smu']}   "
                 f"V → {_format_value(block['voltage_v'])} V   "
                 f"step = {_format_value(block['step_mv'])} mV   ({mag})")
     if t == 'Rt':
-        mag = '✓ magnet' if block['use_magnet'] else '✗ magnet'
+        mag = '✓ magnet' if block['use_magnet'] == "'True'" else '✗ magnet'
         return (f"Rt  |  acq = {_format_value(block['acq_s'])} s   "
                 f"V = {_format_value(block['voltage_v'])} V   "
                 f"H = {_format_value(block['field_t'])} T   ({mag})")
@@ -151,7 +151,7 @@ class BlockDialog(tk.Toplevel):
             # existing[key] may be stored as the string 'True'/'False' — convert back to bool
             if existing:
                 raw_val = existing[key]
-                init = (raw_val == 'True') if isinstance(raw_val, str) else bool(raw_val)
+                init = (raw_val == "'True'") if isinstance(raw_val, str) else bool(raw_val)
             else:
                 init = default
             v = tk.BooleanVar(value=init)
