@@ -1,3 +1,4 @@
+import sys, os
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import threading
@@ -8,6 +9,10 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import time
 
 # Import your driver
+current_dir = os.path.dirname(os.path.abspath(__file__))
+instruments_path = os.path.join(current_dir, '..')
+sys.path.append(instruments_path)
+
 from Instruments.keithley2450_with_add_ons import Keithley2450
 
 

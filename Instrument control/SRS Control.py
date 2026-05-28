@@ -9,13 +9,11 @@ import pyvisa
 
 # --- IMPORT SETUP ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
-instruments_path = os.path.join(current_dir, 'Instruments')
+instruments_path = os.path.join(current_dir, '..')
 sys.path.append(instruments_path)
 
-try:
-    from SR830_with_add_ons import SR830
-except ImportError:
-    SR830 = None
+from Instruments.SR830_with_add_ons import SR830
+
 
 # ==========================================
 #      EXPLICIT SENSITIVITY MAPS
