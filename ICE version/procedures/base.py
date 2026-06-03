@@ -9,7 +9,7 @@ import logging
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
-import time, math
+import time, math, sys
 import numpy as np
 from scipy.constants import e
 from scipy.constants import epsilon_0
@@ -54,6 +54,20 @@ def _rebind_instruments_from_configuration():
     Dual_gate = _cfg.Dual_gate
     Gate_1 = _cfg.Gate_1
     Gate_2 = _cfg.Gate_2
+
+     # NEW: Also update all procedure submodules that imported via `from .base import *`
+
+    _inst_names = ['magnet', 'MFLI_1', 'MFLI_2', 'MFLI_3', 
+                   'SRS860', 'SRS830_1', 'SRS830_2', 
+                   'Dual_gate', 'Gate_1', 'Gate_2']
+    for mod in sys.modules.values():
+        if mod is None or not hasattr(mod, '__file__') or not mod.__file__:
+            continue
+        if 'procedures' not in getattr(mod, '__name__', ''):
+            continue
+        for name in _inst_names:
+            if name in mod.__dict__:
+                mod.__dict__[name] = globals()[name]
 
 
 def _as_cat_list(cat_value):
