@@ -151,8 +151,8 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
                 log.warning("Caught the stop flag in the procedure")
                 return
         if self.Target_voltage == 0:
-            log.info(f"Target reached 0V. Turning {self.smu} OFF.")
-            Gate.output_off()
+            log.info(f"Target reached 0V.  {self.smu} is still ON.")
+            
 
     def run_RH(self):
         time_0 = time.time()
