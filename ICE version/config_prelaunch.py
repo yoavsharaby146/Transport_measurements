@@ -60,14 +60,20 @@ class InstrumentConfig:
     dual_gate_visa: str = ""
     dual_gate_visa_library: str = 'C:\\Windows\\System32\\visa64.dll'
 
-    use_srs860: bool = False
-    srs860_visa: str = ""
+    use_srs860_1: bool = False
+    srs860_1_visa: str = ""
+
+    use_srs860_2: bool = False
+    srs860_2_visa: str = ""
 
     use_srs830_1: bool = False
     srs830_1_visa: str = ""
 
     use_srs830_2: bool = False
     srs830_2_visa: str = ""
+
+    use_srs830_3: bool = False
+    srs830_3_visa: str = ""
 
     use_mfli_1: bool = False
     mfli_1_host: str = ""  # e.g. "192.168.93.134" or "localhost"
@@ -184,12 +190,17 @@ class ConfigDialog(QtWidgets.QDialog):
         self.cmb_dual.setEditText(self._cfg.dual_gate_visa)
 
         # Lock-ins
-        self.chk_srs860.setChecked(self._cfg.use_srs860)
-        self.cmb_srs860.setEditText(self._cfg.srs860_visa)
+        self.chk_srs860_1.setChecked(self._cfg.use_srs860_1)
+        self.cmb_srs860_1.setEditText(self._cfg.srs860_1_visa)
+        self.chk_srs860_2.setChecked(self._cfg.use_srs860_2)
+        self.cmb_srs860_2.setEditText(self._cfg.srs860_2_visa)
+
         self.chk_srs830_1.setChecked(self._cfg.use_srs830_1)
         self.cmb_srs830_1.setEditText(self._cfg.srs830_1_visa)
         self.chk_srs830_2.setChecked(self._cfg.use_srs830_2)
         self.cmb_srs830_2.setEditText(self._cfg.srs830_2_visa)
+        self.chk_srs830_3.setChecked(self._cfg.use_srs830_3)
+        self.cmb_srs830_3.setEditText(self._cfg.srs830_3_visa)
 
         self.chk_mfli_1.setChecked(self._cfg.use_mfli_1)
         self.edt_mfli_1_host.setText(self._cfg.mfli_1_host or "")
@@ -299,16 +310,22 @@ class ConfigDialog(QtWidgets.QDialog):
     def _build_lockins_tab(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget(self)
         grid = QtWidgets.QGridLayout(w)
-        self.chk_srs860 = QtWidgets.QCheckBox("Use SRS860")
-        self.cmb_srs860 = QtWidgets.QComboBox(); self.cmb_srs860.setEditable(True)
+        self.chk_srs860_1 = QtWidgets.QCheckBox("Use SRS860_1")
+        self.cmb_srs860_1 = QtWidgets.QComboBox(); self.cmb_srs860_1.setEditable(True)
+        self.chk_srs860_2 = QtWidgets.QCheckBox("Use SRS860_2")
+        self.cmb_srs860_2 = QtWidgets.QComboBox(); self.cmb_srs860_2.setEditable(True)
         self.chk_srs830_1 = QtWidgets.QCheckBox("Use SRS830_1")
         self.cmb_srs830_1 = QtWidgets.QComboBox(); self.cmb_srs830_1.setEditable(True)
         self.chk_srs830_2 = QtWidgets.QCheckBox("Use SRS830_2")
         self.cmb_srs830_2 = QtWidgets.QComboBox(); self.cmb_srs830_2.setEditable(True)
+        self.chk_srs830_3 = QtWidgets.QCheckBox("Use SRS830_3")
+        self.cmb_srs830_3 = QtWidgets.QComboBox(); self.cmb_srs830_3.setEditable(True)
 
-        grid.addWidget(self.chk_srs860, 0, 0); grid.addWidget(self.cmb_srs860, 0, 1)
-        grid.addWidget(self.chk_srs830_1, 1, 0); grid.addWidget(self.cmb_srs830_1, 1, 1)
-        grid.addWidget(self.chk_srs830_2, 2, 0); grid.addWidget(self.cmb_srs830_2, 2, 1)
+        grid.addWidget(self.chk_srs860_1, 0, 0); grid.addWidget(self.cmb_srs860_1, 0, 1)
+        grid.addWidget(self.chk_srs860_2, 1, 0); grid.addWidget(self.cmb_srs860_2, 1, 1)
+        grid.addWidget(self.chk_srs830_1, 2, 0); grid.addWidget(self.cmb_srs830_1, 2, 1)
+        grid.addWidget(self.chk_srs830_2, 3, 0); grid.addWidget(self.cmb_srs830_2, 3, 1)
+        grid.addWidget(self.chk_srs830_3, 4, 0); grid.addWidget(self.cmb_srs830_3, 4, 1)
         grid.setColumnStretch(1, 1)
         return w
 
@@ -399,7 +416,9 @@ class ConfigDialog(QtWidgets.QDialog):
         self.cmb_magnet_port.setEditable(True)
 
     def _fill_visa_comboboxes(self, resources: List[str]):
-        for cmb in (self.cmb_gate1, self.cmb_gate2, self.cmb_dual, self.cmb_srs860, self.cmb_srs830_1, self.cmb_srs830_2):
+        for cmb in (self.cmb_gate1, self.cmb_gate2, self.cmb_dual,
+                     self.cmb_srs860_1, self.cmb_srs860_2,
+                       self.cmb_srs830_1, self.cmb_srs830_2, self.cmb_srs830_3):
             cmb.clear(); cmb.addItems(resources); cmb.setEditable(True)
 
 
@@ -420,14 +439,20 @@ class ConfigDialog(QtWidgets.QDialog):
             use_dual_gate=self.chk_dual.isChecked(),
             dual_gate_visa=self.cmb_dual.currentText().strip(),
 
-            use_srs860=self.chk_srs860.isChecked(),
-            srs860_visa=self.cmb_srs860.currentText().strip(),
+            use_srs860_1=self.chk_srs860_1.isChecked(),
+            srs860_1_visa=self.cmb_srs860_1.currentText().strip(),
+
+            use_srs860_2=self.chk_srs860_2.isChecked(),
+            srs860_2_visa=self.cmb_srs860_2.currentText().strip(),
 
             use_srs830_1=self.chk_srs830_1.isChecked(),
             srs830_1_visa=self.cmb_srs830_1.currentText().strip(),
 
             use_srs830_2=self.chk_srs830_2.isChecked(),
             srs830_2_visa=self.cmb_srs830_2.currentText().strip(),
+
+            use_srs830_3=self.chk_srs830_3.isChecked(),
+            srs830_3_visa=self.cmb_srs830_3.currentText().strip(),
 
             use_mfli_1=self.chk_mfli_1.isChecked(),
             mfli_1_host=self.edt_mfli_1_host.text().strip(),

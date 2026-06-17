@@ -7,7 +7,7 @@ Each procedure class is in its own module for easier maintenance.
 from .base import (
     log, time, math, np,
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
-    magnet, MFLI_1, MFLI_2, MFLI_3, SRS860, SRS830_1, SRS830_2, Dual_gate, Gate_1, Gate_2,
+    magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2,
     read_temperature, _rebind_instruments_from_configuration,
     _as_cat_list, _proc_matches,
 )
@@ -59,7 +59,7 @@ __all__ = [
     # Base utilities
     'log', 'time', 'math', 'np',
     'Procedure', 'BooleanParameter', 'IntegerParameter', 'FloatParameter', 'Parameter', 'Metadata', 'ListParameter',
-    'magnet', 'MFLI_1', 'MFLI_2', 'MFLI_3', 'SRS860', 'SRS830_1', 'SRS830_2', 'Dual_gate', 'Gate_1', 'Gate_2',
+    'magnet', 'MFLI_1', 'MFLI_2', 'MFLI_3', 'SRS860_1', 'SRS860_2', 'SRS830_1', 'SRS830_2', 'SRS830_3', 'Dual_gate', 'Gate_1', 'Gate_2',
     'read_temperature', '_rebind_instruments_from_configuration',
     '_as_cat_list', '_proc_matches',
     # Procedure classes

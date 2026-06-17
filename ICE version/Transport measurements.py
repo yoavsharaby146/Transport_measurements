@@ -320,7 +320,8 @@ class Launcher(QtWidgets.QMainWindow):
                 cfg.magnet,
                 cfg.Gate_1, cfg.Gate_2, cfg.Dual_gate,
                 cfg.MFLI_1, cfg.MFLI_2, cfg.MFLI_3,
-                cfg.SRS860, cfg.SRS830_1, cfg.SRS830_2
+                cfg.SRS860_1, cfg.SRS860_2,
+                cfg.SRS830_1, cfg.SRS830_2, cfg.SRS830_3
             ]
 
             for inst in instrument_list:
