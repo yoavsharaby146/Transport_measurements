@@ -148,11 +148,18 @@ Dual_gate = _maybe(
 
 
 # SRS lock-ins
-SRS860 = _maybe(
+SRS860_1 = _maybe(
     SR860,
-    enabled=overrides.get("use_srs860", False),
-    addr=overrides.get("srs860_visa", ""),
-    name="SRS860"
+    enabled=overrides.get("use_srs860_1", False),
+    addr=overrides.get("srs860_1_visa", ""),
+    name="SRS860_1"
+)
+
+SRS860_2 = _maybe(
+    SR860,
+    enabled=overrides.get("use_srs860_2", False),
+    addr=overrides.get("srs860_2_visa", ""),
+    name="SRS860_2"
 )
 
 SRS830_1 = _maybe(
@@ -168,6 +175,14 @@ SRS830_2 = _maybe(
     addr=overrides.get("srs830_2_visa", ""),
     name="SRS830_2"
 )
+
+SRS830_3 = _maybe(
+    SR830,
+    enabled=overrides.get("use_srs830_3", False),
+    addr=overrides.get("srs830_3_visa", ""),
+    name="SRS830_3"
+)
+
 
 # Zurich MFLI
 MFLI_1 = None
