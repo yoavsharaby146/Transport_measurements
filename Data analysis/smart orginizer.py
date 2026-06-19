@@ -177,7 +177,8 @@ class ScanOrganizer:
     # =========================================================
     # MODE: Gate Map - Direction Split (Fwd/Bwd)
     # =========================================================
-    def _detect_direction_segments(self, df, axis_col, threshold):
+    def _detect_direction_segments(self, df, axis_col, threshold,
+                                   slow_col=None, slow_threshold=0.0):
         """Detect sweep segments based on direction (sign) of change.
 
         Uses backward-fill for zero-diff rows so that boundary repetitions
@@ -186,6 +187,12 @@ class ScanOrganizer:
             ..., 2.995, 3, 3, 2.995, ...
         the first 3 (arriving via +0.005 diff) stays Forward,
         the second 3 (diff=0, back-filled with next non-zero = -1) goes Backward.
+
+        If `slow_col` is provided, zero-diff regions where the slow axis is
+        *actively changing* (e.g. a magnetic-field sweep between fast sweeps)
+        are NOT back-filled — they are kept as 'flat' segments so they can be
+        separated out. Only genuine turn-around pauses (slow axis constant)
+        are back-filled into the upcoming sweep direction.
 
         Returns list of (segment_df, direction_str) tuples.
         direction_str is 'forward', 'backward', or 'flat'.
@@ -203,16 +210,34 @@ class ScanOrganizer:
         signs = np.sign(diffs).astype(int)
         signs[np.abs(diffs) < threshold] = 0
 
-        # 3. Backward-fill zeros (propagate next non-zero direction backward)
+        # 2b. Determine where the slow axis is actively changing (length n-1).
+        #     Used to avoid back-filling through magnet/B-field sweeps.
+        if slow_col is not None:
+            slow_diffs = np.abs(np.diff(df[slow_col].to_numpy()))
+            slow_active = slow_diffs > slow_threshold
+        else:
+            slow_active = np.zeros(len(signs), dtype=bool)
+
+        # 3. Backward-fill zeros (propagate next non-zero direction backward),
+        #    but NOT through rows where the slow axis is actively changing.
         for i in range(len(signs) - 2, -1, -1):
             if signs[i] == 0:
+                if slow_col is not None and slow_active[i]:
+                    continue  # slow axis sweeping here (e.g. magnet move): keep flat
                 signs[i] = signs[i + 1]
 
-        # 4. Forward-fill any remaining leading zeros
+        # 4. Forward-fill any remaining leading zeros, again skipping rows
+        #    where the slow axis is actively changing.
         if len(signs) > 0 and signs[0] == 0:
             for i in range(1, len(signs)):
                 if signs[i] != 0:
-                    signs[:i + 1] = signs[i]
+                    fill_end = i
+                    if slow_col is not None:
+                        actives = np.where(slow_active[:i])[0]
+                        if len(actives) > 0:
+                            fill_end = actives[0]
+                    if fill_end > 0:
+                        signs[:fill_end] = signs[i]
                     break
 
         # 5. Assign a direction to every row:
@@ -333,10 +358,20 @@ class ScanOrganizer:
         self.root.wait_window(col_window)
 
     def run_smart_split_logic(self, df, file_path, fast_col, slow_col):
-        """Detect segments and classify into Fast Fwd/Bwd and Slow@setpoint groups.
+        """Detect segments and classify into Fast Fwd/Bwd and Slow Fwd/Bwd groups.
+
+        Produces 4 outputs:
+          - {fast_col}_Fwd / {fast_col}_Bwd : fast axis sweeping (gate forward/backward)
+          - {slow_col}_Fwd / {slow_col}_Bwd : slow axis sweeping (e.g. magnet up/down)
+
         Uses direction-sign-based detection to correctly handle repeated boundary
-        values at sweep turnarounds (no data loss)."""
-        # --- Threshold Settings ---
+        values at sweep turnarounds (no data loss).
+
+        The slow axis is monitored so that regions where the slow axis is *actively
+        sweeping* between fast sweeps are kept as 'flat' segments (w.r.t. the fast
+        axis) and then split into Slow Fwd/Bwd by the slow axis direction.
+        """
+        # --- Fast Axis Threshold ---
         fast_range = df[fast_col].max() - df[fast_col].min()
         default_fast_thresh = fast_range * 0.01
 
@@ -349,25 +384,30 @@ class ScanOrganizer:
         if fast_threshold is None:
             return
 
+        # --- Slow Axis Step Threshold (auto, used internally to detect sweeps) ---
+        #   Half the median non-zero slow-axis step: distinguishes a real sweep
+        #   (magnet moving between setpoints) from noise/hold jitter.
         slow_range = df[slow_col].max() - df[slow_col].min()
-        default_slow_tol = slow_range * 0.01
+        slow_values = df[slow_col].to_numpy()
+        slow_abs_diffs = np.abs(np.diff(slow_values))
+        slow_nonzero = slow_abs_diffs[slow_abs_diffs > 0]
+        if len(slow_nonzero) > 0:
+            slow_threshold = float(np.median(slow_nonzero)) * 0.5
+        else:
+            slow_threshold = float(slow_range) * 0.01
 
-        slow_tolerance = simpledialog.askfloat(
-            "Slow Axis Tolerance",
-            f"Enter Slow Axis ('{slow_col}') Setpoint Tolerance:\n"
-            f"(Values within this tolerance are grouped into the same setpoint)\n"
-            f"Default (1% of range): {default_slow_tol:.6g}",
-            initialvalue=default_slow_tol, parent=self.root)
-        if slow_tolerance is None:
-            return
+        print(f"Smart Split: slow axis '{slow_col}' step threshold = {slow_threshold:.6g} "
+              f"(auto, used to separate slow-axis sweeps from fast sweeps)")
 
         # --- Segment Detection using direction-sign method ---
-        segments = self._detect_direction_segments(df, fast_col, fast_threshold)
+        segments = self._detect_direction_segments(
+            df, fast_col, fast_threshold,
+            slow_col=slow_col, slow_threshold=slow_threshold)
 
         fast_fwd_segments = []
         fast_bwd_segments = []
-        slow_segments = []
-        slow_mean_values = []
+        slow_fwd_segments = []
+        slow_bwd_segments = []
 
         for segment, direction in segments:
             if direction == 'forward':
@@ -375,81 +415,59 @@ class ScanOrganizer:
             elif direction == 'backward':
                 fast_bwd_segments.append(segment)
             elif direction == 'flat':
-                avg_slow = segment[slow_col].mean()
-                slow_segments.append(segment)
-                slow_mean_values.append(avg_slow)
-
-        # --- Cluster Slow Axis Setpoints ---
-        setpoint_map = self._cluster_setpoints(slow_mean_values, slow_tolerance)
-
-        slow_by_setpoint = {sp: [] for sp in setpoint_map.values()}
-        for segment, mean_val in zip(slow_segments, slow_mean_values):
-            sp_key = setpoint_map[mean_val]
-            slow_by_setpoint[sp_key].append(segment)
+                # Slow axis is active here → classify by its direction (up/down)
+                slow_vals = segment[slow_col].to_numpy()
+                slow_diffs = np.diff(slow_vals)
+                # Net direction via sum of diffs (robust to noise)
+                net = float(np.sum(slow_diffs))
+                if net > 0:
+                    slow_fwd_segments.append(segment)
+                elif net < 0:
+                    slow_bwd_segments.append(segment)
+                else:
+                    # Genuinely constant (not expected, but skip just in case)
+                    print(f"  Skipping {len(segment)} flat rows "
+                          f"({slow_col} not changing)")
 
         # --- Save Files ---
         self.save_files_smart(file_path, fast_col, slow_col,
-                              fast_fwd_segments, fast_bwd_segments, slow_by_setpoint)
-
-    @staticmethod
-    def _cluster_setpoints(values, tolerance):
-        """Cluster numeric values into setpoints within the given tolerance."""
-        if not values:
-            return {}
-
-        sorted_vals = sorted(values)
-        clusters = []
-        current_cluster = [sorted_vals[0]]
-
-        for val in sorted_vals[1:]:
-            if val - current_cluster[-1] <= tolerance:
-                current_cluster.append(val)
-            else:
-                clusters.append(current_cluster)
-                current_cluster = [val]
-        clusters.append(current_cluster)
-
-        cluster_means = [sum(c) / len(c) for c in clusters]
-
-        mapping = {}
-        for val in values:
-            nearest_idx = min(range(len(cluster_means)),
-                              key=lambda i: abs(cluster_means[i] - val))
-            mapping[val] = cluster_means[nearest_idx]
-
-        return mapping
+                              fast_fwd_segments, fast_bwd_segments,
+                              slow_fwd_segments, slow_bwd_segments)
 
     def save_files_smart(self, original_path, fast_col, slow_col,
-                         fast_fwd, fast_bwd, slow_by_setpoint):
-        """Save split files with generic naming based on axis columns."""
+                         fast_fwd, fast_bwd, slow_fwd, slow_bwd):
+        """Save 4 split files: fast axis Fwd/Bwd + slow axis Fwd/Bwd.
+
+        Only writes files that contain data (skips empty groups).
+        """
         directory = os.path.dirname(original_path)
         name = os.path.splitext(os.path.basename(original_path))[0]
-
-        df_fwd = pl.concat(fast_fwd) if fast_fwd else pl.DataFrame()
-        df_bwd = pl.concat(fast_bwd) if fast_bwd else pl.DataFrame()
-
-        df_fwd.write_csv(os.path.join(directory, f"{name}_{fast_col}_Fwd.csv"))
-        df_bwd.write_csv(os.path.join(directory, f"{name}_{fast_col}_Bwd.csv"))
-
-        slow_info = []
-        sorted_setpoints = sorted(slow_by_setpoint.keys())
-        for idx, sp_val in enumerate(sorted_setpoints, start=1):
-            segments = slow_by_setpoint[sp_val]
-            if not segments:
-                continue
-            df_sp = pl.concat(segments)
-            sp_str = f"{sp_val:.6g}"
-            df_sp.write_csv(os.path.join(directory, f"{name}_{slow_col}_at_{sp_str}.csv"))
-            slow_info.append(f"  {slow_col} @ {sp_str} -> {len(df_sp)} rows")
 
         msg_lines = [
             "Processing Complete!\n",
             f"Fast Axis: '{fast_col}'",
-            f"  Fwd sweep: {len(df_fwd)} rows",
-            f"  Bwd sweep: {len(df_bwd)} rows\n",
-            f"Slow Axis: '{slow_col}' - {len(slow_info)} setpoint(s):"
         ]
-        msg_lines.extend(slow_info)
+
+        if fast_fwd:
+            df = pl.concat(fast_fwd)
+            df.write_csv(os.path.join(directory, f"{name}_{fast_col}_Fwd.csv"))
+            msg_lines.append(f"  Fwd sweep: {len(df)} rows ({len(fast_fwd)} segments)")
+        if fast_bwd:
+            df = pl.concat(fast_bwd)
+            df.write_csv(os.path.join(directory, f"{name}_{fast_col}_Bwd.csv"))
+            msg_lines.append(f"  Bwd sweep: {len(df)} rows ({len(fast_bwd)} segments)")
+
+        msg_lines.append("")
+        msg_lines.append(f"Slow Axis: '{slow_col}'")
+
+        if slow_fwd:
+            df = pl.concat(slow_fwd)
+            df.write_csv(os.path.join(directory, f"{name}_{slow_col}_Fwd.csv"))
+            msg_lines.append(f"  Fwd sweep: {len(df)} rows ({len(slow_fwd)} segments)")
+        if slow_bwd:
+            df = pl.concat(slow_bwd)
+            df.write_csv(os.path.join(directory, f"{name}_{slow_col}_Bwd.csv"))
+            msg_lines.append(f"  Bwd sweep: {len(df)} rows ({len(slow_bwd)} segments)")
 
         msg = "\n".join(msg_lines)
         print(msg)
@@ -546,7 +564,7 @@ class ScanOrganizer:
         s2 = simpledialog.askinteger(
             "Config",
             "Split 2 (sweep index where forward resumes):\n"
-            f"(Sweeps {s1}..s2-1 are Backward, sweeps {s1}..end are Forward part 2)",
+            f"(Sweeps {s1}..{s2-1} are Backward, sweeps {s1}..end are Forward part 2)",
             initialvalue=2, parent=self.root)
         if s2 is None:
             return
