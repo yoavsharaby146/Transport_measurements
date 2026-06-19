@@ -698,8 +698,67 @@ class InteractivePlotter:
         
         w = max(min_width, w)
         h = max(min_height, h)
+
+        # Clamp to the usable work area so dialogs never extend under the
+        # Windows taskbar (or off-screen on small / 14-inch laptops).
+        work_w, work_h = self._get_work_area()
+        if work_w > 0 and work_h > 0:
+            w = min(w, work_w)
+            h = min(h, work_h)
         
         return w, h
+
+    def _get_work_area(self):
+        """Return the usable work area (width, height) excluding the taskbar.
+
+        Uses the Win32 API on Windows (SystemParametersInfoW, SPI_GETWORKAREA);
+        falls back to the full screen size on other platforms or on failure.
+        """
+        try:
+            import ctypes
+            class RECT(ctypes.Structure):
+                _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
+                            ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
+            rect = RECT()
+            # SPI_GETWORKAREA = 0x0030
+            if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+                return rect.right - rect.left, rect.bottom - rect.top
+        except Exception:
+            pass
+        return self.screen_width, self.screen_height
+
+    def _set_dialog_geometry(self, dialog, w, h, parent=None):
+        """Set a dialog's size and center it within the usable work area.
+
+        Ensures the whole dialog (including the bottom button bar) stays
+        visible by clamping to the work area and positioning within it.
+        """
+        work_w, work_h = self._get_work_area()
+        # Final clamp: never exceed the usable work area.
+        w = min(w, work_w) if work_w > 0 else w
+        h = min(h, work_h) if work_h > 0 else h
+
+        if parent is not None:
+            try:
+                parent.update_idletasks()
+                px = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
+                py = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
+            except Exception:
+                px = (work_w - w) // 2
+                py = (work_h - h) // 2
+        else:
+            px = (work_w - w) // 2
+            py = (work_h - h) // 2
+
+        # Keep the top-left inside the work area so the bottom is never cut off.
+        if work_w > 0 and work_h > 0:
+            px = max(0, min(px, work_w - w))
+            py = max(0, min(py, work_h - h))
+        else:
+            px = max(0, px)
+            py = max(0, py)
+
+        dialog.geometry(f"{w}x{h}+{px}+{py}")
     
     def create_scrollable_dialog(self, parent, title, width_pct=0.35, height_pct=0.85, 
                                   max_width=None, max_height=None, min_width=350, min_height=300,
@@ -767,6 +826,80 @@ class InteractivePlotter:
         
         return d, content_frame, canvas, main_container, btn_container
 
+    def _create_scrollable_tabbed_dialog(self, parent, title, width_pct=0.40, height_pct=0.80,
+                                          max_width=None, max_height=None,
+                                          min_width=450, min_height=400):
+        """Create a tabbed (ttk.Notebook) dialog whose button bar is never cut off.
+
+        Layout::
+
+            main_container
+              +-- btn_container      (packed 'bottom' -> PINNED, always visible)
+              +-- canvas + scrollbar (fills the rest)
+                    +-- notebook_host (width synced to canvas)
+                          +-- ttk.Notebook
+
+        Returns ``(dialog, notebook, main_container, btn_container)``.
+        """
+        d = tk.Toplevel(parent)
+        d.title(title)
+        d.transient(parent)
+
+        w, h = self.get_dialog_size(width_pct, height_pct, max_width, max_height,
+                                    min_width, min_height)
+        self._set_dialog_geometry(d, w, h, parent=parent)
+
+        main_container = ttk.Frame(d)
+        main_container.pack(fill='both', expand=True)
+
+        # Pinned button bar at the bottom (packed first so it is always visible).
+        btn_container = ttk.Frame(main_container)
+        btn_container.pack(side='bottom', fill='x', pady=10, padx=10)
+
+        # Scrollable area hosting the Notebook.
+        canvas = tk.Canvas(main_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_container, orient='vertical', command=canvas.yview)
+        notebook_host = ttk.Frame(canvas)
+
+        notebook = ttk.Notebook(notebook_host)
+        notebook.pack(fill='both', expand=True, padx=5, pady=5)
+
+        notebook_host.bind('<Configure>',
+                           lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        inner_id = canvas.create_window((0, 0), window=notebook_host, anchor='nw')
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+
+        # Keep the notebook host as wide as the canvas so content fills the width
+        # and reflows instead of being clipped on the right.
+        def _sync_width(_event):
+            canvas.itemconfigure(inner_id, width=canvas.winfo_width())
+        canvas.bind('<Configure>', _sync_width)
+
+        # Dialog-scoped mouse-wheel scrolling: bound globally, but ignored when
+        # the event originates from a different toplevel (so the main window and
+        # other dialogs keep their own scrolling behaviour).
+        def _on_mousewheel(event):
+            try:
+                if event.widget.winfo_toplevel() is not d:
+                    return
+            except Exception:
+                return
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        d.bind_all('<MouseWheel>', _on_mousewheel)
+
+        def _on_close():
+            try:
+                d.unbind_all('<MouseWheel>')
+            except Exception:
+                pass
+            d.destroy()
+        d.protocol('WM_DELETE_WINDOW', _on_close)
+
+        return d, notebook, main_container, btn_container
+
     def add_dialog_buttons(self, parent, dialog, update_cmd, ok_cmd=None, cancel_cmd=None, 
                            extra_buttons=None):
         """Add standardized button frame to a dialog.
@@ -812,17 +945,11 @@ class InteractivePlotter:
 
     def open_ranges_dialog(self):
         """Open the Ranges & Data dialog with a tabbed interface."""
-        d = tk.Toplevel(self.root)
-        d.title("Ranges & Data Transformation")
-        w, h = self.get_dialog_size(0.40, 0.80, max_width=550, max_height=700, min_width=450, min_height=500)
-        d.geometry(f"{w}x{h}")
-        d.transient(self.root)
-
-        main_container = ttk.Frame(d)
-        main_container.pack(fill='both', expand=True)
-
-        notebook = ttk.Notebook(main_container)
-        notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        d, notebook, main_container, btn_container = self._create_scrollable_tabbed_dialog(
+            self.root, "Ranges & Data Transformation",
+            width_pct=0.40, height_pct=0.80, max_width=550, max_height=700,
+            min_width=450, min_height=500
+        )
 
         def add_entry(parent, txt, var, width=15):
             f = ttk.Frame(parent)
@@ -892,10 +1019,8 @@ class InteractivePlotter:
         ttk.Entry(bf, textvariable=self.v_x_breaks[0][1], width=10).pack(side='left', padx=2)
 
         # ============================================
-        # Button frame at bottom
+        # Button frame at bottom (pinned — provided by helper)
         # ============================================
-        btn_container = ttk.Frame(main_container)
-        btn_container.pack(side='bottom', fill='x', pady=10, padx=10)
         btn_width = 12
         ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
             side='left', expand=True, fill='x', padx=2)
@@ -908,22 +1033,12 @@ class InteractivePlotter:
 
     def open_labels_dialog(self):
         """Open the Labels & Titles dialog with a tabbed interface."""
-        # Create dialog window
-        d = tk.Toplevel(self.root)
-        d.title("Labels, Titles & Colors")
-        
-        # Calculate size - wider for tabs
-        w, h = self.get_dialog_size(0.45, 0.90, max_width=650, max_height=850, min_width=500, min_height=600)
-        d.geometry(f"{w}x{h}")
-        d.transient(self.root)
-        
-        # Main container
-        main_container = ttk.Frame(d)
-        main_container.pack(fill='both', expand=True)
-        
-        # Create notebook (tab container)
-        notebook = ttk.Notebook(main_container)
-        notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        # Create dialog window (tabbed + scrollable, button bar pinned at bottom)
+        d, notebook, main_container, btn_container = self._create_scrollable_tabbed_dialog(
+            self.root, "Labels, Titles & Colors",
+            width_pct=0.45, height_pct=0.90, max_width=650, max_height=850,
+            min_width=500, min_height=600
+        )
         
         # Helper functions
         def add_entry(parent, txt, var, width=15):
@@ -1192,13 +1307,10 @@ class InteractivePlotter:
         add_entry(tab_transparency, "Plot Background Alpha:", self.plot_bg_alpha)
         add_entry(tab_transparency, "Figure Background Alpha:", self.fig_bg_alpha)
         add_entry(tab_transparency, "Legend Fill Alpha:", self.legend_fill_alpha)
-        
+
         # ============================================
-        # Button frame at bottom
+        # Button frame at bottom (pinned — provided by helper)
         # ============================================
-        btn_container = ttk.Frame(main_container)
-        btn_container.pack(side='bottom', fill='x', pady=10, padx=10)
-        
         btn_width = 12
         ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
             side='left', expand=True, fill='x', padx=2)
@@ -1209,18 +1321,11 @@ class InteractivePlotter:
 
     def open_ticks_dialog(self):
         """Open the Ticks & Fonts dialog with a tabbed interface."""
-        d = tk.Toplevel(self.root)
-        d.title("Ticks & Fonts")
-        
-        w, h = self.get_dialog_size(0.45, 0.80, max_width=600, max_height=700, min_width=500, min_height=500)
-        d.geometry(f"{w}x{h}")
-        d.transient(self.root)
-        
-        main_container = ttk.Frame(d)
-        main_container.pack(fill='both', expand=True)
-        
-        notebook = ttk.Notebook(main_container)
-        notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        d, notebook, main_container, btn_container = self._create_scrollable_tabbed_dialog(
+            self.root, "Ticks & Fonts",
+            width_pct=0.45, height_pct=0.80, max_width=600, max_height=700,
+            min_width=500, min_height=500
+        )
         
         dir_options = ["out", "in", "inout", "none"]
 
@@ -1381,10 +1486,8 @@ class InteractivePlotter:
                      values=['-', '--', ':', '-.'], width=8, state='readonly').pack(side='left', padx=2)
 
         # ============================================
-        # Button frame at bottom
+        # Button frame at bottom (pinned — provided by helper)
         # ============================================
-        btn_container = ttk.Frame(main_container)
-        btn_container.pack(side='bottom', fill='x', pady=10, padx=10)
         btn_width = 12
         ttk.Button(btn_container, text="Update Plot", command=self.update_plot, width=btn_width).pack(
             side='left', expand=True, fill='x', padx=2)
