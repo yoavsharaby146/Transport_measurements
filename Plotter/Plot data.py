@@ -2688,10 +2688,41 @@ class InteractivePlotter:
                 X = df[xcol].to_numpy() / xf;
                 Y = df[ycols[0]].to_numpy() / yf;
                 Z = df[self.z_combo.get()].to_numpy() / zf
-                xi, yi = np.meshgrid(np.linspace(X.min(), X.max(), 300), np.linspace(Y.min(), Y.max(), 300))
-                zi = griddata((X, Y), Z, (xi, yi), method='cubic')
-                im = self.ax.imshow(zi, extent=(X.min(), X.max(), Y.min(), Y.max()), origin='lower', aspect='auto',
-                                    cmap=self.v_cmap_name.get(), vmin=z_min_val, vmax=z_max_val)
+
+                # --- Normalize X and Y to a unit square BEFORE interpolation ---
+                # griddata's cubic interpolator depends on the GEOMETRY of the (X, Y)
+                # point cloud. Dividing one axis makes the domain highly anisotropic,
+                # which changes the interpolation result (overshoots / NaN coverage)
+                # and therefore shifts the Z color range — even though Z itself was
+                # not changed. Normalizing to [0, 1] makes the geometry identical for
+                # any divide factor, so the coloring stays invariant to X/Y scaling.
+                x_min, x_max = float(X.min()), float(X.max())
+                y_min, y_max = float(Y.min()), float(Y.max())
+                x_range = (x_max - x_min) or 1.0
+                y_range = (y_max - y_min) or 1.0
+                Xn = (X - x_min) / x_range
+                Yn = (Y - y_min) / y_range
+                xi, yi = np.meshgrid(np.linspace(0.0, 1.0, 300), np.linspace(0.0, 1.0, 300))
+                zi = griddata((Xn, Yn), Z, (xi, yi), method='cubic')
+                # Derive the color range from the ACTUAL Z data (finite values only) when
+                # the user has not set Z Min/Max. Dividing X or Y only rescales the grid
+                # spacing; it must NOT change the Z (color) axis ticks or colors.
+                # Letting matplotlib auto-scale to the interpolated `zi` array would make
+                # the color range drift (cubic overshoot / NaN coverage change with the
+                # grid geometry), which is why dividing one axis appeared to affect the
+                # others. Anchoring vmin/vmax to the real Z data keeps the colormap
+                # completely stable and independent of any X/Y divide factor.
+                z_finite = Z[np.isfinite(Z)]
+                if z_finite.size > 0:
+                    z_auto_min = float(np.min(z_finite))
+                    z_auto_max = float(np.max(z_finite))
+                else:
+                    z_auto_min = z_auto_max = None
+                cmap_vmin = z_min_val if z_min_val is not None else z_auto_min
+                cmap_vmax = z_max_val if z_max_val is not None else z_auto_max
+                # Display extent uses the real (scaled) X/Y so tick labels are correct.
+                im = self.ax.imshow(zi, extent=(x_min, x_max, y_min, y_max), origin='lower', aspect='auto',
+                                    cmap=self.v_cmap_name.get(), vmin=cmap_vmin, vmax=cmap_vmax)
                 # Track ylabel_text for custom positioning
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
