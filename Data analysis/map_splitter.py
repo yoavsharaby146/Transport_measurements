@@ -5,234 +5,683 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 
 
-class MapSplitter:
-    """Splits a map measurement CSV into individual files, one per slow-axis setpoint.
-
-    After a map measurement (e.g. gate map), the data contains many fast-axis
-    sweeps recorded at different slow-axis values. This tool extracts each
-    slow-axis setpoint into its own CSV file so you can examine a single
-    sweep at a time.
-    """
-
+class ScanOrganizer:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Map Splitter — Slow Axis Sweep Extractor")
-        self.root.geometry("440x200")
+        self.root.title("Scan Organizer")
+        self.root.geometry("400x250")
 
-        # Force window to front
+        # --- Force Window to Front ---
         self.root.lift()
         self.root.attributes('-topmost', True)
         self.root.after_idle(self.root.attributes, '-topmost', False)
 
-        # --- UI ---
-        tk.Label(self.root, text="Map Splitter",
-                 font=("Arial", 14, "bold")).pack(pady=(15, 2))
-        tk.Label(self.root,
-                 text="Split a map measurement into individual slow-axis sweeps",
-                 font=("Arial", 9), fg="gray").pack(pady=(0, 10))
-        tk.Button(self.root, text="Select File & Run",
-                  command=self.run, height=2, width=22).pack(pady=10)
+        # --- UI Setup ---
+        tk.Label(self.root, text="Select Scan Type:", font=("Arial", 11, "bold")).pack(pady=10)
 
-    # ═══════════════════════════════════════════════════════════
-    #  UI HELPERS
-    # ═══════════════════════════════════════════════════════════
+        self.mode_var = tk.StringVar()
+        self.mode_combo = ttk.Combobox(self.root, textvariable=self.mode_var, state="readonly", width=40)
+        self.mode_combo['values'] = (
+            "Smart Split (Fast & Slow Axis - Auto Detect)",
+            "Gate Map - Direction Split (Fwd/Bwd)",
+            "Hysteresis - Auto Detect (0 -> SP1 -> SP2 -> 0)",
+            "Standard Loop - Auto Detect (0 -> Max -> 0)",
+            "Snake - Auto Detect (Alternating)"
+        )
+        self.mode_combo.current(0)
+        self.mode_combo.pack(pady=5)
 
-    def _ask_column(self, df, title="Select Slow Axis Column"):
-        """Show dialog for user to select the slow axis column."""
-        columns = df.columns
-        if not columns:
-            messagebox.showerror("Error", "CSV has no columns.")
-            return None
+        tk.Label(self.root, text="Note: All modes auto-detect sweeps from a chosen axis column.",
+                 font=("Arial", 8), fg="gray").pack(pady=0)
 
-        win = tk.Toplevel(self.root)
-        win.title(title)
-        win.geometry("350x180")
-        win.lift()
+        tk.Button(self.root, text="Select File & Run", command=self.process_selection, height=2, width=20).pack(pady=20)
 
-        result = {'col': None}
+    def process_selection(self):
+        mode = self.mode_var.get()
 
-        tk.Label(win, text="Select the slow sweep axis column:",
-                 font=("Arial", 10)).pack(pady=10)
-        col_var = tk.StringVar()
-        combo = ttk.Combobox(win, textvariable=col_var, values=columns,
-                             state="readonly", width=35)
-        combo.current(0)
-        combo.pack(pady=5)
-
-        def confirm():
-            result['col'] = col_var.get()
-            win.destroy()
-
-        tk.Button(win, text="Confirm", command=confirm, width=15).pack(pady=20)
-        self.root.wait_window(win)
-        return result['col']
-
-    # ═══════════════════════════════════════════════════════════
-    #  SETPOINT CLUSTERING
-    # ═══════════════════════════════════════════════════════════
-
-    @staticmethod
-    def _cluster_setpoints(values, tolerance):
-        """Cluster numeric values into setpoints within the given tolerance.
-
-        Returns a dict mapping each unique value to its cluster mean.
-        """
-        if len(values) == 0:
-            return {}
-
-        sorted_vals = sorted(values)
-        clusters = []
-        current_cluster = [sorted_vals[0]]
-
-        for val in sorted_vals[1:]:
-            if val - current_cluster[-1] <= tolerance:
-                current_cluster.append(val)
-            else:
-                clusters.append(current_cluster)
-                current_cluster = [val]
-        clusters.append(current_cluster)
-
-        cluster_means = [sum(c) / len(c) for c in clusters]
-
-        mapping = {}
-        for val in values:
-            nearest_idx = min(range(len(cluster_means)),
-                              key=lambda i: abs(cluster_means[i] - val))
-            mapping[val] = cluster_means[nearest_idx]
-
-        return mapping
-
-    @staticmethod
-    def _auto_compute_tolerance(values):
-        """Auto-compute a tolerance for setpoint clustering.
-
-        Uses half the minimum absolute non-zero gap between sorted unique values,
-        which naturally separates distinct setpoints while allowing for noise.
-        """
-        unique_vals = np.sort(np.unique(values))
-        if len(unique_vals) <= 1:
-            return float(np.ptp(values)) * 0.01 if len(values) > 1 else 1e-6
-
-        gaps = np.diff(unique_vals)
-        nonzero_gaps = gaps[gaps > 0]
-
-        if len(nonzero_gaps) == 0:
-            return float(np.ptp(values)) * 0.01
-
-        # Half the minimum gap between distinct values
-        return float(nonzero_gaps.min() * 0.5)
-
-    # ═══════════════════════════════════════════════════════════
-    #  MAIN LOGIC
-    # ═══════════════════════════════════════════════════════════
-
-    def run(self):
-        """Main processing pipeline: load → select axis → cluster → split → save."""
-
-        # 1. Select file
         file_path = filedialog.askopenfilename(
             parent=self.root,
-            title="Select Map Measurement CSV",
+            title="Select your Data CSV",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
         )
+
         if not file_path:
             return
 
         try:
-            # 2. Load
             df = pl.read_csv(file_path, infer_schema_length=10000)
-            print(f"Loaded: {os.path.basename(file_path)} ({len(df)} rows, {len(df.columns)} columns)")
 
-            # 3. Ask for slow axis column
-            slow_col = self._ask_column(df)
-            if slow_col is None:
-                return
-
-            values = df[slow_col].to_numpy()
-
-            # 4. Compute tolerance and ask user
-            auto_tol = self._auto_compute_tolerance(values)
-
-            tolerance = simpledialog.askfloat(
-                "Setpoint Tolerance",
-                f"Slow axis: '{slow_col}'\n"
-                f"Range: {values.min():.6g} → {values.max():.6g}\n"
-                f"Unique values detected: {len(np.unique(values))}\n\n"
-                f"Tolerance for grouping into setpoints:\n"
-                f"(values within this range are considered the same setpoint)\n\n"
-                f"Auto-detected: {auto_tol:.6g}",
-                initialvalue=auto_tol, parent=self.root
-            )
-            if tolerance is None:
-                return
-
-            # 5. Cluster setpoints
-            unique_vals = np.unique(values)
-            cluster_map = self._cluster_setpoints(list(unique_vals), tolerance)
-            setpoint_values = sorted(set(cluster_map.values()))
-
-            print(f"\nDetected {len(setpoint_values)} setpoint(s) for '{slow_col}':")
-            for sp in setpoint_values:
-                print(f"  {sp:.6g}")
-
-            if not setpoint_values:
-                messagebox.showinfo("Info", "No setpoints detected.")
-                return
-
-            # 6. Choose output folder
-            output_dir = filedialog.askdirectory(
-                parent=self.root,
-                title="Select Output Folder for Split Files"
-            )
-            if not output_dir:
-                return
-
-            # 7. Split and save
-            name = os.path.splitext(os.path.basename(file_path))[0]
-            saved_files = []
-
-            # Add a cluster-mean column to the dataframe for grouping
-            # Map each row's slow_col value to its cluster mean
-            mapping_series = {float(v): float(cluster_map[v]) for v in cluster_map}
-            df = df.with_columns(
-                pl.col(slow_col).map_elements(lambda x: mapping_series.get(float(x), float(x))).alias("_setpoint")
-            )
-
-            for sp_val in setpoint_values:
-                segment = df.filter(pl.col("_setpoint") == sp_val).drop("_setpoint")
-                if len(segment) == 0:
-                    continue
-
-                sp_str = f"{sp_val:.6g}"
-                output_filename = f"{slow_col}_at_{sp_str}_{name}.csv"
-                output_path = os.path.join(output_dir, output_filename)
-                segment.write_csv(output_path)
-                saved_files.append((sp_str, len(segment)))
-                print(f"  Saved: {output_filename} ({len(segment)} rows)")
-
-            # 8. Summary
-            summary_lines = [
-                f"Map Split Complete!\n",
-                f"Source: {os.path.basename(file_path)}",
-                f"Slow axis: '{slow_col}'",
-                f"Setpoints found: {len(saved_files)}",
-                f"Output folder:\n{output_dir}\n",
-                f"Files created:"
-            ]
-            for sp_str, row_count in saved_files:
-                summary_lines.append(f"  {slow_col}_at_{sp_str}_{name}.csv  ({row_count} rows)")
-
-            msg = "\n".join(summary_lines)
-            print(f"\n{msg}")
-            messagebox.showinfo("Success", msg)
-            self.root.quit()
+            # Route to correct logic
+            if "Smart Split" in mode:
+                self.process_smart_axis_split(df, file_path)
+            elif "Gate Map" in mode:
+                self.process_gate_map(df, file_path)
+            elif "Hysteresis" in mode:
+                self.process_hysteresis(df, file_path)
+            elif "Standard Loop" in mode:
+                self.process_standard_loop(df, file_path)
+            elif "Snake" in mode:
+                self.process_snake(df, file_path)
 
         except Exception as e:
-            error_msg = f"An error occurred:\n{str(e)}"
-            print(error_msg)
-            messagebox.showerror("Error", error_msg)
+            messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
+
+    # =========================================================
+    # SHARED HELPERS
+    # =========================================================
+    def _ask_axis_and_threshold(self, df, title_prefix="Axis"):
+        """Ask user to select an axis column and change threshold.
+        Returns (col_name, threshold) or (None, None) if cancelled."""
+        columns = df.columns
+        if not columns:
+            messagebox.showerror("Error", "CSV appears to be empty or has no headers.")
+            return None, None
+
+        # --- Column selection dialog ---
+        col_window = tk.Toplevel(self.root)
+        col_window.title(f"Select {title_prefix} Column")
+        col_window.geometry("320x180")
+        col_window.lift()
+
+        result = {'col': None}
+
+        tk.Label(col_window, text=f"Which column is the {title_prefix}?",
+                 font=("Arial", 10)).pack(pady=10)
+        col_var = tk.StringVar()
+        col_box = ttk.Combobox(col_window, textvariable=col_var, values=columns,
+                               state="readonly", width=35)
+        col_box.current(0)
+        col_box.pack(pady=5)
+
+        def on_confirm():
+            result['col'] = col_var.get()
+            col_window.destroy()
+
+        tk.Button(col_window, text="Confirm", command=on_confirm, width=15).pack(pady=20)
+        self.root.wait_window(col_window)
+
+        if result['col'] is None:
+            return None, None
+
+        # --- Threshold dialog ---
+        col = result['col']
+        col_range = df[col].max() - df[col].min()
+        default_thresh = col_range * 0.01
+
+        threshold = simpledialog.askfloat(
+            "Change Threshold",
+            f"Enter change threshold for '{col}':\n"
+            f"(If |change| < this value, the axis is considered constant)\n"
+            f"Default (1% of range): {default_thresh:.6g}",
+            initialvalue=default_thresh, parent=self.root)
+
+        if threshold is None:
+            return None, None
+
+        return col, threshold
+
+    def _ask_axis_column(self, df, title_prefix="Axis"):
+        """Ask user to select an axis column only. Returns col_name or None."""
+        columns = df.columns
+        if not columns:
+            messagebox.showerror("Error", "CSV appears to be empty or has no headers.")
+            return None
+
+        col_window = tk.Toplevel(self.root)
+        col_window.title(f"Select {title_prefix} Column")
+        col_window.geometry("320x180")
+        col_window.lift()
+
+        result = {'col': None}
+
+        tk.Label(col_window, text=f"Which column is the {title_prefix}?",
+                 font=("Arial", 10)).pack(pady=10)
+        col_var = tk.StringVar()
+        col_box = ttk.Combobox(col_window, textvariable=col_var, values=columns,
+                               state="readonly", width=35)
+        col_box.current(0)
+        col_box.pack(pady=5)
+
+        def on_confirm():
+            result['col'] = col_var.get()
+            col_window.destroy()
+
+        tk.Button(col_window, text="Confirm", command=on_confirm, width=15).pack(pady=20)
+        self.root.wait_window(col_window)
+
+        return result['col']
+
+    def _auto_detect_sweeps(self, df, axis_col, threshold):
+        """Detect sweep segments where the axis is changing (not constant).
+        Returns a list of DataFrames, each being one sweep segment,
+        plus the modified df (with helper columns) for reference."""
+        df = df.with_columns([
+            (pl.col(axis_col).diff().abs() < threshold).alias("axis_is_constant")
+        ])
+        df = df.with_columns([
+            (pl.col("axis_is_constant") != pl.col("axis_is_constant").shift(1))
+            .cum_sum().alias("segment_id")
+        ])
+
+        sweeps = []
+        grouped = df.group_by('segment_id', maintain_order=True)
+        for seg_id, segment in grouped:
+            if len(segment) < 3:
+                continue
+            is_constant = segment["axis_is_constant"].mode()[0]
+            if not is_constant:
+                sweeps.append(segment.drop(['axis_is_constant', 'segment_id']))
+
+        return sweeps
+
+    # =========================================================
+    # MODE: Gate Map - Direction Split (Fwd/Bwd)
+    # =========================================================
+    def _detect_direction_segments(self, df, axis_col, threshold,
+                                   slow_col=None, slow_threshold=0.0,
+                                   fast_min=None, fast_max=None):
+        """Detect sweep segments based on direction (sign) of change.
+
+        Uses backward-fill for zero-diff rows so that boundary repetitions
+        are correctly assigned to the *upcoming* sweep direction.
+        E.g. at the forward→backward turn-around where the value 3 repeats:
+            ..., 2.995, 3, 3, 2.995, ...
+        the first 3 (arriving via +0.005 diff) stays Forward,
+        the second 3 (diff=0, back-filled with next non-zero = -1) goes Backward.
+
+        If `slow_col` is provided, zero-diff regions where the slow axis is
+        *actively changing* (e.g. a magnetic-field sweep between fast sweeps)
+        are NOT back-filled — they are kept as 'flat' segments so they can be
+        separated out. Only genuine turn-around pauses (slow axis constant)
+        are back-filled into the upcoming sweep direction.
+
+        If `fast_min`/`fast_max` are provided, any diff step where either
+        endpoint falls outside [fast_min, fast_max] is forced flat and blocked
+        from fill — those rows are guaranteed to land in the slow-axis output.
+
+        Row direction is assigned as the *incoming* diff (signs[i-1] → row i),
+        so each sweep's turnaround point (its last row — the peak at a
+        forward→backward turn, the valley at a backward→forward turn) stays
+        with the sweep that produced it rather than leaking into the next one.
+
+        Returns list of (segment_df, direction_str) tuples.
+        direction_str is 'forward', 'backward', or 'flat'.
+        """
+        values = df[axis_col].to_numpy()
+        n = len(values)
+
+        if n < 2:
+            return [(df, 'forward')]
+
+        # 1. Compute diffs: diffs[i] = values[i+1] - values[i]
+        diffs = np.diff(values)                       # length n-1
+
+        # 2. Compute raw signs; zero out near-zero diffs
+        signs = np.sign(diffs).astype(int)
+        signs[np.abs(diffs) < threshold] = 0
+
+        # 2b. Determine where the slow axis is actively changing (length n-1).
+        #     Used to avoid back-filling through magnet/B-field sweeps.
+        if slow_col is not None:
+            slow_diffs = np.abs(np.diff(df[slow_col].to_numpy()))
+            slow_active = slow_diffs > slow_threshold
+        else:
+            slow_active = np.zeros(len(signs), dtype=bool)
+
+        # 2c. If fast axis limits are provided, force any diff step where either
+        #     endpoint is outside [fast_min, fast_max] to flat, and block fill
+        #     through those positions — they belong to the slow-axis segment.
+        if fast_min is not None or fast_max is not None:
+            lo = fast_min if fast_min is not None else -np.inf
+            hi = fast_max if fast_max is not None else  np.inf
+            outside = ((values[:-1] < lo) | (values[:-1] > hi) |
+                       (values[1:]  < lo) | (values[1:]  > hi))
+            signs[outside] = 0
+            slow_active = slow_active | outside
+
+        # 3. Backward-fill zeros (propagate next non-zero direction backward),
+        #    but NOT through positions where the slow axis is actively changing.
+        for i in range(len(signs) - 2, -1, -1):
+            if signs[i] == 0 and not slow_active[i]:
+                signs[i] = signs[i + 1]
+
+        # 3b. Forward-fill the single trailing zero immediately after a non-zero
+        #     run, but only if it is not slow-active.
+        #     Needed for the turnaround peak (e.g. last row of fwd): its outgoing
+        #     diff is zero (fast axis pauses before the slow axis starts moving),
+        #     but the backward-fill above couldn't reach it because the next sign
+        #     was also zero (slow_active blocked). Carrying the incoming direction
+        #     forward by one step correctly keeps the peak in the fast sweep.
+        for i in range(len(signs) - 1):
+            if signs[i] != 0 and signs[i + 1] == 0 and not slow_active[i + 1]:
+                signs[i + 1] = signs[i]
+
+        # 4. Forward-fill any remaining leading zeros, again skipping slow-active.
+        if len(signs) > 0 and signs[0] == 0:
+            for i in range(1, len(signs)):
+                if signs[i] != 0:
+                    fill_end = i
+                    actives = np.where(slow_active[:i])[0]
+                    if len(actives) > 0:
+                        fill_end = actives[0]
+                    if fill_end > 0:
+                        signs[:fill_end] = signs[i]
+                    break
+
+        # 5 & 6. Convert step signs → per-row direction, then segment.
+        #
+        # Each row is labelled by the *incoming* step — the step that arrived
+        # at it: row i ← signs[i-1]. This is what keeps a sweep's turnaround
+        # point attached to the sweep that produced it, instead of dropping it
+        # into the following sweep. At a forward→backward turn:
+        #   values:   ..., 2,   3,   3,   2,   ...   (3 = forward peak)
+        #   signs:    ..., +,   +,   0/-, -,   ...
+        #   row_sign: ..., +,   +,   +,   -,   ...   (the peak keeps '+')
+        # so the peak row stays in Forward and the Backward sweep starts on the
+        # next (already descending) row. Row 0 has no incoming step, so it
+        # inherits the first step's direction (it opens that first sweep).
+        #
+        # Rows then collapse into maximal runs of equal row_sign — clean,
+        # non-overlapping segments with no per-row boundary ambiguity.
+        if len(signs) == 0:
+            return [(df, 'flat')]
+
+        row_sign = np.empty(n, dtype=int)
+        row_sign[0] = signs[0]
+        row_sign[1:] = signs            # row_sign[i] = signs[i-1]  (incoming step)
+
+        # Maximal runs of equal row_sign → segment boundaries (row indices).
+        changes = np.where(np.diff(row_sign) != 0)[0] + 1
+        boundaries = np.concatenate([[0], changes, [n]])
+
+        segments = []
+        for i in range(len(boundaries) - 1):
+            s = int(boundaries[i])
+            e = int(boundaries[i + 1])   # exclusive
+            segment = df.slice(s, e - s)
+
+            # Label by net sign of this row block (robust to per-row noise)
+            net = int(np.sign(np.sum(row_sign[s:e])))
+            if net > 0:
+                dir_str = 'forward'
+            elif net < 0:
+                dir_str = 'backward'
+            else:
+                dir_str = 'flat'
+            segments.append((segment, dir_str))
+
+        return segments
+
+    def process_gate_map(self, df, file_path):
+        """Split gate map data into forward and backward sweeps using
+        direction (sign) detection instead of magnitude thresholding."""
+        axis_col = self._ask_axis_column(df, title_prefix="Gate Map Axis")
+        if axis_col is None:
+            return
+
+        # Auto-compute a sensible threshold from the data:
+        #   half the median absolute non-zero diff
+        values = df[axis_col].to_numpy()
+        abs_diffs = np.abs(np.diff(values))
+        non_zero = abs_diffs[abs_diffs > 0]
+        if len(non_zero) > 0:
+            auto_threshold = float(np.median(non_zero)) * 0.5
+        else:
+            auto_threshold = float(values.max() - values.min()) * 0.01
+
+        threshold = simpledialog.askfloat(
+            "Direction Threshold",
+            f"Auto-detected step threshold: {auto_threshold:.6g}\n"
+            f"(Diffs smaller than this are treated as flat/zero)\n\n"
+            f"Adjust if needed:",
+            initialvalue=auto_threshold, parent=self.root)
+        if threshold is None:
+            return
+
+        segments = self._detect_direction_segments(df, axis_col, threshold)
+
+        if not segments:
+            messagebox.showinfo("Info", "No sweep segments detected.")
+            return
+
+        fwd, bwd = [], []
+        for segment, direction in segments:
+            if direction == 'forward':
+                fwd.append(segment)
+            elif direction == 'backward':
+                bwd.append(segment)
+            # 'flat' segments (if any) are discarded
+
+        fwd_rows = sum(len(s) for s in fwd)
+        bwd_rows = sum(len(s) for s in bwd)
+        print(f"Gate Map Split: {len(df)} total rows → {fwd_rows} fwd, {bwd_rows} bwd "
+              f"({len(df) - fwd_rows - bwd_rows} flat discarded)")
+
+        self.save_simple(file_path, fwd, bwd, f"GateMap_{axis_col}")
+
+    # =========================================================
+    # MODE: Smart Split (Fast & Slow Axis - Auto Detect)
+    # =========================================================
+    def process_smart_axis_split(self, df, file_path):
+        """Ask user to select Fast Axis and Slow Axis columns."""
+        columns = df.columns
+        if not columns:
+            messagebox.showerror("Error", "CSV appears to be empty or has no headers.")
+            return
+
+        col_window = tk.Toplevel(self.root)
+        col_window.title("Select Axis Columns")
+        col_window.geometry("350x250")
+        col_window.lift()
+
+        # Fast Axis selection
+        tk.Label(col_window, text="Fast Axis (swept while slow axis holds):",
+                 font=("Arial", 10)).pack(pady=(15, 2))
+        fast_var = tk.StringVar()
+        fast_box = ttk.Combobox(col_window, textvariable=fast_var, values=columns,
+                                state="readonly", width=35)
+        fast_box.current(0)
+        fast_box.pack(pady=2)
+
+        # Slow Axis selection
+        tk.Label(col_window, text="Slow Axis (holds while fast axis sweeps):",
+                 font=("Arial", 10)).pack(pady=(15, 2))
+        slow_var = tk.StringVar()
+        slow_box = ttk.Combobox(col_window, textvariable=slow_var, values=columns,
+                                state="readonly", width=35)
+        slow_box.current(min(1, len(columns) - 1))
+        slow_box.pack(pady=2)
+
+        def on_confirm():
+            if fast_var.get() == slow_var.get():
+                messagebox.showwarning("Warning", "Fast and Slow axis must be different columns.",
+                                       parent=col_window)
+                return
+            col_window.destroy()
+            self.run_smart_split_logic(df, file_path, fast_var.get(), slow_var.get())
+
+        tk.Button(col_window, text="Confirm", command=on_confirm, width=15).pack(pady=20)
+        self.root.wait_window(col_window)
+
+    def run_smart_split_logic(self, df, file_path, fast_col, slow_col):
+        """Detect segments and classify into Fast Fwd/Bwd and Slow Fwd/Bwd groups.
+
+        Produces 4 outputs:
+          - {fast_col}_Fwd / {fast_col}_Bwd : fast axis sweeping (gate forward/backward)
+          - {slow_col}_Fwd / {slow_col}_Bwd : slow axis sweeping (e.g. magnet up/down)
+
+        Uses direction-sign-based detection to correctly handle repeated boundary
+        values at sweep turnarounds (no data loss).
+
+        The slow axis is monitored so that regions where the slow axis is *actively
+        sweeping* between fast sweeps are kept as 'flat' segments (w.r.t. the fast
+        axis) and then split into Slow Fwd/Bwd by the slow axis direction.
+        """
+        # --- Fast Axis Threshold ---
+        fast_range = df[fast_col].max() - df[fast_col].min()
+        fast_data_min = float(df[fast_col].min())
+        fast_data_max = float(df[fast_col].max())
+        default_fast_thresh = fast_range * 0.01
+
+        fast_threshold = simpledialog.askfloat(
+            "Fast Axis Threshold",
+            f"Enter Fast Axis ('{fast_col}') Change Threshold:\n"
+            f"(Diffs smaller than this are treated as flat/zero)\n"
+            f"Default (1% of range): {default_fast_thresh:.6g}",
+            initialvalue=default_fast_thresh, parent=self.root)
+        if fast_threshold is None:
+            return
+
+        # --- Fast Axis Limits (optional) ---
+        #   Rows where the fast axis falls outside [fast_min, fast_max] are
+        #   forced into the slow-axis output regardless of their diff sign.
+        #   This cleanly separates the slow-axis sweep region from the fast
+        #   sweep region without relying solely on diff magnitudes.
+        fast_min = fast_max = None
+        use_limits = messagebox.askyesno(
+            "Fast Axis Limits",
+            f"Set fast axis sweep limits for '{fast_col}'?\n\n"
+            f"Rows outside [min, max] will be treated as slow-axis data.\n"
+            f"Data range: [{fast_data_min:.6g}, {fast_data_max:.6g}]\n\n"
+            f"Recommended if the first row of each forward sweep\n"
+            f"is being misclassified as slow-axis data.",
+            parent=self.root)
+        if use_limits:
+            fast_min = simpledialog.askfloat(
+                "Fast Axis Min",
+                f"Fast axis minimum sweep value:\n(data min = {fast_data_min:.6g})",
+                initialvalue=fast_data_min, parent=self.root)
+            if fast_min is None:
+                return
+            fast_max = simpledialog.askfloat(
+                "Fast Axis Max",
+                f"Fast axis maximum sweep value:\n(data max = {fast_data_max:.6g})",
+                initialvalue=fast_data_max, parent=self.root)
+            if fast_max is None:
+                return
+
+        # --- Slow Axis Step Threshold (auto, used internally to detect sweeps) ---
+        #   Half the median non-zero slow-axis step: distinguishes a real sweep
+        #   (magnet moving between setpoints) from noise/hold jitter.
+        slow_range = df[slow_col].max() - df[slow_col].min()
+        slow_values = df[slow_col].to_numpy()
+        slow_abs_diffs = np.abs(np.diff(slow_values))
+        slow_nonzero = slow_abs_diffs[slow_abs_diffs > 0]
+        if len(slow_nonzero) > 0:
+            slow_threshold = float(np.median(slow_nonzero)) * 0.5
+        else:
+            slow_threshold = float(slow_range) * 0.01
+
+        print(f"Smart Split: slow axis '{slow_col}' step threshold = {slow_threshold:.6g} "
+              f"(auto, used to separate slow-axis sweeps from fast sweeps)")
+        if fast_min is not None or fast_max is not None:
+            print(f"Smart Split: fast axis limits = [{fast_min:.6g}, {fast_max:.6g}]")
+
+        # --- Segment Detection using direction-sign method ---
+        segments = self._detect_direction_segments(
+            df, fast_col, fast_threshold,
+            slow_col=slow_col, slow_threshold=slow_threshold,
+            fast_min=fast_min, fast_max=fast_max)
+
+        fast_fwd_segments = []
+        fast_bwd_segments = []
+        slow_fwd_segments = []
+        slow_bwd_segments = []
+
+        for segment, direction in segments:
+            if direction == 'forward':
+                fast_fwd_segments.append(segment)
+            elif direction == 'backward':
+                fast_bwd_segments.append(segment)
+            elif direction == 'flat':
+                # Slow axis is active here → classify by its direction (up/down)
+                slow_vals = segment[slow_col].to_numpy()
+                slow_diffs = np.diff(slow_vals)
+                # Net direction via sum of diffs (robust to noise)
+                net = float(np.sum(slow_diffs))
+                if net > 0:
+                    slow_fwd_segments.append(segment)
+                elif net < 0:
+                    slow_bwd_segments.append(segment)
+                else:
+                    # Genuinely constant (not expected, but skip just in case)
+                    print(f"  Skipping {len(segment)} flat rows "
+                          f"({slow_col} not changing)")
+
+        # --- Save Files ---
+        self.save_files_smart(file_path, fast_col, slow_col,
+                              fast_fwd_segments, fast_bwd_segments,
+                              slow_fwd_segments, slow_bwd_segments)
+
+    def save_files_smart(self, original_path, fast_col, slow_col,
+                         fast_fwd, fast_bwd, slow_fwd, slow_bwd):
+        """Save 4 split files: fast axis Fwd/Bwd + slow axis Fwd/Bwd.
+
+        Only writes files that contain data (skips empty groups).
+        """
+        directory = os.path.dirname(original_path)
+        name = os.path.splitext(os.path.basename(original_path))[0]
+
+        msg_lines = [
+            "Processing Complete!\n",
+            f"Fast Axis: '{fast_col}'",
+        ]
+
+        if fast_fwd:
+            df = pl.concat(fast_fwd)
+            df.write_csv(os.path.join(directory, f"{name}_{fast_col}_Fwd.csv"))
+            msg_lines.append(f"  Fwd sweep: {len(df)} rows ({len(fast_fwd)} segments)")
+        if fast_bwd:
+            df = pl.concat(fast_bwd)
+            df.write_csv(os.path.join(directory, f"{name}_{fast_col}_Bwd.csv"))
+            msg_lines.append(f"  Bwd sweep: {len(df)} rows ({len(fast_bwd)} segments)")
+
+        msg_lines.append("")
+        msg_lines.append(f"Slow Axis: '{slow_col}'")
+
+        if slow_fwd:
+            df = pl.concat(slow_fwd)
+            df.write_csv(os.path.join(directory, f"{name}_{slow_col}_Fwd.csv"))
+            msg_lines.append(f"  Fwd sweep: {len(df)} rows ({len(slow_fwd)} segments)")
+        if slow_bwd:
+            df = pl.concat(slow_bwd)
+            df.write_csv(os.path.join(directory, f"{name}_{slow_col}_Bwd.csv"))
+            msg_lines.append(f"  Bwd sweep: {len(df)} rows ({len(slow_bwd)} segments)")
+
+        msg = "\n".join(msg_lines)
+        print(msg)
+        messagebox.showinfo("Success", msg)
+        self.root.quit()
+
+    # =========================================================
+    # MODE: Snake - Auto Detect
+    # =========================================================
+    def process_snake(self, df, file_path):
+        """Auto-detect sweeps and alternate them into Fwd/Bwd."""
+        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Sweep Axis")
+        if axis_col is None:
+            return
+
+        sweeps = self._auto_detect_sweeps(df, axis_col, threshold)
+        if not sweeps:
+            messagebox.showinfo("Info", "No sweep segments detected.")
+            return
+
+        fwd, bwd = [], []
+        for i, sweep in enumerate(sweeps):
+            if i % 2 == 0:
+                fwd.append(sweep)
+            else:
+                bwd.append(sweep)
+
+        self.save_simple(file_path, fwd, bwd, f"Snake_{axis_col}")
+
+    # =========================================================
+    # MODE: Standard Loop - Auto Detect
+    # =========================================================
+    def process_standard_loop(self, df, file_path):
+        """Auto-detect sweeps, group into cycles, split into Fwd/Bwd."""
+        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Loop Axis")
+        if axis_col is None:
+            return
+
+        sweeps = self._auto_detect_sweeps(df, axis_col, threshold)
+        if not sweeps:
+            messagebox.showinfo("Info", "No sweep segments detected.")
+            return
+
+        sweeps_per_cycle = simpledialog.askinteger(
+            "Config", f"Detected {len(sweeps)} sweeps.\nSweeps per cycle:",
+            initialvalue=2, parent=self.root)
+        if not sweeps_per_cycle:
+            return
+
+        split = simpledialog.askinteger(
+            "Config", "Forward sweeps per cycle:",
+            initialvalue=sweeps_per_cycle // 2, parent=self.root)
+        if split is None:
+            return
+
+        fwd, bwd = [], []
+        for i in range(0, len(sweeps), sweeps_per_cycle):
+            block = sweeps[i:i + sweeps_per_cycle]
+            if len(block) < sweeps_per_cycle:
+                break
+            fwd.extend(block[:split])
+            bwd.extend(block[split:])
+
+        self.save_simple(file_path, fwd, bwd, f"StandardLoop_{axis_col}")
+
+    # =========================================================
+    # MODE: Hysteresis - Auto Detect
+    # =========================================================
+    def process_hysteresis(self, df, file_path):
+        """Auto-detect sweeps, group into hysteresis blocks, split by sweep indices."""
+        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Hysteresis Axis")
+        if axis_col is None:
+            return
+
+        sweeps = self._auto_detect_sweeps(df, axis_col, threshold)
+        if not sweeps:
+            messagebox.showinfo("Info", "No sweep segments detected.")
+            return
+
+        sweeps_per_block = simpledialog.askinteger(
+            "Config", f"Detected {len(sweeps)} sweeps.\nSweeps per hysteresis block:",
+            initialvalue=3, parent=self.root)
+        if not sweeps_per_block:
+            return
+
+        s1 = simpledialog.askinteger(
+            "Config",
+            "Split 1 (sweep index where backward starts):\n"
+            "(Sweeps 0..s1-1 are Forward part 1)",
+            initialvalue=1, parent=self.root)
+        if s1 is None:
+            return
+
+        s2 = simpledialog.askinteger(
+            "Config",
+            "Split 2 (sweep index where forward resumes):\n"
+            f"(Sweeps {s1}..{s2-1} are Backward, sweeps {s1}..end are Forward part 2)",
+            initialvalue=2, parent=self.root)
+        if s2 is None:
+            return
+
+        fwd, bwd = [], []
+        for i in range(0, len(sweeps), sweeps_per_block):
+            block = sweeps[i:i + sweeps_per_block]
+            if len(block) < sweeps_per_block:
+                break
+            fwd.extend(block[:s1])
+            fwd.extend(block[s2:])
+            bwd.extend(block[s1:s2])
+
+        self.save_simple(file_path, fwd, bwd, f"Hysteresis_{axis_col}")
+
+    # =========================================================
+    # SHARED SAVER (Snake, Standard Loop, Hysteresis)
+    # =========================================================
+    def save_simple(self, path, fwd, bwd, suffix):
+        df_f = pl.concat(fwd) if fwd else pl.DataFrame()
+        df_b = pl.concat(bwd) if bwd else pl.DataFrame()
+        d = os.path.dirname(path)
+        n = os.path.splitext(os.path.basename(path))[0]
+
+        msg_lines = [f"Processing Complete! ({suffix})\n"]
+        if len(df_f) > 0:
+            df_f.write_csv(os.path.join(d, f"{n}_{suffix}_Fwd.csv"))
+            msg_lines.append(f"Fwd: {len(df_f)} rows")
+        if len(df_b) > 0:
+            df_b.write_csv(os.path.join(d, f"{n}_{suffix}_Bwd.csv"))
+            msg_lines.append(f"Bwd: {len(df_b)} rows")
+
+        msg = "\n".join(msg_lines)
+        print(msg)
+        messagebox.showinfo("Success", msg)
+        self.root.quit()
 
 
 if __name__ == "__main__":
-    app = MapSplitter()
+    app = ScanOrganizer()
     app.root.mainloop()
