@@ -178,7 +178,8 @@ class ScanOrganizer:
     # MODE: Gate Map - Direction Split (Fwd/Bwd)
     # =========================================================
     def _detect_direction_segments(self, df, axis_col, threshold,
-                                   slow_col=None, slow_threshold=0.0):
+                                   slow_col=None, slow_threshold=0.0,
+                                   fast_min=None, fast_max=None):
         """Detect sweep segments based on direction (sign) of change.
 
         Uses backward-fill for zero-diff rows so that boundary repetitions
@@ -193,6 +194,15 @@ class ScanOrganizer:
         are NOT back-filled — they are kept as 'flat' segments so they can be
         separated out. Only genuine turn-around pauses (slow axis constant)
         are back-filled into the upcoming sweep direction.
+
+        If `fast_min`/`fast_max` are provided, any diff step where either
+        endpoint falls outside [fast_min, fast_max] is forced flat and blocked
+        from fill — those rows are guaranteed to land in the slow-axis output.
+
+        Row direction is assigned as the *incoming* diff (signs[i-1] → row i),
+        so each sweep's turnaround point (its last row — the peak at a
+        forward→backward turn, the valley at a backward→forward turn) stays
+        with the sweep that produced it rather than leaking into the next one.
 
         Returns list of (segment_df, direction_str) tuples.
         direction_str is 'forward', 'backward', or 'flat'.
@@ -218,47 +228,83 @@ class ScanOrganizer:
         else:
             slow_active = np.zeros(len(signs), dtype=bool)
 
+        # 2c. If fast axis limits are provided, force any diff step where either
+        #     endpoint is outside [fast_min, fast_max] to flat, and block fill
+        #     through those positions — they belong to the slow-axis segment.
+        if fast_min is not None or fast_max is not None:
+            lo = fast_min if fast_min is not None else -np.inf
+            hi = fast_max if fast_max is not None else  np.inf
+            outside = ((values[:-1] < lo) | (values[:-1] > hi) |
+                       (values[1:]  < lo) | (values[1:]  > hi))
+            signs[outside] = 0
+            slow_active = slow_active | outside
+
         # 3. Backward-fill zeros (propagate next non-zero direction backward),
-        #    but NOT through rows where the slow axis is actively changing.
+        #    but NOT through positions where the slow axis is actively changing.
         for i in range(len(signs) - 2, -1, -1):
-            if signs[i] == 0:
-                if slow_col is not None and slow_active[i]:
-                    continue  # slow axis sweeping here (e.g. magnet move): keep flat
+            if signs[i] == 0 and not slow_active[i]:
                 signs[i] = signs[i + 1]
 
-        # 4. Forward-fill any remaining leading zeros, again skipping rows
-        #    where the slow axis is actively changing.
+        # 3b. Forward-fill the single trailing zero immediately after a non-zero
+        #     run, but only if it is not slow-active.
+        #     Needed for the turnaround peak (e.g. last row of fwd): its outgoing
+        #     diff is zero (fast axis pauses before the slow axis starts moving),
+        #     but the backward-fill above couldn't reach it because the next sign
+        #     was also zero (slow_active blocked). Carrying the incoming direction
+        #     forward by one step correctly keeps the peak in the fast sweep.
+        for i in range(len(signs) - 1):
+            if signs[i] != 0 and signs[i + 1] == 0 and not slow_active[i + 1]:
+                signs[i + 1] = signs[i]
+
+        # 4. Forward-fill any remaining leading zeros, again skipping slow-active.
         if len(signs) > 0 and signs[0] == 0:
             for i in range(1, len(signs)):
                 if signs[i] != 0:
                     fill_end = i
-                    if slow_col is not None:
-                        actives = np.where(slow_active[:i])[0]
-                        if len(actives) > 0:
-                            fill_end = actives[0]
+                    actives = np.where(slow_active[:i])[0]
+                    if len(actives) > 0:
+                        fill_end = actives[0]
                     if fill_end > 0:
                         signs[:fill_end] = signs[i]
                     break
 
-        # 5. Assign a direction to every row:
-        #    row 0 inherits signs[0]; row j (j>0) inherits signs[j-1]
-        row_dirs = np.zeros(n, dtype=int)
-        row_dirs[0] = signs[0] if len(signs) > 0 else 0
-        row_dirs[1:] = signs
+        # 5 & 6. Convert step signs → per-row direction, then segment.
+        #
+        # Each row is labelled by the *incoming* step — the step that arrived
+        # at it: row i ← signs[i-1]. This is what keeps a sweep's turnaround
+        # point attached to the sweep that produced it, instead of dropping it
+        # into the following sweep. At a forward→backward turn:
+        #   values:   ..., 2,   3,   3,   2,   ...   (3 = forward peak)
+        #   signs:    ..., +,   +,   0/-, -,   ...
+        #   row_sign: ..., +,   +,   +,   -,   ...   (the peak keeps '+')
+        # so the peak row stays in Forward and the Backward sweep starts on the
+        # next (already descending) row. Row 0 has no incoming step, so it
+        # inherits the first step's direction (it opens that first sweep).
+        #
+        # Rows then collapse into maximal runs of equal row_sign — clean,
+        # non-overlapping segments with no per-row boundary ambiguity.
+        if len(signs) == 0:
+            return [(df, 'flat')]
 
-        # 6. Detect direction changes → segment boundaries
-        changes = np.where(np.diff(row_dirs) != 0)[0] + 1
+        row_sign = np.empty(n, dtype=int)
+        row_sign[0] = signs[0]
+        row_sign[1:] = signs            # row_sign[i] = signs[i-1]  (incoming step)
+
+        # Maximal runs of equal row_sign → segment boundaries (row indices).
+        changes = np.where(np.diff(row_sign) != 0)[0] + 1
         boundaries = np.concatenate([[0], changes, [n]])
 
         segments = []
         for i in range(len(boundaries) - 1):
-            start = int(boundaries[i])
-            end = int(boundaries[i + 1])
-            segment = df.slice(start, end - start)
-            d = int(row_dirs[start])
-            if d > 0:
+            s = int(boundaries[i])
+            e = int(boundaries[i + 1])   # exclusive
+            segment = df.slice(s, e - s)
+
+            # Label by net sign of this row block (robust to per-row noise)
+            net = int(np.sign(np.sum(row_sign[s:e])))
+            if net > 0:
                 dir_str = 'forward'
-            elif d < 0:
+            elif net < 0:
                 dir_str = 'backward'
             else:
                 dir_str = 'flat'
@@ -373,6 +419,8 @@ class ScanOrganizer:
         """
         # --- Fast Axis Threshold ---
         fast_range = df[fast_col].max() - df[fast_col].min()
+        fast_data_min = float(df[fast_col].min())
+        fast_data_max = float(df[fast_col].max())
         default_fast_thresh = fast_range * 0.01
 
         fast_threshold = simpledialog.askfloat(
@@ -383,6 +431,34 @@ class ScanOrganizer:
             initialvalue=default_fast_thresh, parent=self.root)
         if fast_threshold is None:
             return
+
+        # --- Fast Axis Limits (optional) ---
+        #   Rows where the fast axis falls outside [fast_min, fast_max] are
+        #   forced into the slow-axis output regardless of their diff sign.
+        #   This cleanly separates the slow-axis sweep region from the fast
+        #   sweep region without relying solely on diff magnitudes.
+        fast_min = fast_max = None
+        use_limits = messagebox.askyesno(
+            "Fast Axis Limits",
+            f"Set fast axis sweep limits for '{fast_col}'?\n\n"
+            f"Rows outside [min, max] will be treated as slow-axis data.\n"
+            f"Data range: [{fast_data_min:.6g}, {fast_data_max:.6g}]\n\n"
+            f"Recommended if the first row of each forward sweep\n"
+            f"is being misclassified as slow-axis data.",
+            parent=self.root)
+        if use_limits:
+            fast_min = simpledialog.askfloat(
+                "Fast Axis Min",
+                f"Fast axis minimum sweep value:\n(data min = {fast_data_min:.6g})",
+                initialvalue=fast_data_min, parent=self.root)
+            if fast_min is None:
+                return
+            fast_max = simpledialog.askfloat(
+                "Fast Axis Max",
+                f"Fast axis maximum sweep value:\n(data max = {fast_data_max:.6g})",
+                initialvalue=fast_data_max, parent=self.root)
+            if fast_max is None:
+                return
 
         # --- Slow Axis Step Threshold (auto, used internally to detect sweeps) ---
         #   Half the median non-zero slow-axis step: distinguishes a real sweep
@@ -398,11 +474,14 @@ class ScanOrganizer:
 
         print(f"Smart Split: slow axis '{slow_col}' step threshold = {slow_threshold:.6g} "
               f"(auto, used to separate slow-axis sweeps from fast sweeps)")
+        if fast_min is not None or fast_max is not None:
+            print(f"Smart Split: fast axis limits = [{fast_min:.6g}, {fast_max:.6g}]")
 
         # --- Segment Detection using direction-sign method ---
         segments = self._detect_direction_segments(
             df, fast_col, fast_threshold,
-            slow_col=slow_col, slow_threshold=slow_threshold)
+            slow_col=slow_col, slow_threshold=slow_threshold,
+            fast_min=fast_min, fast_max=fast_max)
 
         fast_fwd_segments = []
         fast_bwd_segments = []
