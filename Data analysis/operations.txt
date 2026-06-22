@@ -1,0 +1,6 @@
+Rxx srs860	(f1.Lockin_Voltage_SRS860_1_X(V)+f2.Lockin_Voltage_SRS860_1_X(V))/2
+Rxx srs830_1	(f1.Lockin_Voltage_SRS830_1_X(V)+f2.Lockin_Voltage_SRS830_1_X(V))/2
+Rxx srs830_2	(f1.Lockin_Voltage_SRS830_2_X(V)+f2.Lockin_Voltage_SRS830_2_X(V))/2
+Rxy srs860	(f1.Lockin_Voltage_SRS860_1_X(V)-f2.Lockin_Voltage_SRS860_1_X(V))/2
+Rxy srs830_1	(f1.Lockin_Voltage_SRS830_1_X(V)-f2.Lockin_Voltage_SRS830_1_X(V))/2
+Rxy srs830_2	(f1.Lockin_Voltage_SRS830_2_X(V)-f2.Lockin_Voltage_SRS830_2_X(V))/2

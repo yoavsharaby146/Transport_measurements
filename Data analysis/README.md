@@ -1,6 +1,6 @@
 # CSV Data Processing Scripts
 
-A suite of GUI-based Python tools for merging, organizing, and reversing CSV measurement data.  
+A suite of GUI-based Python tools for merging, organizing, reversing, and computing across CSV measurement data.  
 Designed for transport-measurement workflows (e.g., gate maps, hysteresis loops, standard sweeps).
 
 ---
@@ -119,6 +119,34 @@ python map_splitter.py
 3. Review/adjust the auto-detected setpoint tolerance
 4. Choose an output folder
 5. The script creates one CSV per slow-axis setpoint, each containing all rows at that setpoint value
+
+---
+
+### 5. `csv_operations.py` — Cross-File Column Math Tool
+
+Load multiple CSV files, reference their columns in math expressions, and export a new CSV with computed + copied columns.
+
+**Features:**
+- **Multi-file support (up to 5)** — each file is color-coded and aliased (`f1`, `f2`, …). Row counts are shown per file; a warning appears if they differ (the minimum count is used)
+- **Column references** — click a reference chip (e.g. `f1.Voltage`) to insert it into the focused formula. Bare names like `a+b` resolve against file 1
+- **Formula columns** — define computed columns with arbitrary math expressions (supports the `math` module, e.g. `sqrt(f1.x**2 + f1.y**2)`). Live preview updates as you type
+- **Copy columns** — pass raw columns through to the output unchanged via checkboxes, grouped by file in scrollable columns
+- **Formula I/O** — load/save formula definitions from a `.txt` file (format: `name<TAB>expression`, one per line; supports append or replace)
+- **Preview & export** — on-screen table preview (first 20 rows) before exporting to CSV
+
+**Usage:**
+```bash
+python csv_operations.py
+```
+
+**Workflow:**
+1. Click **Add CSV files…** and select one or more CSVs (up to 5)
+2. In **Column references**, click chips to insert them into a formula entry
+3. In **Copy columns**, tick any raw columns you want passed through to the output
+4. In **Computed columns**, add formula columns (optionally load them from a `.txt` file)
+5. Review the preview table, then **Export CSV…** to save the result
+
+**UI layout note:** file lists, column references, and copy columns are displayed in fixed-height scrollable panels (vertical columns per file) so the window stays narrow even when files have many columns.
 
 ---
 
