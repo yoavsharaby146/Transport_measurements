@@ -580,9 +580,7 @@ class SR860(Instrument):
         start_aux = getattr(self,f'dac{aux}')
         for aux_v in np.linspace(start_aux, target_voltage,steps):
             setattr(self,f'dac{aux}', aux_v)
-            time.sleep(delay)
-            
-            
+            time.sleep(delay)          
     
     def auto_range(self):
         magnitude = self.snap("R")
