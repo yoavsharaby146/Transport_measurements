@@ -39,7 +39,7 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
 
     # --- Mapping Configuration ---
     mapping = BooleanParameter('Mapping RHV', default=True)
-
+    line_transition = BooleanParameter('Document between gate sweeps', default=False, group_by='mapping', group_condition=True)
     scan_mode = ListParameter('Gate Scan Mode', default='Snake',
                               choices=['Snake', 'Forward/Backward'],
                               group_by='mapping', group_condition=True)
@@ -224,8 +224,9 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
                 magnet.sweep_mode = 'PAUSE'
                 log.warning("User stopped measurement during initial magnet sweep, magnet is Paused")
                 return
-            self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
-            time.sleep(self.acq_delay)
+            if self.line_transition:
+                self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
+                time.sleep(self.acq_delay)
         gate.voltage_ramping(self.gate_start, 2, 0.1)
         if self.should_stop():
             log.warning("User stopped measurement during initial gate ramping")
@@ -244,8 +245,9 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
                         magnet.sweep_mode = 'PAUSE'
                         log.warning("User stopped measurement during  magnet ramp, magnet is Paused")
                         return
-                    self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
-                    time.sleep(self.acq_delay)
+                    if self.line_transition:
+                        self.emit('results', dict(zip(self.DATA_COLUMNS, self.getmeas(time_0))))
+                        time.sleep(self.acq_delay)
                 log.info(f"Field at {field}T. Stabilizing...")
                 time.sleep(self.mag_delay)
 
@@ -307,7 +309,7 @@ proc_resistance_magnet_gate_map = {
         'use_srs860_1', 'use_srs860_2',
         'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
         'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
-        'mapping', 'scan_mode',
+        'mapping', 'line_transition', 'scan_mode',
         'field_start', 'field_end', 'field_step',
         'smu', 'gate_start', 'gate_end', 'gate_step',
         'mag_delay', 'acq_delay',
