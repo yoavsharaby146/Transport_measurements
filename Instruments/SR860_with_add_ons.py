@@ -277,7 +277,7 @@ class SR860(Instrument):
         map_values=True
     )
     aux_out_1 = Instrument.control(
-        "AUXV?1;", "AUXV1,%f;",
+        "AUXV?0;", "AUXV0,%f;",
         """ A floating point property that controls the output of Aux output 1 in
         Volts, taking values between -10.5 V and +10.5 V.
         This property can be set.""",
@@ -288,7 +288,7 @@ class SR860(Instrument):
     dac1 = aux_out_1
 
     aux_out_2 = Instrument.control(
-        "AUXV?2;", "AUXV2,%f;",
+        "AUXV?1;", "AUXV1,%f;",
         """ A floating point property that controls the output of Aux output 2 in
         Volts, taking values between -10.5 V and +10.5 V.
         This property can be set.""",
@@ -299,7 +299,7 @@ class SR860(Instrument):
     dac2 = aux_out_2
 
     aux_out_3 = Instrument.control(
-        "AUXV?3;", "AUXV3,%f;",
+        "AUXV?2;", "AUXV2,%f;",
         """ A floating point property that controls the output of Aux output 3 in
         Volts, taking values between -10.5 V and +10.5 V.
         This property can be set.""",
@@ -310,7 +310,7 @@ class SR860(Instrument):
     dac3 = aux_out_3
 
     aux_out_4 = Instrument.control(
-        "AUXV?4;", "AUXV4,%f;",
+        "AUXV?3;", "AUXV3,%f;",
         """ A floating point property that controls the output of Aux output 4 in
         Volts, taking values between -10.5 V and +10.5 V.
         This property can be set.""",
@@ -321,28 +321,28 @@ class SR860(Instrument):
     dac4 = aux_out_4
 
     aux_in_1 = Instrument.measurement(
-        "OAUX?1;",
+        "OAUX?0;",
         """ Reads the Aux input 1 value in Volts with 1/3 mV resolution. """
     )
     # For consistency with other lock-in instrument classes
     adc1 = aux_in_1
 
     aux_in_2 = Instrument.measurement(
-        "OAUX?2;",
+        "OAUX?1;",
         """ Reads the Aux input 2 value in Volts with 1/3 mV resolution. """
     )
     # For consistency with other lock-in instrument classes
     adc2 = aux_in_2
 
     aux_in_3 = Instrument.measurement(
-        "OAUX?3;",
+        "OAUX?2;",
         """ Reads the Aux input 3 value in Volts with 1/3 mV resolution. """
     )
     # For consistency with other lock-in instrument classes
     adc3 = aux_in_3
 
     aux_in_4 = Instrument.measurement(
-        "OAUX?4;",
+        "OAUX?3;",
         """ Reads the Aux input 4 value in Volts with 1/3 mV resolution. """
     )
     # For consistency with other lock-in instrument classes
@@ -564,7 +564,24 @@ class SR860(Instrument):
 
         command = "SNAP? " + ",".join(vals_idx)
         return self.values(command)
-
+    
+    def ramping_aux(self, aux, target_voltage, step_size, delay):
+        start_aux = getattr(self,f'dac{aux}')
+        step_v = step_size/1000
+        if step_v == 0:
+            step_v = 0.001
+        num_points = int(abs(target_voltage - start_aux)/step_v)+1
+        aux_range =  np.linspace(start_aux, target_voltage, num_points)
+        for aux_v in aux_range:
+            setattr(self,f'dac{aux}',aux_v)
+            time.sleep(delay)
+            
+    def ramp_aux (self, aux, target_voltage, steps, delay):
+        start_aux = getattr(self,f'dac{aux}')
+        for aux_v in np.linspace(start_aux, target_voltage,steps):
+            setattr(self,f'dac{aux}', aux_v)
+            time.sleep(delay)
+    
     def auto_range(self):
         magnitude = self.snap("R")
         while magnitude[0] > 0.8 * self.sensitivity or magnitude[0] < 0.2 * self.sensitivity:

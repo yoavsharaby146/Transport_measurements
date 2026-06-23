@@ -1,0 +1,213 @@
+"""
+Differential Resistance Zurich Measurement.
+
+dV/dI measurement using MFLI aux for DC current.
+"""
+
+from .base import (
+    log, time, math, np,
+    Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
+    magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2,
+    read_temperature,
+    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
+)
+from . import base
+
+
+class Differential_Resistance_SRS860(Procedure):
+    # --- Parameters ---
+    Title = Parameter('dV/dI sweep measurement', default='dV/dI sweep measurement')
+    Resistor = Parameter('Resistance/Gain', default='insert resistor size/gain')
+    Contacts = Parameter('Contacts ', default='insert contact numbers')
+    Gate_contacts = Parameter('Gate contacts', default='insert gate contacts')
+
+    # --- Hardware Selection ---
+    devices = BooleanParameter('Devices in use', default=False)
+    use_magnet = BooleanParameter('Use Magnet', group_by='devices', default=False)
+    use_MFLI_1 = BooleanParameter('use_MFLI_1', group_by='devices', default=False)
+    use_MFLI_2 = BooleanParameter('use_MFLI_2', group_by='devices', default=False)
+    use_MFLI_3 = BooleanParameter('use_MFLI_3', group_by='devices', default=False)
+    use_srs860_1 = BooleanParameter('Use srs860_1', group_by='devices', default=False)
+    use_srs860_2 = BooleanParameter('Use srs860_2', group_by='devices', default=False)
+    use_srs830_1 = BooleanParameter('Use srs830_1', group_by='devices', default=False)
+    use_srs830_2 = BooleanParameter('Use srs830_2', group_by='devices', default=False)
+    use_srs830_3 = BooleanParameter('Use srs830_3', group_by='devices', default=False)
+    use_dual_gate = BooleanParameter('Use dual gate', group_by='devices', default=False)
+    use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
+    use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+
+    # --- Sweep Parameters ---
+    scan_mode = ListParameter('Sweep Mode', choices=['Sweep to setpoint', 'Sweep and Return'],
+                              default='Sweep to setpoint')
+    aux_Target = FloatParameter('Auxiliary DC Bias Target  (V)', group_by='use_srs860_1', default=0)
+    aux_signal = ListParameter('Aux output 1-4:', group_by='use_srs860_1', choices=[1, 2, 3, 4], default=1)
+    aux_step = FloatParameter('Auxiliary step (mV)', group_by='use_srs860_1', default=2)
+    acq_delay = FloatParameter('Acquisition  Delay (s)', default=0.1)
+
+    # --- Metadata ---
+    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
+    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
+    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
+    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
+
+    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
+    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
+    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
+    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
+    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
+    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
+
+    MFLI_1_sine_voltage = Metadata("MFLI_1 sine voltage", default=math.nan)
+    MFLI_1_frequency = Metadata("MFLI_1 frequency (Hz)", default=math.nan)
+    MFLI_2_sine_voltage = Metadata("MFLI_2 sine voltage", default=math.nan)
+    MFLI_2_frequency = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
+    MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
+    MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
+
+    DATA_COLUMNS = BASE_DATA_COLUMNS +  ['AUX_DC_offset(V)'] + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
+
+
+    def startup(self):
+        if self.use_srs860_1:
+            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
+            self.srs860_1_frequency = SRS860_1.frequency
+        if self.use_srs860_2:
+            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
+            self.srs860_2_frequency = SRS860_2.frequency
+
+        if self.use_MFLI_1:
+            self.MFLI_1_sine_voltage = MFLI_1.sine_amplitude
+            self.MFLI_1_frequency = MFLI_1.frequency
+        if self.use_MFLI_2:
+            self.MFLI_2_sine_voltage = MFLI_2.sine_amplitude
+            self.MFLI_2_frequency = MFLI_2.frequency
+        if self.use_MFLI_3:
+            self.MFLI_3_sine_voltage = MFLI_3.sine_amplitude
+            self.MFLI_3_frequency = MFLI_3.frequency
+
+        if self.use_srs830_1:
+            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
+            self.srs830_1_frequency = SRS830_1.frequency
+        if self.use_srs830_2:
+            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
+            self.srs830_2_frequency = SRS830_2.frequency
+        if self.use_srs830_3:
+            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
+            self.srs830_3_frequency = SRS830_3.frequency
+
+    def getmeas(self, t0):
+        magnet = base.magnet
+        temperature = read_temperature()
+        vals = [time.time() - t0] + list(temperature)
+
+        if self.use_magnet:
+            magnet.magnet_field_write_query()
+
+        if self.use_dual_gate:
+            vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
+                     Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
+        else:
+            vals += [math.nan] * 4
+
+        vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
+        vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
+
+        if self.use_srs860_1:
+            auxout = getattr(SRS860_1,f'dac{self.aux_signal}')
+            vals += [auxout]
+        else:
+            vals +=[math.nan]
+            
+        vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
+        vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
+
+
+        for use, inst in [(self.use_MFLI_1, MFLI_1), (self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
+            vals += list(inst.read_demod()) if use else [math.nan] * 2
+
+        for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2), (self.use_srs830_3, SRS830_3)]:
+            vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
+
+        vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
+        return vals
+
+    def generate_range(self, start, end, step_units):
+        step = abs(step_units / 1000.0)
+        if step == 0:
+            step = 0.001
+        num_points = int(abs(end - start) / step) + 1
+        return np.linspace(start, end, num_points)
+
+    def execute(self):
+        
+        magnet = base.magnet
+        time_0 = time.time()
+        
+        aux_origin = getattr(SRS860_1,f'dac{self.aux_signal}')
+        target_aux = self.aux_Target
+        log.info(f"Starting dV/dI {self.scan_mode}. Start={aux_origin:.4f}V, Target={target_aux:.4f}V")
+
+        range_to_target = self.generate_range(aux_origin, target_aux, self.aux_step)
+        range_return = self.generate_range(target_aux, aux_origin, self.aux_step)
+
+        total_points = len(range_to_target)
+        if self.scan_mode == 'Sweep and Return':
+            total_points += len(range_return)
+
+        point_counter = 0
+
+        log.info("Sweeping to Setpoint...")
+        for aux in range_to_target:
+            SRS860_1.ramp_aux(self.aux_signal, aux, 5, 0.01)
+            time.sleep(self.acq_delay)
+            data = self.getmeas(time_0)
+            self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
+            self.emit('progress', 100 * point_counter / total_points)
+            point_counter += 1
+            if self.should_stop():
+                log.warning("User stopped measurement while in Sweep")
+                return
+
+        if self.scan_mode == 'Sweep and Return':
+            log.info("Returning to Origin...")
+            for aux in range_return:
+                SRS860_1.ramp_aux(self.aux_signal, aux, 5, 0.01)
+                time.sleep(self.acq_delay)
+                data = self.getmeas(time_0)
+                self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
+                self.emit('progress', 100 * point_counter / total_points)
+                point_counter += 1
+                if self.should_stop():
+                    log.warning("User stopped measurement while in return Sweep")
+                    return
+
+    def shutdown(self):
+        log.info("Finished measuring")
+
+
+proc_differential_resistance_SRS860 = {
+    "Differential Resistance SRS860": dict(
+        cls=Differential_Resistance_SRS860,
+        category="Differential Resistance",
+        description="dV/dI Sweep starting from Origin DC AUX using SRS860.\n"
+                    "1. Sweep to Setpoint: Measures from [Origin] -> [Target]. Leaves voltage at Target.\n"
+                    "2. Sweep and Return: Measures from [Origin] -> [Target] -> [Origin]. Returns voltage to start.",
+        inputs=[
+            'Title', 'Resistor', 'Contacts', 'Gate_contacts',
+            'acq_delay',
+            'devices',
+            'use_magnet',
+            'use_MFLI_1','use_MFLI_2', 'use_MFLI_3',
+            'use_srs860_1',
+            'aux_Target', 'aux_step', 'aux_signal',
+            'use_srs860_2',
+            'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
+            'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
+            'scan_mode',
+        ],
+        displays=[
+            'Title', 'scan_mode', 'aux_Target'],
+        x=['AUX_DC_offset(V)'],
+        y=['MFLI_Lockin_1_Voltage_X(V)', 'MFLI_Lockin_1_Voltage_Y(V)'],
+    ),
+}
