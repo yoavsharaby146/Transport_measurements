@@ -564,11 +564,7 @@ class SR860(Instrument):
 
         command = "SNAP? " + ",".join(vals_idx)
         return self.values(command)
-<<<<<<< HEAD
-
-=======
     
->>>>>>> ICE_version
     def ramping_aux(self, aux, target_voltage, step_size, delay):
         start_aux = getattr(self,f'dac{aux}')
         step_v = step_size/1000
@@ -585,11 +581,7 @@ class SR860(Instrument):
         for aux_v in np.linspace(start_aux, target_voltage,steps):
             setattr(self,f'dac{aux}', aux_v)
             time.sleep(delay)
-<<<<<<< HEAD
-            
-=======
     
->>>>>>> ICE_version
     def auto_range(self):
         magnitude = self.snap("R")
         while magnitude[0] > 0.8 * self.sensitivity or magnitude[0] < 0.2 * self.sensitivity:
