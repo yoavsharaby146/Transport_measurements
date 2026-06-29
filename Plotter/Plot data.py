@@ -1036,7 +1036,7 @@ class InteractivePlotter:
         # Create dialog window (tabbed + scrollable, button bar pinned at bottom)
         d, notebook, main_container, btn_container = self._create_scrollable_tabbed_dialog(
             self.root, "Labels, Titles & Colors",
-            width_pct=0.45, height_pct=0.90, max_width=650, max_height=850,
+            width_pct=0.45, height_pct=0.80, max_width=650, max_height=850,
             min_width=500, min_height=600
         )
         
@@ -3384,7 +3384,7 @@ class InteractivePlotter:
         self.update_plot()
 
     def export_plot(self):
-        filepath = filedialog.asksaveasfilename(defaultextension=".png",
+        filepath = filedialog.asksaveasfilename(defaultextension=".svg",
                                                 filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")])
         if filepath:
             try:
@@ -4193,7 +4193,7 @@ class InteractivePlotter:
         def export_plot():
             filepath = filedialog.asksaveasfilename(
                 parent=popup,
-                defaultextension=".png",
+                defaultextension=".svg",
                 filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
                 title="Export Profile Plot"
             )
@@ -4329,7 +4329,7 @@ class InteractivePlotter:
         
         def export_plot():
             filepath = filedialog.asksaveasfilename(
-                parent=popup, defaultextension=".png",
+                parent=popup, defaultextension=".svg",
                 filetypes=[("PNG", "*.png"), ("PDF", "*.pdf"), ("SVG", "*.svg")],
                 title="Export Profile Plot")
             if filepath:
