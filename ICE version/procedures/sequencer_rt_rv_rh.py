@@ -20,6 +20,7 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
     Gate_contacts = Parameter('Gate', default='Insert gate contacts')
     Type = ListParameter('Measurement Type', choices=['Rt', 'RV', 'RH'], default='Rt')
     Target_field = FloatParameter('Target field (T)', group_by='Type', group_condition='RH', default=0)
+    sweep_control = ListParameter('Sweep speed', group_by='Type', group_condition='RH', choices=["Slow","Normal","Fast"], default="Normal")
     Target_voltage = FloatParameter('Target Voltage(V)', group_by='Type', group_condition='RV', default=0)
     step_size = FloatParameter('Step size(mV)', group_by='Type', group_condition='RV', default=1)
     smu = ListParameter('User defined SMU', choices=['Gate_1', 'Gate_2', 'smua', 'smub'], group_by='Type', group_condition='RV', default='Gate_1')
@@ -173,6 +174,24 @@ class Rt_RV_RH_sequencer_measurement(Procedure):
         if self.use_magnet == False:
             log.info("Forgot to choose magnet in magnetic field measurement")
             return
+        if self.sweep_control == "fast":
+            if abs(self.Target_field) < 1 and abs(magnet.magnet_field) < 1:
+                log.info("Magnetic field -1<B<1 Tesla, Fast sweep rate 0.2 T/min")
+                magnet.current_rate0 = (0.2*10.375)/60
+            else:
+                log.info("Magnetic field outside of range -1 < B < 1 Tesla, Fast sweep rate cannot be used")
+                return
+        if self.sweep_control == "normal":
+            log.info("Normal sweep rate 0.1 T/min")
+            magnet.current_rate0 = (0.1*10.375)/60
+        if self.sweep_control == "slow":
+            if abs(self.Target_field) < 0.5 and abs(magnet.magnet_field) < 0.5:
+                log.info("Magnetic field -0.5<B<0.5 Tesla, Slow sweep rate 0.05 T/min")
+                magnet.current_rate0 = (0.05*10.375)/60
+            else:
+                log.info("Magnetic field outside of range -0.5 < B < 0.5 Tesla, Slow sweep rate cannot be used")
+                return
+        
         log.info("starting to sweep field to %g Tesla", self.Target_field)
         current_field = magnet.magnet_field
         persistent_heater_status = magnet.persistent_switch_heater
@@ -220,7 +239,7 @@ proc_Rt_RV_RH_sequencer = {
         cls=Rt_RV_RH_sequencer_measurement,
         category=["Magnetic Field", "Gate Sweep", "Keithley 2450", "Time-based"],
         description="Procedure to sequence between Rt, RV and RH measurements.",
-        inputs=['Title', 'Resistor', 'Contacts', 'Gate_contacts', 'Type', 'Target_field',
+        inputs=['Title', 'Resistor', 'Contacts', 'Gate_contacts', 'Type', 'Target_field','sweep_control',
                 'Target_voltage', 'step_size', 'smu', 'acq_length', 'devices', 'use_magnet',
                 'use_MFLI_1', 'use_MFLI_2', 'use_MFLI_3', 'use_srs860_1', 'use_srs860_2', 'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
                 'use_dual_gate', 'use_keithley_1', 'use_keithley_2', 'acq_delay'],
