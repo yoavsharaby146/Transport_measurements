@@ -15,6 +15,7 @@ class Resistance_magnet_sweep_measurement(Procedure):
     Gate_contacts = Parameter('Gate', default='Insert gate contacts')
 
     Target_field = FloatParameter('Target field (T)', group_by='use_magnet', default=0)
+    sweep_control = ListParameter('Sweep speed', group_by='use_magnet', choices=["Slow","Normal","Fast"], default="Normal")
     acq_delay = FloatParameter('Acquisition Delay (s)', default=0.5)
 
     # --- Hardware Selection ---
@@ -116,12 +117,33 @@ class Resistance_magnet_sweep_measurement(Procedure):
             vals.append(math.nan)
 
         return vals
+    
+
+
 
     def execute(self):
         magnet = base.magnet
         if self.use_magnet == False:
             log.warning("Magnet was not chosen measurement aborted")
             return
+        if self.sweep_control == "fast":
+            if abs(self.Target_field) < 1 and abs(magnet.magnet_field) < 1:
+                log.info("Magnetic field -1<B<1 Tesla, Fast sweep rate 0.2 T/min")
+                magnet.current_rate0 = (0.2*10.375)/60
+            else:
+                log.info("Magnetic field outside of range -1 < B < 1 Tesla, Fast sweep rate cannot be used")
+                return
+        if self.sweep_control == "normal":
+            log.info("Normal sweep rate 0.1 T/min")
+            magnet.current_rate0 = (0.1*10.375)/60
+        if self.sweep_control == "slow":
+            if abs(self.Target_field) < 0.5 and abs(magnet.magnet_field) < 0.5:
+                log.info("Magnetic field -0.5<B<0.5 Tesla, Slow sweep rate 0.05 T/min")
+                magnet.current_rate0 = (0.05*10.375)/60
+            else:
+                log.info("Magnetic field outside of range -0.5 < B < 0.5 Tesla, Slow sweep rate cannot be used")
+                return
+            
         time_0 = time.time()
         log.info("starting to sweep field to %g Tesla", self.Target_field)
         # --- 1. Persistent Heater Logic ---
@@ -177,7 +199,7 @@ proc_resistance_magnet = {
         inputs=[
                 'Title','Resistor','Contacts','Gate_contacts',
                 'devices',
-                'use_magnet','Target_field',
+                'use_magnet','Target_field','sweep_control',
                 'use_MFLI_1','use_MFLI_2' ,'use_MFLI_3',
                 'use_srs860_1','use_srs860_2',
                 'use_srs830_1','use_srs830_2','use_srs830_3',
