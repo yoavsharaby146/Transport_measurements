@@ -5,11 +5,68 @@
 #
 # Command reference: https://cryomagnetics.com/wp-content/uploads/2022/05/4G-Rev-9_3.pdf
 #
+# Usage examples:
+#
+#   from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
+#
+#   # --- Connect to the instrument ---
+#   magnet = Cryomagnetics_MPS4G(port='COM3', baudrate=9600, timeout=1)
+#
+#   # --- Basic field operations ---
+#   field = magnet.magnet_field                 # read current field (Tesla)
+#   magnet.go_to_target_field(5.0)              # sweep to 5 T
+#   magnet.go_to_target_field(0)                # sweep back to zero
+#
+#   # --- Switch heater (must be ON before sweeping) ---
+#   magnet.persistent_switch_heater = 'ON'
+#   print(magnet.persistent_switch_heater)      # -> 'ON' / 'OFF'
+#
+#   # --- Sweep limits (set before manual SWEEP UP/DOWN) ---
+#   magnet.high_current_sweep_limit = 9.0       # ULIM in Tesla
+#   magnet.low_current_sweep_limit = -9.0       # LLIM in Tesla
+#   magnet.sweep_mode = 'UP'                    # sweep to upper limit
+#   magnet.sweep_mode = 'DOWN'                  # sweep to lower limit
+#
+#   # --- Ranges & rates (0-4) ---
+#   magnet.current_range0 = 1.0                 # upper limit of range 0 (A)
+#   magnet.current_rate0 = 0.1                  # charge rate for range 0 (A/s)
+#
+#   # --- Read output values ---
+#   print(magnet.ps_output)                     # output current (A)
+#   print(magnet.output_voltage)                # output voltage (V)
+#   print(magnet.magnet_voltage)                # magnet voltage (V)
+#
+#   # --- Remote mode & quench reset ---
+#   magnet.remote()                             # enable remote control
+#   magnet.reset_quench_condition()             # clear a quench
+#
+#   # --- Close when done ---
+#   magnet.close()
+#
 # Key properties/methods for typical use:
 #   - magnet_field: Get/set the current magnetic field in Tesla
 #   - go_to_target_field(): Sweep to a target field value
 #   - sweep_mode: Set sweep direction (UP, DOWN, ZERO, FAST, SLOW)
 #   - persistent_switch_heater: Control the persistent switch heater (ON/OFF)
+#
+# Example — using current_range_for_output() to access the matching range/rate:
+#
+#   current_range_for_output() returns a string like 'range0' .. 'range4'.
+#   That string does NOT map to a property name by itself, so you cannot
+#   "call" it directly. Use getattr() / setattr() to build the attribute
+#   name dynamically:
+#
+#       # which range is the output currently in?
+#       r = magnet.current_range_for_output()        # e.g. 'range2'
+#
+#       # GET the upper current limit of that range
+#       limit = getattr(magnet, f'current_{r}')      # magnet.current_range2
+#
+#       # SET the charge rate for that same range
+#       setattr(magnet, f'current_rate{r[-1]}', 0.1) # magnet.current_rate2 = 0.1
+#
+#       # GET the charge rate currently set for that range
+#       rate = getattr(magnet, f'current_rate{r[-1]}')
 #
 # Written by YOAV SHARABY
 
@@ -764,3 +821,28 @@ class Cryomagnetics_MPS4G:
         elif target_field < current_field:
             self.low_current_sweep_limit = target_field
             self.sweep_mode = "DOWN"
+
+    def current_range_for_output(self):
+        """Get the current range index for the present power supply output current.
+        
+        Reads the output current and determines which of the five current ranges
+        (defined by current_range0 .. current_range4) it falls into. The absolute
+        value of the current is used, so this works for negative currents as well.
+        
+        Returns:
+            str: The current range as 'range0', 'range1', 'range2', 'range3',
+                 or 'range4'. Values above the highest range limit are assigned
+                 to 'range4'.
+        """
+        output_current = abs(self.ps_output)
+        ranges = [
+            self.current_range0,
+            self.current_range1,
+            self.current_range2,
+            self.current_range3,
+            self.current_range4,
+        ]
+        for i, upper_limit in enumerate(ranges):
+            if output_current <= upper_limit:
+                return f'range{i}'
+        return 'range4'

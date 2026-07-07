@@ -1,0 +1,569 @@
+"""
+Cryomagnetics MPS 4G Magnet Power Supply — Desktop GUI
+
+A Tkinter desktop application for controlling and monitoring the
+Cryomagnetics 4G magnet power supply, built on top of the
+Instruments.Cryomagnetics_MPS4G driver.
+
+Run:
+    python gui.py
+
+By default "Simulation Mode" is checked, so the app runs fully
+standalone against a simulated instrument (see mock_instrument.py) -
+no hardware or real serial port required. Uncheck it and set a real
+port/baudrate to talk to an actual instrument.
+"""
+
+import os
+import queue
+import sys
+import threading
+import time
+import tkinter as tk
+from tkinter import ttk, messagebox
+
+# Make the project root importable so `Instruments.*` resolves even when this
+# script is launched directly from the "Instrument control" folder.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.abspath(os.path.join(_HERE, '..'))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+import Instruments.Cryomagnetics_MPS4G as cryo_module
+from mock_instrument import MockSerialPort
+
+POLL_INTERVAL_S = 1.0  # auto-update read interval (seconds)
+
+
+def _enable_simulation_patches():
+    """Patch the driver so the mock serial port + instant responses are used.
+
+    The Cryomagnetics driver calls ``time.sleep(0.1)`` after every command to
+    let real hardware settle. Against the instant mock these sleeps are pure
+    latency (each snapshot = ~0.8s, each ranges-load = ~1.1s), so we replace
+    ``time.sleep`` with a no-op for the lifetime of a simulated connection.
+
+    Returns the originals so they can be restored by :func:`_restore_patches`.
+    """
+    return {
+        'serial_cls': cryo_module.serial.Serial,
+        'sleep': cryo_module.time.sleep,
+    }
+
+
+def _apply_simulation_patches():
+    cryo_module.serial.Serial = MockSerialPort
+    cryo_module.time.sleep = lambda *_args, **_kw: None
+
+
+def _restore_patches(originals):
+    cryo_module.serial.Serial = originals['serial_cls']
+    cryo_module.time.sleep = originals['sleep']
+
+
+def create_instrument(port, baudrate, timeout, simulate):
+    """Instantiate the driver, optionally backed by a simulated serial port.
+
+    Returns ``(instrument, originals)`` where ``originals`` is ``None`` for
+    real hardware, or a dict of the pre-patch values to restore on disconnect.
+    """
+    originals = None
+    if simulate:
+        originals = _enable_simulation_patches()
+        _apply_simulation_patches()
+    inst = cryo_module.Cryomagnetics_MPS4G(port=port, baudrate=baudrate, timeout=timeout)
+    return inst, originals
+
+
+class MagnetGUI(ttk.Frame):
+    def __init__(self, root):
+        super().__init__(root, padding=10)
+        self.root = root
+        self.root.title('Cryomagnetics MPS 4G Controller')
+        self.grid(sticky='nsew')
+        root.columnconfigure(0, weight=1)
+        root.rowconfigure(0, weight=1)
+
+        # --- Scrollable canvas infrastructure ---
+        # All panels live inside `self.content`, which is placed in a canvas
+        # so the whole window can scroll vertically when content overflows.
+        self.scroll_canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        self.vscroll = ttk.Scrollbar(self, orient='vertical', command=self.scroll_canvas.yview)
+        self.scroll_canvas.configure(yscrollcommand=self.vscroll.set)
+        self.scroll_canvas.grid(row=0, column=0, sticky='nsew')
+        self.vscroll.grid(row=0, column=1, sticky='ns')
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+
+        self.content = ttk.Frame(self.scroll_canvas)
+        self._content_window = self.scroll_canvas.create_window((0, 0), window=self.content, anchor='nw')
+
+        # Keep the scroll region matched to the content's size, and make the
+        # content as wide as the canvas so nothing gets clipped horizontally.
+        self.content.bind('<Configure>', self._on_content_configure)
+        self.scroll_canvas.bind('<Configure>', self._on_canvas_configure)
+        # Mouse-wheel scrolling, active only while the cursor is over the canvas.
+        self.scroll_canvas.bind('<Enter>', lambda _e: self.scroll_canvas.bind_all('<MouseWheel>', self._on_mousewheel))
+        self.scroll_canvas.bind('<Leave>', lambda _e: self.scroll_canvas.unbind_all('<MouseWheel>'))
+
+        self.instrument = None
+        self._sim_originals = None  # saved driver attrs to restore on disconnect
+        self.serial_lock = threading.Lock()
+        self.polling = False
+        self._stop_event = threading.Event()  # used for interruptible waits
+        self.poll_thread = None
+        self.data_queue = queue.Queue()
+        # Measurement mode: OFF by default. Use "Measure Now" for a one-shot
+        # read, or tick "Auto-Update" to poll the instrument continuously.
+        self.auto_refresh = tk.BooleanVar(value=False)
+
+        self._build_connection_panel()
+        self._build_readout_panel()
+        self._build_control_panel()
+        self._build_config_panel()
+        self._build_log_panel()
+
+        self.root.protocol('WM_DELETE_WINDOW', self._on_close)
+        self._poll_queue()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+    def _build_connection_panel(self):
+        frame = ttk.LabelFrame(self.content, text='Connection', padding=8)
+        frame.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 8))
+
+        ttk.Label(frame, text='Port:').grid(row=0, column=0, sticky='w')
+        self.port_var = tk.StringVar(value='SIM')
+        ttk.Entry(frame, textvariable=self.port_var, width=10).grid(row=0, column=1, padx=4)
+
+        ttk.Label(frame, text='Baud:').grid(row=0, column=2, sticky='w')
+        self.baud_var = tk.StringVar(value='9600')
+        ttk.Entry(frame, textvariable=self.baud_var, width=8).grid(row=0, column=3, padx=4)
+
+        ttk.Label(frame, text='Timeout (s):').grid(row=0, column=4, sticky='w')
+        self.timeout_var = tk.StringVar(value='1')
+        ttk.Entry(frame, textvariable=self.timeout_var, width=5).grid(row=0, column=5, padx=4)
+
+        self.sim_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame, text='Simulation Mode', variable=self.sim_var).grid(row=0, column=6, padx=10)
+
+        self.connect_btn = ttk.Button(frame, text='Connect', command=self._on_connect)
+        self.connect_btn.grid(row=0, column=7, padx=4)
+        self.disconnect_btn = ttk.Button(frame, text='Disconnect', command=self._on_disconnect, state='disabled')
+        self.disconnect_btn.grid(row=0, column=8, padx=4)
+
+        self.status_var = tk.StringVar(value='Disconnected')
+        ttk.Label(frame, textvariable=self.status_var, foreground='red').grid(row=0, column=9, padx=10)
+
+    def _build_readout_panel(self):
+        frame = ttk.LabelFrame(self.content, text='Live Readouts', padding=8)
+        frame.grid(row=1, column=0, sticky='nsew', pady=(0, 8))
+
+        # Measurement controls: one-shot read + continuous auto-update toggle.
+        ctrl = ttk.Frame(frame)
+        ctrl.grid(row=0, column=0, columnspan=2, sticky='ew', pady=(0, 6))
+        self.measure_btn = ttk.Button(ctrl, text='Measure Now', command=self._on_measure_now)
+        self.measure_btn.pack(side='left')
+        ttk.Checkbutton(ctrl, text='Auto-Update', variable=self.auto_refresh).pack(side='left', padx=12)
+
+        labels = [
+            ('field', 'Field (T):'),
+            ('current', 'Output Current (A):'),
+            ('vout', 'Output Voltage (V):'),
+            ('vmag', 'Magnet Voltage (V):'),
+            ('heater', 'Heater:'),
+            ('sweep', 'Sweep Status:'),
+            ('mode', 'Operating Mode:'),
+            ('coil', 'Coil Name:'),
+        ]
+        self.readout_vars = {}
+        for i, (key, text) in enumerate(labels):
+            ttk.Label(frame, text=text).grid(row=i + 1, column=0, sticky='w', pady=2)
+            var = tk.StringVar(value='--')
+            ttk.Label(frame, textvariable=var, font=('TkDefaultFont', 10, 'bold')).grid(
+                row=i + 1, column=1, sticky='w', padx=8)
+            self.readout_vars[key] = var
+
+    def _build_control_panel(self):
+        frame = ttk.LabelFrame(self.content, text='Control', padding=8)
+        frame.grid(row=1, column=1, sticky='nsew', pady=(0, 8))
+
+        # Heater
+        ttk.Label(frame, text='Persistent Switch Heater:').grid(row=0, column=0, sticky='w')
+        ttk.Button(frame, text='ON', width=6, command=lambda: self._run_async(self._set_heater, 'ON')).grid(
+            row=0, column=1)
+        ttk.Button(frame, text='OFF', width=6, command=lambda: self._run_async(self._set_heater, 'OFF')).grid(
+            row=0, column=2)
+
+        # Remote / quench
+        ttk.Button(frame, text='Enable Remote', command=lambda: self._run_async(self._remote)).grid(
+            row=1, column=0, columnspan=1, sticky='ew', pady=4)
+        ttk.Button(frame, text='Reset Quench', command=lambda: self._run_async(self._quench_reset)).grid(
+            row=1, column=1, columnspan=2, sticky='ew', pady=4)
+
+        ttk.Separator(frame, orient='horizontal').grid(row=2, column=0, columnspan=3, sticky='ew', pady=6)
+
+        # Go to target field
+        ttk.Label(frame, text='Target Field (T):').grid(row=3, column=0, sticky='w')
+        self.target_field_var = tk.StringVar(value='0.0')
+        ttk.Entry(frame, textvariable=self.target_field_var, width=10).grid(row=3, column=1, sticky='w')
+        ttk.Button(frame, text='Go To Field', command=self._on_go_to_field).grid(row=3, column=2, sticky='ew')
+
+        # Manual sweep buttons
+        ttk.Label(frame, text='Manual Sweep:').grid(row=4, column=0, sticky='w', pady=(8, 0))
+        sweep_frame = ttk.Frame(frame)
+        sweep_frame.grid(row=5, column=0, columnspan=3, sticky='ew')
+        for mode in ('UP', 'DOWN', 'ZERO', 'FAST', 'SLOW'):
+            ttk.Button(sweep_frame, text=mode, width=6,
+                       command=lambda m=mode: self._run_async(self._set_sweep_mode, m)).pack(side='left', padx=2)
+
+        ttk.Separator(frame, orient='horizontal').grid(row=6, column=0, columnspan=3, sticky='ew', pady=6)
+
+        # Sweep limits
+        ttk.Label(frame, text='Low Sweep Limit (T):').grid(row=7, column=0, sticky='w')
+        self.llim_var = tk.StringVar(value='-5.0')
+        ttk.Entry(frame, textvariable=self.llim_var, width=10).grid(row=7, column=1, sticky='w')
+        ttk.Button(frame, text='Set', width=6, command=self._on_set_llim).grid(row=7, column=2)
+
+        ttk.Label(frame, text='High Sweep Limit (T):').grid(row=8, column=0, sticky='w')
+        self.ulim_var = tk.StringVar(value='5.0')
+        ttk.Entry(frame, textvariable=self.ulim_var, width=10).grid(row=8, column=1, sticky='w')
+        ttk.Button(frame, text='Set', width=6, command=self._on_set_ulim).grid(row=8, column=2)
+
+    def _build_config_panel(self):
+        frame = ttk.LabelFrame(self.content, text='Ranges & Rates', padding=8)
+        frame.grid(row=2, column=0, columnspan=2, sticky='ew', pady=(0, 8))
+
+        ttk.Label(frame, text='Range').grid(row=0, column=0)
+        ttk.Label(frame, text='Upper Limit (A)').grid(row=0, column=1)
+        ttk.Label(frame, text='Rate (A/s)').grid(row=0, column=2)
+
+        self.range_vars = []
+        self.rate_vars = []
+        for i in range(5):
+            ttk.Label(frame, text=f'Range {i}').grid(row=i + 1, column=0, sticky='w')
+            rvar = tk.StringVar(value='')
+            ttk.Entry(frame, textvariable=rvar, width=10).grid(row=i + 1, column=1, padx=4)
+            self.range_vars.append(rvar)
+            ratevar = tk.StringVar(value='')
+            ttk.Entry(frame, textvariable=ratevar, width=10).grid(row=i + 1, column=2, padx=4)
+            self.rate_vars.append(ratevar)
+
+        # Fast-mode rate (rate5, no matching range)
+        ttk.Label(frame, text='Fast Rate (rate5, A/s)').grid(row=6, column=0, sticky='w')
+        self.fast_rate_var = tk.StringVar(value='')
+        ttk.Entry(frame, textvariable=self.fast_rate_var, width=10).grid(row=6, column=1, padx=4)
+
+        btns = ttk.Frame(frame)
+        btns.grid(row=7, column=0, columnspan=3, pady=6)
+        ttk.Button(btns, text='Load From Instrument', command=self._on_load_ranges).pack(side='left', padx=4)
+        ttk.Button(btns, text='Apply To Instrument', command=self._on_apply_ranges).pack(side='left', padx=4)
+
+    def _build_log_panel(self):
+        frame = ttk.LabelFrame(self.content, text='Log', padding=4)
+        frame.grid(row=3, column=0, columnspan=2, sticky='ew', pady=(8, 0))
+        self.log_text = tk.Text(frame, height=6, state='disabled', wrap='word')
+        self.log_text.pack(fill='both', expand=True)
+
+    # ------------------------------------------------------------------
+    # Scrollable-canvas plumbing
+    # ------------------------------------------------------------------
+    def _on_content_configure(self, _event=None):
+        """Update the scroll region whenever the inner content resizes."""
+        self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox('all'))
+
+    def _on_canvas_configure(self, event=None):
+        """Make the content frame as wide as the canvas (no horizontal clip)."""
+        self.scroll_canvas.itemconfig(self._content_window, width=event.width)
+
+    def _on_mousewheel(self, event):
+        """Translate mouse-wheel events into vertical scrolling (Windows)."""
+        self.scroll_canvas.yview_scroll(int(-event.delta / 120), 'units')
+
+    # ------------------------------------------------------------------
+    # Logging helper (thread-safe: schedules onto the Tk main loop)
+    # ------------------------------------------------------------------
+    def log(self, message):
+        def _append():
+            self.log_text.configure(state='normal')
+            ts = time.strftime('%H:%M:%S')
+            self.log_text.insert('end', f'[{ts}] {message}\n')
+            self.log_text.see('end')
+            self.log_text.configure(state='disabled')
+        self.root.after(0, _append)
+
+    # ------------------------------------------------------------------
+    # Connection handling
+    # ------------------------------------------------------------------
+    def _on_connect(self):
+        port = self.port_var.get().strip()
+        try:
+            baud = int(self.baud_var.get())
+            timeout = float(self.timeout_var.get())
+        except ValueError:
+            messagebox.showerror('Invalid input', 'Baud rate and timeout must be numeric.')
+            return
+        simulate = self.sim_var.get()
+
+        self.connect_btn.configure(state='disabled')
+
+        def worker():
+            try:
+                inst, originals = create_instrument(port, baud, timeout, simulate)
+                self._sim_originals = originals
+                with self.serial_lock:
+                    inst.remote()
+                self.instrument = inst
+                self.root.after(0, self._on_connected)
+            except Exception as exc:
+                self.root.after(0, lambda: self._on_connect_failed(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_connected(self):
+        mode = 'simulation' if self.sim_var.get() else 'hardware'
+        self.status_var.set(f'Connected ({mode})')
+        self.disconnect_btn.configure(state='normal')
+        self.log(f'Connected to instrument on port "{self.port_var.get()}" ({mode} mode).')
+        self.polling = True
+        self._stop_event.clear()
+        self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self.poll_thread.start()
+        self._on_load_ranges()
+        # Show current values once on connect; continuous polling only runs
+        # while "Auto-Update" is ticked.
+        self._on_measure_now()
+
+    def _on_connect_failed(self, exc):
+        self.connect_btn.configure(state='normal')
+        self.log(f'Connection failed: {exc}')
+        messagebox.showerror('Connection failed', str(exc))
+
+    def _on_disconnect(self):
+        self.polling = False
+        self._stop_event.set()  # wake the poll loop immediately
+        if self.instrument is not None:
+            try:
+                with self.serial_lock:
+                    self.instrument.close()
+            except Exception as exc:
+                self.log(f'Error closing connection: {exc}')
+        self.instrument = None
+        self._restore_sim_patches()
+        self.status_var.set('Disconnected')
+        self.connect_btn.configure(state='normal')
+        self.disconnect_btn.configure(state='disabled')
+        self.log('Disconnected.')
+
+    def _on_close(self):
+        self.polling = False
+        self._stop_event.set()  # wake the poll loop immediately
+        if self.instrument is not None:
+            try:
+                with self.serial_lock:
+                    self.instrument.close()
+            except Exception:
+                pass
+        self._restore_sim_patches()
+        self.root.destroy()
+
+    def _restore_sim_patches(self):
+        """Undo the simulation-mode driver patches (if any were applied)."""
+        if self._sim_originals is not None:
+            _restore_patches(self._sim_originals)
+            self._sim_originals = None
+
+    # ------------------------------------------------------------------
+    # Polling loop (background thread) -> pushes snapshots to a queue
+    # ------------------------------------------------------------------
+    def _poll_loop(self):
+        """Background loop.
+
+        Only reads from the instrument while "Auto-Update" is enabled; the loop
+        stays alive (and idle) otherwise so toggling is responsive.
+
+        Note: we use ``self._stop_event.wait()`` (not ``time.sleep``) for the
+        interval, because in simulation mode the driver's ``time.sleep`` is
+        monkey-patched to a no-op to avoid per-command latency — and since the
+        ``time`` module is shared globally, ``time.sleep`` here would be
+        affected too. ``Event.wait`` is immune to that patch and also makes the
+        loop immediately interruptible on disconnect/close.
+        """
+        while self.polling and self.instrument is not None:
+            if self.auto_refresh.get():
+                try:
+                    self.data_queue.put(self._read_snapshot())
+                except Exception as exc:
+                    self.log(f'Polling error: {exc}')
+            # Sleep interruptibly: returns True immediately if stop was signaled.
+            self._stop_event.wait(timeout=POLL_INTERVAL_S)
+
+    def _poll_queue(self):
+        """Runs on the Tk main loop; drains the queue and updates the UI."""
+        try:
+            while True:
+                self._apply_snapshot(self.data_queue.get_nowait())
+        except queue.Empty:
+            pass
+        self.root.after(200, self._poll_queue)
+
+    def _apply_snapshot(self, snapshot):
+        for key, value in snapshot.items():
+            var = self.readout_vars.get(key)
+            if var is None:
+                continue
+            if isinstance(value, float):
+                var.set(f'{value:.4f}')
+            else:
+                var.set(str(value))
+
+    def _read_snapshot(self):
+        """Read a single snapshot of all monitored values (holds the lock)."""
+        with self.serial_lock:
+            return {
+                'field': self.instrument.magnet_field,
+                'current': self.instrument.ps_output,
+                'vout': self.instrument.output_voltage,
+                'vmag': self.instrument.magnet_voltage,
+                'heater': self.instrument.persistent_switch_heater,
+                'sweep': self.instrument.sweep_mode,
+                'mode': self.instrument.operating_mode,
+                'coil': self.instrument.coil_name,
+            }
+
+    def _on_measure_now(self):
+        """One-shot measurement: read once and update the readouts."""
+        if self.instrument is None:
+            return
+        threading.Thread(target=self._measure_once, daemon=True).start()
+
+    def _measure_once(self):
+        try:
+            self.data_queue.put(self._read_snapshot())
+        except Exception as exc:
+            self.log(f'Measure error: {exc}')
+
+    # ------------------------------------------------------------------
+    # Control actions (run in short-lived background threads)
+    # ------------------------------------------------------------------
+    def _run_async(self, fn, *args):
+        if self.instrument is None:
+            messagebox.showwarning('Not connected', 'Connect to an instrument first.')
+            return
+        threading.Thread(target=self._safe_call, args=(fn, args), daemon=True).start()
+
+    def _safe_call(self, fn, args):
+        try:
+            fn(*args)
+        except Exception as exc:
+            self.log(f'Error: {exc}')
+
+    def _set_heater(self, state):
+        with self.serial_lock:
+            self.instrument.persistent_switch_heater = state
+        self.log(f'Persistent switch heater set to {state}.')
+
+    def _remote(self):
+        with self.serial_lock:
+            self.instrument.remote()
+        self.log('Remote control enabled.')
+
+    def _quench_reset(self):
+        with self.serial_lock:
+            self.instrument.reset_quench_condition()
+        self.log('Quench condition reset.')
+
+    def _set_sweep_mode(self, mode):
+        with self.serial_lock:
+            self.instrument.sweep_mode = mode
+        self.log(f'Sweep mode set to {mode}.')
+
+    def _on_go_to_field(self):
+        try:
+            target = float(self.target_field_var.get())
+        except ValueError:
+            messagebox.showerror('Invalid input', 'Target field must be numeric.')
+            return
+        self._run_async(self._go_to_field, target)
+
+    def _go_to_field(self, target):
+        with self.serial_lock:
+            self.instrument.go_to_target_field(target)
+        self.log(f'Sweeping to target field {target} T.')
+
+    def _on_set_llim(self):
+        try:
+            val = float(self.llim_var.get())
+        except ValueError:
+            messagebox.showerror('Invalid input', 'Low sweep limit must be numeric.')
+            return
+        self._run_async(self._set_llim, val)
+
+    def _set_llim(self, val):
+        with self.serial_lock:
+            self.instrument.low_current_sweep_limit = val
+        self.log(f'Low sweep limit set to {val} T.')
+
+    def _on_set_ulim(self):
+        try:
+            val = float(self.ulim_var.get())
+        except ValueError:
+            messagebox.showerror('Invalid input', 'High sweep limit must be numeric.')
+            return
+        self._run_async(self._set_ulim, val)
+
+    def _set_ulim(self, val):
+        with self.serial_lock:
+            self.instrument.high_current_sweep_limit = val
+        self.log(f'High sweep limit set to {val} T.')
+
+    # ------------------------------------------------------------------
+    # Range / rate configuration
+    # ------------------------------------------------------------------
+    def _on_load_ranges(self):
+        self._run_async(self._load_ranges)
+
+    def _load_ranges(self):
+        with self.serial_lock:
+            ranges = [getattr(self.instrument, f'current_range{i}') for i in range(5)]
+            rates = [getattr(self.instrument, f'current_rate{i}') for i in range(5)]
+            fast_rate = self.instrument.current_rate5
+
+        def _apply():
+            for i in range(5):
+                self.range_vars[i].set(f'{ranges[i]:.4f}')
+                self.rate_vars[i].set(f'{rates[i]:.4f}')
+            self.fast_rate_var.set(f'{fast_rate:.4f}')
+
+        self.root.after(0, _apply)
+        self.log('Loaded current range/rate configuration from instrument.')
+
+    def _on_apply_ranges(self):
+        try:
+            ranges = [float(v.get()) for v in self.range_vars]
+            rates = [float(v.get()) for v in self.rate_vars]
+            fast_rate = float(self.fast_rate_var.get())
+        except ValueError:
+            messagebox.showerror('Invalid input', 'All range/rate fields must be numeric.')
+            return
+        self._run_async(self._apply_ranges, ranges, rates, fast_rate)
+
+    def _apply_ranges(self, ranges, rates, fast_rate):
+        with self.serial_lock:
+            for i in range(5):
+                setattr(self.instrument, f'current_range{i}', ranges[i])
+                setattr(self.instrument, f'current_rate{i}', rates[i])
+            self.instrument.current_rate5 = fast_rate
+        self.log('Applied range/rate configuration to instrument.')
+
+
+def main():
+    root = tk.Tk()
+    root.geometry('980x640')
+    app = MagnetGUI(root)
+    root.mainloop()
+
+
+if __name__ == '__main__':
+    main()
