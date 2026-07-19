@@ -43,7 +43,7 @@ def write_block(f, measurement_type: str,
 # Each block is a dict describing one measurement step.
 # Keys depend on block type:
 #
-# RH  → { type, field_t, use_magnet }
+# RH  → { type, field_t, sweep_rate, use_magnet }
 # RV  → { type, smu, voltage_v, step_mv, use_magnet }
 # Rt  → { type, acq_s, voltage_v, field_t, use_magnet }
 
@@ -65,7 +65,7 @@ def block_summary(block: dict) -> str:
     t = block['type']
     if t == 'RH':
         mag = '✓ magnet' if block['use_magnet'] == "'True'" else '✗ magnet'
-        return f"RH  |  H = {_format_value(block['field_t'])} T   ({mag})  |  delay = {_format_value(block['acq_delay'])} s"
+        return f"RH  |  H = {_format_value(block['field_t'])} T   ({mag})| rate = {_format_value(block['sweep_rate'])} T/min |  delay = {_format_value(block['acq_delay'])} s"
     if t == 'RV':
         mag = '✓ magnet' if block['use_magnet'] == "'True'" else '✗ magnet'
         return (f"RV  |  SMU = {block['smu']}   "
@@ -86,8 +86,9 @@ def block_to_file_params(block: dict) -> list[tuple[str, Union[int, float, str],
     if t == 'RH':
         return [
             ('Target field (T)',  block['field_t'],   1),
-            ('Acquisition Delay (s)', block['acq_delay'], 2),
-            ('Use Magnet',        mag,                3),
+            ('Sweep rate (T/min)', block['sweep_rate'], 2),
+            ('Acquisition Delay (s)', block['acq_delay'], 3),
+            ('Use Magnet',        mag,                4),
         ]
     if t == 'RV':
         return [
@@ -164,6 +165,7 @@ class BlockDialog(tk.Toplevel):
         r = 0
         if block_type == 'RH':
             add_float(r, 'Target field (T):', 'field_t', 0.0);   r += 1
+            add_float(r, 'Sweep rate (T/min):', 'sweep_rate', 0.1); r += 1
             add_float(r, 'Acquisition Delay (s):', 'acq_delay', 1.0);r += 1
             add_check(r, 'Use Magnet:', 'use_magnet', True);       r += 1
 
@@ -211,9 +213,9 @@ class BlockDialog(tk.Toplevel):
     def _ok(self):
         # Parse and validate all float fields
         float_keys = {
-            'RH':  ['field_t','acq_delay'],
-            'RV':  ['voltage_v', 'step_mv','acq_delay'],
-            'Rt':  ['acq_s','acq_delay', 'voltage_v', 'field_t'],
+            'RH':  ['field_t', 'sweep_rate', 'acq_delay'],
+            'RV':  ['voltage_v', 'step_mv', 'acq_delay'],
+            'Rt':  ['acq_s', 'acq_delay', 'voltage_v', 'field_t'],
         }[self.block_type]
 
         block = {'type': self.block_type}
