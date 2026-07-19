@@ -6,7 +6,6 @@ from .base import *
 from . import base
 
 
-
 class Resistance_magnet_sweep_measurement(Procedure):
     # --- Parameters ---
     Title = Parameter('RH measurement', default='RH')
@@ -15,7 +14,7 @@ class Resistance_magnet_sweep_measurement(Procedure):
     Gate_contacts = Parameter('Gate', default='Insert gate contacts')
 
     Target_field = FloatParameter('Target field (T)', group_by='use_magnet', default=0)
-    sweep_control = ListParameter('Sweep speed', group_by='use_magnet', choices=["Slow","Normal","Fast"], default="Normal")
+    sweep_rate = FloatParameter('Sweep rate (T/min)', group_by='use_magnet', default=0.1)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=0.5)
 
     # --- Hardware Selection ---
@@ -118,68 +117,70 @@ class Resistance_magnet_sweep_measurement(Procedure):
 
         return vals
     
-
-
-
     def execute(self):
         magnet = base.magnet
         if self.use_magnet == False:
             log.warning("Magnet was not chosen measurement aborted")
             return
-        if self.sweep_control == "fast":
-            if abs(self.Target_field) < 1 and abs(magnet.magnet_field) < 1:
-                log.info("Magnetic field -1<B<1 Tesla, Fast sweep rate 0.2 T/min")
-                magnet.current_rate0 = (0.2*10.375)/60
-            else:
-                log.info("Magnetic field outside of range -1 < B < 1 Tesla, Fast sweep rate cannot be used")
-                return
-        if self.sweep_control == "normal":
-            log.info("Normal sweep rate 0.1 T/min")
-            magnet.current_rate0 = (0.1*10.375)/60
-        if self.sweep_control == "slow":
-            if abs(self.Target_field) < 0.5 and abs(magnet.magnet_field) < 0.5:
-                log.info("Magnetic field -0.5<B<0.5 Tesla, Slow sweep rate 0.05 T/min")
-                magnet.current_rate0 = (0.05*10.375)/60
-            else:
-                log.info("Magnetic field outside of range -0.5 < B < 0.5 Tesla, Slow sweep rate cannot be used")
-                return
+        original_rates = {i: getattr(magnet, f"current_rate{i}") for i in range(5)}
+        SAFETY_MAX_RATE_PER_RANGE = {0: 0.20,1: 0.10,2: 0.05,3: 0.03,4: 0.001}
+
+        try:
+            for i in range(5):
+                max_rate = SAFETY_MAX_RATE_PER_RANGE[i]
+                if self.sweep_rate <= max_rate:
+                    applied_rate = self.sweep_rate
+                else:
+                    applied_rate = original_rates[i]
+                    log.warning(
+                    "Requested rate %g T/min exceeds safety limit %g T/min for range %d — "
+                    "ignored, default rate %g T/min retained.",
+                    self.sweep_rate, max_rate, i, original_rates[i]
+                    )
+                rate_A_s = (applied_rate * 10.375) / 60
+                setattr(magnet, f'current_rate{i}', rate_A_s)
+                log.info("Range %d rate set to %g T/min (%g A/s)", i, applied_rate, rate_A_s)
             
-        time_0 = time.time()
-        log.info("starting to sweep field to %g Tesla", self.Target_field)
-        # --- 1. Persistent Heater Logic ---
-        current_field = magnet.magnet_field
-        persistent_heater_status = magnet.persistent_switch_heater
-        print('Persistent switch heater mode: %s' % persistent_heater_status)
-        # Test if the magnet heater is on, in case the persistent heater is off
-        # turn it on and wait 10 min
-        if persistent_heater_status == '0':
-            log.info("Heater is OFF. Turning ON and waiting 600s...")
-            magnet.persistent_switch_heater = 'ON'
-            time.sleep(600)
-            log.info("Heater warm-up complete.")
+            time_0 = time.time()
+            log.info("starting to sweep field to %g Tesla", self.Target_field)
+            # --- 1. Persistent Heater Logic ---
+            current_field = magnet.magnet_field
+            persistent_heater_status = magnet.persistent_switch_heater
+            print('Persistent switch heater mode: %s' % persistent_heater_status)
+            # Test if the magnet heater is on, in case the persistent heater is off
+            # turn it on and wait 10 min
+            if persistent_heater_status == '0':
+                log.info("Heater is OFF. Turning ON and waiting 600s...")
+                magnet.persistent_switch_heater = 'ON'
+                time.sleep(600)
+                log.info("Heater warm-up complete.")
 
-        # --- 2. Setup Sweep ---
-        origin_field = magnet.magnet_field
-        magnet.go_to_target_field(self.Target_field)
+            # --- 2. Setup Sweep ---
+            origin_field = magnet.magnet_field
+            magnet.go_to_target_field(self.Target_field)
 
-        total_sweep_range = abs(self.Target_field - origin_field)
-        if total_sweep_range == 0: total_sweep_range = 1.0  # Avoid division by zero
+            total_sweep_range = abs(self.Target_field - origin_field)
+            if total_sweep_range == 0: total_sweep_range = 1.0  # Avoid division by zero
 
-        # --- 3. Monitoring Loop ---
-        while abs(current_field - self.Target_field) > 0.003:
+            # --- 3. Monitoring Loop ---
+            while abs(current_field - self.Target_field) > 0.003:
 
-            data = self.getmeas(time_0)
-            current_field = data[-1]
-            self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
+                data = self.getmeas(time_0)
+                current_field = data[-1]
+                self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
 
-            progress_percent = 100 * (abs(current_field - origin_field) / total_sweep_range)
-            self.emit('progress', min(100, max(0, progress_percent)))
+                progress_percent = 100 * (abs(current_field - origin_field) / total_sweep_range)
+                self.emit('progress', min(100, max(0, progress_percent)))
 
-            time.sleep(self.acq_delay)
-            if self.should_stop():
-                log.warning("Magnet sweep stopped by user.")
-                break
-        log.info("Magnetic field Reached!")
+                time.sleep(self.acq_delay)
+                if self.should_stop():
+                    log.warning("Magnet sweep stopped by user.")
+                    return
+                
+            log.info("Magnetic field Reached!")
+        finally:
+            for i in range(5):
+                setattr(magnet, f'current_rate{i}', original_rates[i])
 
     def shutdown(self):
         magnet = base.magnet
@@ -199,7 +200,7 @@ proc_resistance_magnet = {
         inputs=[
                 'Title','Resistor','Contacts','Gate_contacts',
                 'devices',
-                'use_magnet','Target_field','sweep_control',
+                'use_magnet','Target_field','sweep_rate',
                 'use_MFLI_1','use_MFLI_2' ,'use_MFLI_3',
                 'use_srs860_1','use_srs860_2',
                 'use_srs830_1','use_srs830_2','use_srs830_3',
