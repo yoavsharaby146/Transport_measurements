@@ -252,7 +252,7 @@ proc_Rt_RV_RH_sequencer = {
                 'Target_voltage', 'step_size', 'smu', 'acq_length', 'devices', 'use_magnet',
                 'use_MFLI_1', 'use_MFLI_2', 'use_MFLI_3', 'use_srs860_1', 'use_srs860_2', 'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
                 'use_dual_gate', 'use_keithley_1', 'use_keithley_2', 'acq_delay'],
-        displays=['Type','Target_field','smu','Target_voltage','step_size','acq_length','acq_delay'],
+        displays=['Type','Target_field', 'sweep_rate','smu','Target_voltage','step_size','acq_length','acq_delay'],
         x=['time(s)'],
         y=['probe_temp(K)', 'field(T)'],
         sequencer=True,
