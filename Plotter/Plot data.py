@@ -214,6 +214,7 @@ class InteractivePlotter:
         self.v_y_not = tk.StringVar(value="Scientific")
         self.x_log = tk.BooleanVar()
         self.y_log = tk.BooleanVar()
+        self.z_log = tk.BooleanVar()  # Log scale for Color Map Z (colormap/colorbar)
 
         # --- TICK DIRECTION & LENGTH (Origin Pro-like) ---
         self.v_tick_dir_x = tk.StringVar(value="out")       # "out", "in", "inout", "none"
@@ -283,6 +284,30 @@ class InteractivePlotter:
         self._cmap_default_colors = ['#FF0000', '#00AAFF', '#00CC00', '#FF8800', '#AA00FF',
                                       '#00CCCC', '#FF00FF', '#888800', '#FF4444', '#4444FF']
         self._cmap_color_index = 0         # Index into default color cycle
+
+        # --- LINE DRAWING SETTINGS (GUI-controlled) ---
+        # Drawing mode: "Freehand" (click to add points), "H" (horizontal), "V" (vertical), "Coord" (manual x,y)
+        self._cmap_line_mode = tk.StringVar(value="Freehand")
+        # Profile x-axis: "distance" (arc length) or "position" (use x for horizontal lines, y for vertical)
+        self._cmap_profile_xmode = tk.StringVar(value="distance")
+        # Manual coordinate entry vars for "Coord" mode
+        self._cmap_coord_x = tk.StringVar(value="0")
+        self._cmap_coord_y = tk.StringVar(value="0")
+        # Horizontal/Vertical line span controls (in data coordinates)
+        self._cmap_h_y = tk.StringVar(value="0")       # Y value of horizontal line
+        self._cmap_h_xmin = tk.StringVar(value="")     # X start (blank = full extent min)
+        self._cmap_h_xmax = tk.StringVar(value="")     # X end   (blank = full extent max)
+        self._cmap_v_x = tk.StringVar(value="0")       # X value of vertical line
+        self._cmap_v_ymin = tk.StringVar(value="")     # Y start (blank = full extent min)
+        self._cmap_v_ymax = tk.StringVar(value="")     # Y end   (blank = full extent max)
+        # Fine line width for H/V lines (can be edited later in Line Settings too)
+        self._cmap_hv_width = tk.StringVar(value="2.5")
+        # Selected line index (for single-line operations like delete/adjust)
+        self._cmap_selected_idx = None
+        # Status text shown in the Line Profile Tools popup
+        self.draw_line_status = tk.StringVar(value="")
+        # Window handle for the Line Profile Tools popup (None when closed)
+        self._line_tools_window = None
         
         # --- SCREEN DIMENSIONS (for responsive design) ---
         self.screen_width = self.root.winfo_screenwidth()
@@ -537,6 +562,10 @@ class InteractivePlotter:
         ttk.Checkbutton(control_frame, text="Y Log Scale", variable=self.y_log).grid(row=row, column=2, columnspan=2,
                                                                                      sticky='w', pady=2)
         row += 1
+        ttk.Checkbutton(control_frame, text="Z Log Scale (Color Map)",
+                        variable=self.z_log,
+                        command=self.update_plot).grid(row=row, column=0, columnspan=4, sticky='w', pady=2)
+        row += 1
         ttk.Separator(control_frame, orient='horizontal').grid(row=row, column=0, columnspan=4, sticky='ew', pady=10)
         row += 1
 
@@ -572,23 +601,12 @@ class InteractivePlotter:
         row += 1
         
         # --- LINE DRAWING ON COLOR MAP ---
-        cmap_line_frame = ttk.Frame(control_frame)
-        cmap_line_frame.grid(row=row, column=0, columnspan=4, sticky='ew', pady=5)
-        self.btn_draw_line = ttk.Button(cmap_line_frame, text="✏ Draw Line on Color Map", command=self.toggle_draw_line_mode)
-        self.btn_draw_line.pack(side='left', expand=True, fill='x', padx=2)
-        self.btn_clear_lines = ttk.Button(cmap_line_frame, text="✖ Clear Lines", command=self._clear_cmap_lines)
-        self.btn_clear_lines.pack(side='left', expand=True, fill='x', padx=2)
-        self.draw_line_status = tk.StringVar(value="")
-        self.draw_line_label = ttk.Label(control_frame, textvariable=self.draw_line_status, foreground='red', font=('Arial', 9, 'italic'))
-        self.draw_line_label.grid(row=row+1, column=0, columnspan=4, sticky='w', pady=0)
-        # Second row: Show Profiles + Line Colors buttons
-        cmap_btn_frame2 = ttk.Frame(control_frame)
-        cmap_btn_frame2.grid(row=row+2, column=0, columnspan=4, sticky='ew', pady=2)
-        self.btn_show_profiles = ttk.Button(cmap_btn_frame2, text="📊 Show Profiles", command=self._show_all_profiles)
-        self.btn_show_profiles.pack(side='left', expand=True, fill='x', padx=2)
-        self.btn_line_colors = ttk.Button(cmap_btn_frame2, text="🎨 Line Colors", command=self._open_line_config_dialog)
-        self.btn_line_colors.pack(side='left', expand=True, fill='x', padx=2)
-        row += 3
+        # Single button opens a dedicated window for all line-profile controls
+        # (keeps the main control panel uncluttered)
+        ttk.Button(control_frame, text="🛠  Line Profile Tools",
+                   command=self._open_line_tools_dialog).grid(
+            row=row, column=0, columnspan=4, sticky='ew', pady=5)
+        row += 1
         control_frame.columnconfigure(2, weight=1)
         control_frame.columnconfigure(3, weight=1)
 
@@ -2720,9 +2738,24 @@ class InteractivePlotter:
                     z_auto_min = z_auto_max = None
                 cmap_vmin = z_min_val if z_min_val is not None else z_auto_min
                 cmap_vmax = z_max_val if z_max_val is not None else z_auto_max
+                # Z log scale → use LogNorm for the colormap/colorbar. Ensure vmin > 0.
+                norm = None
+                if self.z_log.get():
+                    from matplotlib.colors import LogNorm
+                    if cmap_vmin is not None and cmap_vmin <= 0:
+                        pos_finite = z_finite[z_finite > 0]
+                        cmap_vmin = float(np.min(pos_finite)) if pos_finite.size > 0 else 1e-9
+                        if cmap_vmax is not None and cmap_vmax <= cmap_vmin:
+                            cmap_vmax = float(np.max(pos_finite)) if pos_finite.size > 0 else 1.0
+                    if cmap_vmin is not None and cmap_vmax is not None and cmap_vmax > cmap_vmin > 0:
+                        norm = LogNorm(vmin=cmap_vmin, vmax=cmap_vmax)
                 # Display extent uses the real (scaled) X/Y so tick labels are correct.
+                # NOTE: when a norm is supplied (LogNorm), vmin/vmax must be None —
+                # matplotlib doesn't allow passing both vmin/vmax and a Normalize instance.
+                im_vmin = None if norm is not None else cmap_vmin
+                im_vmax = None if norm is not None else cmap_vmax
                 im = self.ax.imshow(zi, extent=(x_min, x_max, y_min, y_max), origin='lower', aspect='auto',
-                                    cmap=self.v_cmap_name.get(), vmin=cmap_vmin, vmax=cmap_vmax)
+                                    cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm)
                 # Track ylabel_text for custom positioning
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
@@ -2732,8 +2765,13 @@ class InteractivePlotter:
                                fontname=font, color=self.zlabel_color, rotation=zlabel_rot)
                 # Get the actual label text object from the colorbar
                 zlabel_text = cbar.ax.yaxis.label
-                if z_maj: cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(z_maj))
-                if z_min > 1: cbar.ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(z_min))
+                # Only set linear locators when NOT using log scale (log scale auto-generates good ticks)
+                if not self.z_log.get():
+                    if z_maj: cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(z_maj))
+                    if z_min > 1: cbar.ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(z_min))
+                else:
+                    cbar.ax.yaxis.set_major_locator(ticker.LogLocator())
+                    cbar.ax.yaxis.set_minor_locator(ticker.LogLocator(subs='auto'))
                 cbar.ax.tick_params(labelsize=yt_sz, pad=z_pad_val, labelcolor=self.z_tick_color, color=self.z_tick_color)
                 
                 # --- Store interpolated data for line drawing feature ---
@@ -3847,12 +3885,338 @@ class InteractivePlotter:
         self._show_line_toggle_menu(x, y)
                 
     # --- LINE DRAWING ON COLOR MAP ---
-    
-    def toggle_draw_line_mode(self, force_disconnect=False):
-        """Toggle line drawing mode on the color map.
-        
+
+    def _extent_or_axes_limits(self):
+        """Return (xmin, xmax, ymin, ymax) from stored extent, or fall back to current axes limits."""
+        if self._cmap_extent is not None:
+            return self._cmap_extent
+        try:
+            return (self.ax.get_xlim()[0], self.ax.get_xlim()[1],
+                    self.ax.get_ylim()[0], self.ax.get_ylim()[1])
+        except Exception:
+            return (0.0, 1.0, 0.0, 1.0)
+
+    def _refresh_line_select_combo(self):
+        """Refresh the 'Delete' combobox with the current completed lines."""
+        try:
+            vals = [f"{i+1}: {ld.get('name', 'Line')}" for i, ld in enumerate(self._cmap_completed_lines)]
+            self._cmap_line_select['values'] = vals
+            if vals:
+                self._cmap_line_select.current(len(vals) - 1)
+        except Exception:
+            pass
+
+    def _on_line_mode_change(self):
+        """Rebuild the parameter panel inside _cmap_config_frame based on selected line type."""
+        # Ensure the config frame exists
+        if not hasattr(self, '_cmap_config_frame'):
+            return
+        for child in self._cmap_config_frame.winfo_children():
+            child.destroy()
+
+        mode = self._cmap_line_mode.get()
+
+        # If switching to a click-based mode while draw mode is off, that's fine —
+        # the user can still press "Draw Line" to start clicking.
+        # For Horizontal/Vertical, the panel itself contains an "Add" button, so
+        # no click interaction is required.
+
+        if mode in ("Freehand", "Coordinates"):
+            hint = ("Click on the color map to add points, double-click to finish.\n"
+                    "Use 'Draw Line' to start/stop clicking.") if mode == "Freehand" else \
+                   ("Click on the color map OR type X,Y and press Add Point.\n"
+                    "Double-click (or press Finish) to complete the line.")
+            ttk.Label(self._cmap_config_frame, text=hint, font=('Arial', 8, 'italic'),
+                      foreground='gray', wraplength=360, justify='left').pack(anchor='w', pady=2)
+
+            if mode == "Coordinates":
+                ef = ttk.Frame(self._cmap_config_frame)
+                ef.pack(fill='x', pady=4)
+                ttk.Label(ef, text="X:").pack(side='left')
+                ttk.Entry(ef, textvariable=self._cmap_coord_x, width=10).pack(side='left', padx=4)
+                ttk.Label(ef, text="Y:").pack(side='left')
+                ttk.Entry(ef, textvariable=self._cmap_coord_y, width=10).pack(side='left', padx=4)
+                ttk.Button(ef, text="➕ Add Point", command=self._add_coord_point).pack(side='left', padx=4)
+                ttk.Button(ef, text="⏎ Finish Line", command=self._finish_cmap_line).pack(side='left', padx=4)
+                ttk.Button(ef, text="↩ Undo Point", command=self._undo_last_cmap_point).pack(side='left', padx=4)
+
+            # common width control for freehand/coord completed lines
+            wf = ttk.Frame(self._cmap_config_frame)
+            wf.pack(fill='x', pady=2)
+            ttk.Label(wf, text="Line width:").pack(side='left')
+            ttk.Entry(wf, textvariable=self._cmap_hv_width, width=6).pack(side='left', padx=4)
+            ttk.Label(wf, text="(applied to newly finished lines)", font=('Arial', 8, 'italic'),
+                      foreground='gray').pack(side='left')
+
+        elif mode == "Horizontal":
+            xmin, xmax, ymin, ymax = self._extent_or_axes_limits()
+            ttk.Label(self._cmap_config_frame, text="Horizontal line: constant Y, spans X range.",
+                      font=('Arial', 8, 'italic'), foreground='gray').pack(anchor='w')
+            f1 = ttk.Frame(self._cmap_config_frame); f1.pack(fill='x', pady=2)
+            ttk.Label(f1, text="Y:").pack(side='left')
+            ttk.Entry(f1, textvariable=self._cmap_h_y, width=10).pack(side='left', padx=4)
+            ttk.Label(f1, text="X min:").pack(side='left', padx=(8, 0))
+            eh1 = ttk.Entry(f1, textvariable=self._cmap_h_xmin, width=8); eh1.pack(side='left', padx=4)
+            ttk.Label(f1, text="X max:").pack(side='left', padx=(8, 0))
+            eh2 = ttk.Entry(f1, textvariable=self._cmap_h_xmax, width=8); eh2.pack(side='left', padx=4)
+            f2 = ttk.Frame(self._cmap_config_frame); f2.pack(fill='x', pady=2)
+            ttk.Label(f2, text="Width:").pack(side='left')
+            ttk.Entry(f2, textvariable=self._cmap_hv_width, width=6).pack(side='left', padx=4)
+            ttk.Button(f2, text="➕ Add Horizontal Line", command=self._add_horizontal_line).pack(side='left', padx=8)
+            ttk.Label(f2, text=f"(blank → {xmin:.4g} … {xmax:.4g})", font=('Arial', 8, 'italic'),
+                      foreground='gray').pack(side='left')
+
+        elif mode == "Vertical":
+            xmin, xmax, ymin, ymax = self._extent_or_axes_limits()
+            ttk.Label(self._cmap_config_frame, text="Vertical line: constant X, spans Y range.",
+                      font=('Arial', 8, 'italic'), foreground='gray').pack(anchor='w')
+            f1 = ttk.Frame(self._cmap_config_frame); f1.pack(fill='x', pady=2)
+            ttk.Label(f1, text="X:").pack(side='left')
+            ttk.Entry(f1, textvariable=self._cmap_v_x, width=10).pack(side='left', padx=4)
+            ttk.Label(f1, text="Y min:").pack(side='left', padx=(8, 0))
+            ev1 = ttk.Entry(f1, textvariable=self._cmap_v_ymin, width=8); ev1.pack(side='left', padx=4)
+            ttk.Label(f1, text="Y max:").pack(side='left', padx=(8, 0))
+            ev2 = ttk.Entry(f1, textvariable=self._cmap_v_ymax, width=8); ev2.pack(side='left', padx=4)
+            f2 = ttk.Frame(self._cmap_config_frame); f2.pack(fill='x', pady=2)
+            ttk.Label(f2, text="Width:").pack(side='left')
+            ttk.Entry(f2, textvariable=self._cmap_hv_width, width=6).pack(side='left', padx=4)
+            ttk.Button(f2, text="➕ Add Vertical Line", command=self._add_vertical_line).pack(side='left', padx=8)
+            ttk.Label(f2, text=f"(blank → {ymin:.4g} … {ymax:.4g})", font=('Arial', 8, 'italic'),
+                      foreground='gray').pack(side='left')
+
+    def _undo_last_cmap_point(self):
+        """Remove the last added point during freehand/coordinate drawing."""
+        if not self._cmap_line_points:
+            return
+        self._cmap_line_points.pop()
+        # remove last point marker
+        if self._cmap_point_artists:
+            try: self._cmap_point_artists.pop().remove()
+            except Exception: pass
+        # rebuild live line
+        for a in self._cmap_line_artists:
+            try: a.remove()
+            except Exception: pass
+        self._cmap_line_artists = []
+        if len(self._cmap_line_points) >= 2:
+            xs = [p[0] for p in self._cmap_line_points]
+            ys = [p[1] for p in self._cmap_line_points]
+            ln, = self.ax.plot(xs, ys, 'r-', linewidth=2, zorder=19)
+            self._cmap_line_artists.append(ln)
+        n = len(self._cmap_line_points)
+        self.draw_line_status.set(f"{n} point(s). Add more, or finish.")
+        self.canvas.draw_idle()
+
+    def _add_coord_point(self):
+        """Add a point from the X,Y entry fields (Coordinates mode)."""
+        try:
+            x = float(self._cmap_coord_x.get())
+            y = float(self._cmap_coord_y.get())
+        except ValueError:
+            messagebox.showinfo("Info", "Please enter numeric X and Y values.")
+            return
+        self._cmap_line_points.append((x, y))
+        pt, = self.ax.plot(x, y, 'ro', markersize=6, zorder=20)
+        self._cmap_point_artists.append(pt)
+        if len(self._cmap_line_points) >= 2:
+            xs = [p[0] for p in self._cmap_line_points]
+            ys = [p[1] for p in self._cmap_line_points]
+            for a in self._cmap_line_artists:
+                try: a.remove()
+                except Exception: pass
+            self._cmap_line_artists = []
+            ln, = self.ax.plot(xs, ys, 'r-', linewidth=2, zorder=19)
+            self._cmap_line_artists.append(ln)
+        self.draw_line_status.set(f"{len(self._cmap_line_points)} point(s). Add more, or finish.")
+        self.canvas.draw_idle()
+
+    def _add_horizontal_line(self):
+        """Create a horizontal line from the parameter panel."""
+        try:
+            y = float(self._cmap_h_y.get())
+        except ValueError:
+            messagebox.showinfo("Info", "Please enter a numeric Y value.")
+            return
+        xmin, xmax, _, _ = self._extent_or_axes_limits()
+        try:
+            x0 = float(self._cmap_h_xmin.get()) if self._cmap_h_xmin.get().strip() else xmin
+        except ValueError:
+            x0 = xmin
+        try:
+            x1 = float(self._cmap_h_xmax.get()) if self._cmap_h_xmax.get().strip() else xmax
+        except ValueError:
+            x1 = xmax
+        try:
+            w = float(self._cmap_hv_width.get())
+            if w <= 0: w = 2.5
+        except ValueError:
+            w = 2.5
+        self._add_cmap_line([(x0, y), (x1, y)], line_type='horizontal', width=w)
+
+    def _add_vertical_line(self):
+        """Create a vertical line from the parameter panel."""
+        try:
+            x = float(self._cmap_v_x.get())
+        except ValueError:
+            messagebox.showinfo("Info", "Please enter a numeric X value.")
+            return
+        _, _, ymin, ymax = self._extent_or_axes_limits()
+        try:
+            y0 = float(self._cmap_v_ymin.get()) if self._cmap_v_ymin.get().strip() else ymin
+        except ValueError:
+            y0 = ymin
+        try:
+            y1 = float(self._cmap_v_ymax.get()) if self._cmap_v_ymax.get().strip() else ymax
+        except ValueError:
+            y1 = ymax
+        try:
+            w = float(self._cmap_hv_width.get())
+            if w <= 0: w = 2.5
+        except ValueError:
+            w = 2.5
+        self._add_cmap_line([(x, y0), (x, y1)], line_type='vertical', width=w)
+
+    def _add_cmap_line(self, points, line_type='free', color=None, name=None, width=None, linestyle=None):
+        """Generic helper: add a completed line from an explicit list of points.
+
         Args:
-            force_disconnect: If True, force disconnect regardless of plot type (used when switching plot types).
+            points: list of (x, y) tuples (>=2 points).
+            line_type: 'free' | 'horizontal' | 'vertical' | 'coord'
+            color, name, width, linestyle: optional overrides; otherwise auto-assigned.
+        """
+        if len(points) < 2:
+            return
+        # Ensure unique points (avoid degenerate duplicates)
+        pts = [tuple(p) for p in points]
+
+        line_color = color or self._cmap_default_colors[self._cmap_color_index % len(self._cmap_default_colors)]
+        self._cmap_color_index += 1
+        line_num = len(self._cmap_completed_lines) + 1
+        line_name = name or f"Line {line_num}"
+        line_width = width if width is not None else float(self._cmap_hv_width.get() or 2.5)
+        line_style = linestyle or '-'
+
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        persistent_line, = self.ax.plot(xs, ys, color=line_color, linestyle=line_style,
+                                        linewidth=line_width, zorder=19)
+        persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=line_width + 1, zorder=18)
+        persistent_dots, = self.ax.plot(xs, ys, 'o', color=line_color, markersize=5,
+                                        zorder=20, markeredgecolor='k')
+
+        profile_data = self._extract_line_profile(pts)
+
+        self._cmap_completed_lines.append({
+            'artists': [persistent_outline, persistent_line, persistent_dots],
+            'points': pts,
+            'color': line_color,
+            'name': line_name,
+            'profile_data': profile_data,
+            'linestyle': line_style,
+            'width': line_width,
+            'type': line_type,
+        })
+        self.canvas.draw_idle()
+        self._refresh_line_select_combo()
+        self.draw_line_status.set(f"{line_name} added.")
+
+    def _open_line_tools_dialog(self):
+        """Open a dedicated window containing all line-drawing/profile controls.
+
+        Keeps the main control panel uncluttered by moving the previously
+        embedded line-drawing widgets into their own popup.
+        """
+        # Reuse an existing window if one is already open
+        if self._line_tools_window is not None and self._line_tools_window.winfo_exists():
+            self._line_tools_window.lift()
+            self._line_tools_window.focus_force()
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("🛠  Line Profile Tools")
+        win.transient(self.root)
+        # Size the popup relative to the screen and position it nicely
+        w, h = self.get_dialog_size(0.34, 0.72, max_width=460, max_height=700,
+                                     min_width=360, min_height=450)
+        self._set_dialog_geometry(win, w, h, parent=self.root)
+        self._line_tools_window = win
+
+        # Frame to hold all controls
+        top = ttk.Frame(win, padding=10)
+        top.pack(fill='both', expand=True)
+
+        # Header
+        ttk.Label(top, text="Line Drawing & Profiles", font=('Arial', 11, 'bold')).pack(anchor='w', pady=(0, 5))
+
+        # --- Status label (mirrors self.draw_line_status) ---
+        self.draw_line_status = getattr(self, 'draw_line_status', None) or tk.StringVar(value="")
+        status_lbl = ttk.Label(top, textvariable=self.draw_line_status, foreground='red',
+                               font=('Arial', 9, 'italic'))
+        status_lbl.pack(fill='x', pady=(0, 5))
+
+        # --- Draw / Clear buttons ---
+        cmap_line_frame = ttk.Frame(top)
+        cmap_line_frame.pack(fill='x', pady=4)
+        self.btn_draw_line = ttk.Button(cmap_line_frame, text="✏ Draw Line on Color Map",
+                                        command=self.toggle_draw_line_mode)
+        self.btn_draw_line.pack(side='left', expand=True, fill='x', padx=2)
+        self.btn_clear_lines = ttk.Button(cmap_line_frame, text="✖ Clear All",
+                                          command=self._clear_cmap_lines)
+        self.btn_clear_lines.pack(side='left', expand=True, fill='x', padx=2)
+
+        # --- Type + Profile X selectors ---
+        type_mode_frame = ttk.Frame(top)
+        type_mode_frame.pack(fill='x', pady=4)
+        ttk.Label(type_mode_frame, text="Type:").pack(side='left')
+        type_combo = ttk.Combobox(type_mode_frame, textvariable=self._cmap_line_mode,
+                                   values=["Freehand", "Horizontal", "Vertical", "Coordinates"],
+                                   state='readonly', width=12)
+        type_combo.pack(side='left', padx=4)
+        type_combo.bind('<<ComboboxSelected>>', lambda e: self._on_line_mode_change())
+        ttk.Label(type_mode_frame, text="Profile X:").pack(side='left', padx=(8, 0))
+        ttk.Combobox(type_mode_frame, textvariable=self._cmap_profile_xmode,
+                      values=["distance", "position"], state='readonly', width=9).pack(side='left', padx=4)
+
+        # --- Parameter panel (swaps based on selected line type) ---
+        self._cmap_config_frame = ttk.LabelFrame(top, text="Line Parameters", padding=5)
+        self._cmap_config_frame.pack(fill='x', pady=4)
+        # Populate it now based on the current mode
+        self._on_line_mode_change()
+
+        # --- Show Profiles + Line Settings ---
+        cmap_btn_frame2 = ttk.Frame(top)
+        cmap_btn_frame2.pack(fill='x', pady=4)
+        self.btn_show_profiles = ttk.Button(cmap_btn_frame2, text="📊 Show Profiles",
+                                            command=self._show_all_profiles)
+        self.btn_show_profiles.pack(side='left', expand=True, fill='x', padx=2)
+        self.btn_line_colors = ttk.Button(cmap_btn_frame2, text="🎨 Line Settings",
+                                          command=self._open_line_config_dialog)
+        self.btn_line_colors.pack(side='left', expand=True, fill='x', padx=2)
+
+        # --- Delete selected line ---
+        del_frame = ttk.Frame(top)
+        del_frame.pack(fill='x', pady=4)
+        ttk.Label(del_frame, text="Delete:").pack(side='left')
+        self._cmap_line_select = ttk.Combobox(del_frame, state='readonly', width=18)
+        self._cmap_line_select.pack(side='left', padx=4)
+        ttk.Button(del_frame, text="🗑 Delete", command=self._delete_selected_line).pack(side='left', padx=2)
+
+        # Refresh the delete combobox with any pre-existing lines
+        self._refresh_line_select_combo()
+
+        # Close handler: stop drawing mode if active and clear the reference
+        def _on_close():
+            if self._cmap_draw_mode:
+                self.toggle_draw_line_mode(force_disconnect=True)
+            self._line_tools_window = None
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+    def toggle_draw_line_mode(self, force_disconnect=False):
+        """Toggle line drawing (click) mode on the color map.
+
+        Only used by click-based modes (Freehand, Coordinates). Horizontal/Vertical
+        lines are added via the parameter panel buttons.
         """
         if force_disconnect:
             # Force disable drawing mode and disconnect events
@@ -3883,7 +4247,7 @@ class InteractivePlotter:
             self._cmap_point_artists = []
             self._cmap_line_points = []
             return
-        
+
         ptype = self.plot_type.get()
         if ptype != "Color Map":
             messagebox.showinfo("Info", "Line drawing is only available for Color Map plots.")
@@ -3891,9 +4255,17 @@ class InteractivePlotter:
         if self._cmap_zi_data is None:
             messagebox.showinfo("Info", "Please create a Color Map first (load data & plot).")
             return
-        
+
+        mode = self._cmap_line_mode.get()
+        # Horizontal/Vertical don't use click interaction
+        if mode in ("Horizontal", "Vertical"):
+            messagebox.showinfo("Info",
+                f"{mode} lines are added from the 'Line Parameters' panel below.\n"
+                f"Set the values and press the ➕ Add button.")
+            return
+
         self._cmap_draw_mode = not self._cmap_draw_mode
-        
+
         if self._cmap_draw_mode:
             self.btn_draw_line.config(text="🔴 Drawing... (click to stop)")
             self.draw_line_status.set("Click on plot to add points. Double-click to finish.")
@@ -4010,43 +4382,30 @@ class InteractivePlotter:
             try: self._cmap_preview_line.remove()
             except: pass
             self._cmap_preview_line = None
-        
-        # Assign color and name
-        line_color = self._cmap_default_colors[self._cmap_color_index % len(self._cmap_default_colors)]
-        line_num = len(self._cmap_completed_lines) + 1
-        line_name = f"Line {line_num}"
-        self._cmap_color_index += 1
-        
-        # Store the completed line as a persistent artist with color
-        xs = [p[0] for p in points]
-        ys = [p[1] for p in points]
-        line_width = 2.5
-        line_style = '-'
-        persistent_line, = self.ax.plot(xs, ys, color=line_color, linestyle=line_style, linewidth=line_width, zorder=19)
-        persistent_outline, = self.ax.plot(xs, ys, 'k-', linewidth=line_width + 1, zorder=18)
-        persistent_dots, = self.ax.plot(xs, ys, 'o', color=line_color, markersize=5, zorder=20, markeredgecolor='k')
-        
-        # Extract data along the line
-        profile_data = self._extract_line_profile(points)
-        
-        self._cmap_completed_lines.append({
-            'artists': [persistent_outline, persistent_line, persistent_dots],
-            'points': points,
-            'color': line_color,
-            'name': line_name,
-            'profile_data': profile_data,
-            'linestyle': line_style,
-            'width': line_width
-        })
-        self._cmap_line_artists = []
-        
-        self.canvas.draw_idle()
-        
+
+        if len(points) < 2:
+            self._cmap_line_points = []
+            self.draw_line_status.set("Need at least 2 points.")
+            return
+
+        # Determine line type from current mode
+        mode = self._cmap_line_mode.get()
+        line_type = 'coord' if mode == "Coordinates" else 'free'
+        try:
+            line_width = float(self._cmap_hv_width.get())
+            if line_width <= 0:
+                line_width = 2.5
+        except ValueError:
+            line_width = 2.5
+
+        # Add via generic helper (handles color, name, profile extraction, combo refresh)
+        self._add_cmap_line(points, line_type=line_type, width=line_width)
+        self._cmap_line_points = []
+
         # Show combined popup with all lines
         self._show_all_profiles()
-        
-        # Reset drawing state for next line
-        self._cmap_line_points = []
+
+        line_name = self._cmap_completed_lines[-1].get('name', 'Line') if self._cmap_completed_lines else 'Line'
         self.draw_line_status.set(f"{line_name} completed! Click to draw another, or stop drawing.")
     
     def _extract_line_profile(self, points):
@@ -4209,13 +4568,20 @@ class InteractivePlotter:
         ttk.Button(btn_frame, text="Close", command=popup.destroy).pack(side='left', expand=True, fill='x', padx=3)
     
     def _redraw_cmap_lines(self):
-        """Redraw persistent line artists on the color map after update_plot."""
+        """Redraw persistent line artists on the color map after update_plot.
+
+        Also re-extracts the Z profile for each line, because the interpolated
+        color-map data (`_cmap_zi_data`/`_cmap_extent`) is regenerated whenever
+        the user presses Update Plot, so previously cached profiles would be stale.
+        """
         if not hasattr(self, '_cmap_completed_lines'):
             return
         for line_data in self._cmap_completed_lines:
             points = line_data['points']
             if not points or len(points) < 2:
                 continue
+            # Re-extract the profile using the freshly interpolated color-map data
+            line_data['profile_data'] = self._extract_line_profile(points)
             xs = [p[0] for p in points]
             ys = [p[1] for p in points]
             color = line_data.get('color', 'white')
@@ -4226,42 +4592,65 @@ class InteractivePlotter:
             persistent_dots, = self.ax.plot(xs, ys, 'o', color=color, markersize=5, zorder=20, markeredgecolor='k')
             line_data['artists'] = [persistent_outline, persistent_line, persistent_dots]
     
+    def _profile_xvalues(self, line_data):
+        """Return the x-axis values for a line's profile based on Profile X mode.
+
+        - 'distance' (default): arc length along the line.
+        - 'position': for horizontal lines use X, for vertical lines use Y,
+          and for free/coord lines fall back to X.
+        """
+        profile = line_data.get('profile_data', [])
+        mode = self._cmap_profile_xmode.get()
+        ltype = line_data.get('type', 'free')
+        if mode == 'position':
+            if ltype == 'vertical':
+                return [d['y'] for d in profile]
+            # horizontal, free, coord → use X
+            return [d['x'] for d in profile]
+        return [d['distance'] for d in profile]
+
     def _show_all_profiles(self):
         """Show a popup with all line profiles overlaid, with interactive legend."""
         if not self._cmap_completed_lines:
             messagebox.showinfo("Info", "No lines drawn yet. Draw a line on the color map first.")
             return
-        
+
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as CanvasTkAgg
-        
+
+        use_position = self._cmap_profile_xmode.get() == "position"
+
         popup = tk.Toplevel(self.root)
         popup.title("Line Profiles — All Lines")
         popup.geometry("850x600")
         popup.transient(self.root)
-        
+
         fig_profile = Figure(figsize=(8, 4.5), dpi=100)
         ax_profile = fig_profile.add_subplot(111)
-        
+
         plotted_lines = []
         plotted_labels = []
-        
+
         for line_data in self._cmap_completed_lines:
             profile = line_data.get('profile_data', [])
             if not profile:
                 continue
-            distances = [d['distance'] for d in profile]
+            x_vals = self._profile_xvalues(line_data)
             z_vals = [d['z'] for d in profile]
             color = line_data.get('color', 'blue')
             name = line_data.get('name', 'Line')
             ls = line_data.get('linestyle', '-')
             lw = line_data.get('width', 1.5)
-            ln, = ax_profile.plot(distances, z_vals, color=color, linestyle=ls, linewidth=lw, label=name)
+            ln, = ax_profile.plot(x_vals, z_vals, color=color, linestyle=ls, linewidth=lw, label=name)
             plotted_lines.append(ln)
             plotted_labels.append(name)
-        
-        ax_profile.set_xlabel("Distance along line", fontsize=11)
+
+        if use_position:
+            ax_profile.set_xlabel("Position along line (X / Y)", fontsize=11)
+            ax_profile.set_title("Line Profiles (Z vs Position)", fontsize=13, fontweight='bold')
+        else:
+            ax_profile.set_xlabel("Distance along line", fontsize=11)
+            ax_profile.set_title("Line Profiles (Z vs Distance)", fontsize=13, fontweight='bold')
         ax_profile.set_ylabel(self.v_zlabel.get() or self.z_combo.get() or "Z Value", fontsize=11)
-        ax_profile.set_title("Line Profiles (Z vs Distance)", fontsize=13, fontweight='bold')
         ax_profile.grid(True, alpha=0.3)
         
         # Add interactive legend
@@ -4275,7 +4664,13 @@ class InteractivePlotter:
         canvas_profile = CanvasTkAgg(fig_profile, master=popup)
         canvas_profile.draw()
         canvas_profile.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+
+        # Matplotlib navigation toolbar (zoom/pan/save/home) — same library as the main plot
+        from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk as ProfileToolbar
+        profile_toolbar = ProfileToolbar(canvas_profile, popup)
+        profile_toolbar.update()
+        profile_toolbar.pack(side=tk.BOTTOM, fill=tk.X)
+
         # Legend toggle via pick event on the popup's legend
         def on_legend_pick(event):
             leg = event.artist
@@ -4488,7 +4883,36 @@ class InteractivePlotter:
         self._cmap_color_index = 0  # Reset color cycle
         self._cmap_line_points = []
         self.canvas.draw_idle()
+        self._refresh_line_select_combo()
         self.draw_line_status.set("Lines cleared.")
+
+    def _delete_selected_line(self):
+        """Delete the currently selected line from the color map (without clearing all)."""
+        if not self._cmap_completed_lines:
+            return
+        # Parse selection: combobox values are formatted "N: Name"
+        sel = self._cmap_line_select.get()
+        idx = None
+        if sel:
+            try:
+                idx = int(sel.split(':')[0]) - 1
+            except (ValueError, IndexError):
+                idx = None
+        if idx is None:
+            # Fall back to currently-selected index var
+            idx = self._cmap_selected_idx
+        if idx is None or not (0 <= idx < len(self._cmap_completed_lines)):
+            messagebox.showinfo("Info", "Select a line to delete from the 'Delete' dropdown.")
+            return
+        line_data = self._cmap_completed_lines[idx]
+        for a in line_data.get('artists', []):
+            try: a.remove()
+            except Exception: pass
+        del self._cmap_completed_lines[idx]
+        self.canvas.draw_idle()
+        self._refresh_line_select_combo()
+        # Update remaining line names/numbers in the combo
+        self.draw_line_status.set(f"Deleted line {idx+1}.")
 
     def load_session(self):
         """Load a session from a JSON cache file."""
@@ -4689,6 +5113,7 @@ class InteractivePlotter:
                 self.show_major_grid.set(plot_settings.get("show_grid", True))
                 self.x_log.set(plot_settings.get("x_log", False))
                 self.y_log.set(plot_settings.get("y_log", False))
+                self.z_log.set(plot_settings.get("z_log", False))
             
             # === RESTORE AXIS SELECTIONS ===
             axis_selections = session_data.get("axis_selections", {})
