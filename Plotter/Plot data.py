@@ -2714,12 +2714,12 @@ class InteractivePlotter:
                 # and therefore shifts the Z color range — even though Z itself was
                 # not changed. Normalizing to [0, 1] makes the geometry identical for
                 # any divide factor, so the coloring stays invariant to X/Y scaling.
-                x_min, x_max = float(X.min()), float(X.max())
-                y_min, y_max = float(Y.min()), float(Y.max())
-                x_range = (x_max - x_min) or 1.0
-                y_range = (y_max - y_min) or 1.0
-                Xn = (X - x_min) / x_range
-                Yn = (Y - y_min) / y_range
+                cmap_x_min, cmap_x_max = float(X.min()), float(X.max())
+                cmap_y_min, cmap_y_max = float(Y.min()), float(Y.max())
+                x_range = (cmap_x_max - cmap_x_min) or 1.0
+                y_range = (cmap_y_max - cmap_y_min) or 1.0
+                Xn = (X - cmap_x_min) / x_range
+                Yn = (Y - cmap_y_min) / y_range
                 xi, yi = np.meshgrid(np.linspace(0.0, 1.0, 300), np.linspace(0.0, 1.0, 300))
                 zi = griddata((Xn, Yn), Z, (xi, yi), method='cubic')
                 # Derive the color range from the ACTUAL Z data (finite values only) when
@@ -2754,7 +2754,7 @@ class InteractivePlotter:
                 # matplotlib doesn't allow passing both vmin/vmax and a Normalize instance.
                 im_vmin = None if norm is not None else cmap_vmin
                 im_vmax = None if norm is not None else cmap_vmax
-                im = self.ax.imshow(zi, extent=(x_min, x_max, y_min, y_max), origin='lower', aspect='auto',
+                im = self.ax.imshow(zi, extent=(cmap_x_min, cmap_x_max, cmap_y_min, cmap_y_max), origin='lower', aspect='auto',
                                     cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm)
                 # Track ylabel_text for custom positioning
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
@@ -2773,6 +2773,13 @@ class InteractivePlotter:
                     cbar.ax.yaxis.set_major_locator(ticker.LogLocator())
                     cbar.ax.yaxis.set_minor_locator(ticker.LogLocator(subs='auto'))
                 cbar.ax.tick_params(labelsize=yt_sz, pad=z_pad_val, labelcolor=self.z_tick_color, color=self.z_tick_color)
+                if not self.z_log.get() and z_min > 1:
+                    min_z_dir = self.v_minor_tick_dir_z.get()
+                    min_z_len = val(self.v_minor_tick_length, 2.0)
+                    cbar.ax.tick_params(axis='y', which='minor',
+                        direction=min_z_dir if min_z_dir != "none" else "out",
+                        length=0 if min_z_dir == "none" else min_z_len,
+                        labelcolor=self.z_tick_color, color=self.z_tick_color)
                 
                 # --- Store interpolated data for line drawing feature ---
                 self._cmap_zi_data = zi.copy()
@@ -2861,15 +2868,17 @@ class InteractivePlotter:
                             length=min_x_len,
                             bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
 
-                if ptype == "XYXY (Dual X+Y)" and id(ax_curr) in is_top_x_axis:
-                    # Right Y-axis for XYXY: ticks on right side only, apply formatting
+                if (ptype == "XYXY (Dual X+Y)" and id(ax_curr) in is_top_x_axis) or \
+                   (ptype == "Dual Y-Axis" and ax_curr == axes_list[1]):
+                    # Right Y-axis for XYXY / Dual Y-Axis: ticks on right side only, apply formatting
                     y_dir_y2 = self.v_tick_dir_y2.get()
                     min_y_dir_y2 = self.v_minor_tick_dir_y2.get()
                     y2_maj_val = val(self.v_y2_maj)
                     y2_min_div = int(val(self.v_y2_min_div, 0))
                     y2_pad_val = val(self.v_y2_pad, 3.5)
                     if not self.y_log.get():
-                        apply_format(ax_curr, 'y', self.v_y_not.get())
+                        if ptype != "Dual Y-Axis":
+                            apply_format(ax_curr, 'y', self.v_y_not.get())
                         if y2_maj_val: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y2_maj_val))
                         if y2_min_div > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y2_min_div))
                     y_tick_len = 0 if y_dir_y2 == "none" else maj_len
@@ -2881,7 +2890,7 @@ class InteractivePlotter:
                         min_y_len = 0 if min_y_dir_y2 == "none" else min_len
                         ax_curr.tick_params(axis='y', which='minor', direction=min_y_dir_y2 if min_y_dir_y2 != "none" else "out",
                             length=min_y_len, left=False, right=True)
-                elif ptype not in ["Dual Y-Axis"]:
+                elif ptype != "Dual Y-Axis" or ax_curr == axes_list[0]:
                     y_tick_len = 0 if y_dir == "none" else maj_len
                     ax_curr.tick_params(axis='y', direction=y_dir if y_dir != "none" else "out",
                         length=y_tick_len, labelsize=yt_sz, pad=y_pad_val, labelcolor=self.ytick_color,
@@ -2924,6 +2933,10 @@ class InteractivePlotter:
                 elif ptype not in ["Dual Y-Axis", "XYXY (Dual X+Y)"] or ax_curr == axes_list[0]:
                     if y_dec is not None and not has_y_breaks:
                         ax_curr.yaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{y_dec}f'))
+
+            # Z axis (colorbar) decimals
+            if ptype == "Color Map" and z_dec is not None:
+                cbar.ax.yaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{z_dec}f'))
 
             target_ax = self.ax
             if self.x_log.get() and ptype != "Color Map":
