@@ -981,7 +981,9 @@ class InteractivePlotter:
         tab_ranges = ttk.Frame(notebook, padding=10)
         notebook.add(tab_ranges, text="Ranges & Transform")
 
-        ttk.Label(tab_ranges, text="Data Transformation (Divide by)", font=('Arial', 10, 'bold')).pack(pady=5)
+        ttk.Label(tab_ranges, text="Data Transformation (Divide by or Formula)", font=('Arial', 10, 'bold')).pack(pady=5)
+        ttk.Label(tab_ranges, text="Enter a number to divide, OR a formula using 'x'. Examples: x*1e-9, x/1e10, np.sqrt(x), 1/x, x**2. Supports numpy as np.",
+                  font=('Arial', 8, 'italic'), foreground='gray', wraplength=400, justify='left').pack(anchor='w', pady=(0, 5))
         add_entry(tab_ranges, "Divide X:", self.v_x_div)
         add_entry(tab_ranges, "Divide Y:", self.v_y_div)
         add_entry(tab_ranges, "Divide Y2:", self.v_y2_div)
@@ -2278,6 +2280,44 @@ class InteractivePlotter:
         # Not recognized
         return None
 
+    # --- AXIS DATA TRANSFORM (divide-by number OR formula, like secondary X-axis) ---
+
+    @staticmethod
+    def _axis_transform(data, expr_str):
+        """Transform axis data using a plain number OR a formula.
+
+        Backward compatible:
+        - Empty / None -> data unchanged.
+        - Pure number (e.g. "1e10", "2", "0.3048") -> divide data by it.
+
+        Formula mode (same semantics as the secondary top X-axis):
+        - Any expression that is NOT a pure number is evaluated as
+          ``lambda x: <expr>`` with ``x`` bound to the data and ``np`` available.
+        - Examples: "x * 4.1357e-15", "x / 1e10", "np.sqrt(x)", "1 / x", "x**2".
+
+        On formula error, prints a message and returns the original data
+        (so a typo never blanks the plot).
+        """
+        s = (expr_str or "").strip()
+        if not s:
+            return data
+        # Backward-compatible: pure numeric divisor
+        try:
+            factor = float(s)
+            if factor == 0:
+                return data
+            return data / factor
+        except ValueError:
+            pass
+        # Formula mode (numpy available, like secondary X-axis)
+        try:
+            safe_dict = {"np": np, "__builtins__": {}}
+            func = eval(f"lambda x: {s}", safe_dict)
+            return func(np.asarray(data, dtype=float))
+        except Exception as e:
+            print(f"Axis transform error for '{s}': {e}")
+            return data
+
     # --- AXIS BREAK HELPERS ---
 
     @staticmethod
@@ -2424,10 +2464,10 @@ class InteractivePlotter:
             y2label_rot = val(self.y2label_rotation, 90)
             zlabel_rot = val(self.zlabel_rotation, 90)
 
-        xf = val(self.v_x_div, 1.0);
-        yf = val(self.v_y_div, 1.0)
-        y2f = val(self.v_y2_div, 1.0);
-        zf = val(self.v_z_div, 1.0)
+        xf_s = self.v_x_div.get()
+        yf_s = self.v_y_div.get()
+        y2f_s = self.v_y2_div.get()
+        zf_s = self.v_z_div.get()
         t_sz = val(self.v_t_size, 14);
         l_sz = val(self.v_l_size, 12)
         leg_sz = val(self.v_leg_size, 10);
@@ -2531,7 +2571,7 @@ class InteractivePlotter:
             if self.use_ref_x_var.get():
                 ref = self.axis_ref_combo.get()
                 if ref in self.datasets and xcol in self.datasets[ref].columns:
-                    X_master = self.datasets[ref][xcol].to_numpy() / xf
+                    X_master = self._axis_transform(self.datasets[ref][xcol].to_numpy(), xf_s)
 
             # --- PARSE AXIS BREAKS (universal — works with Line, Scatter, and Dual Y-Axis) ---
             y_breaks_orig = self._parse_breaks(self.v_y_breaks)
@@ -2622,42 +2662,42 @@ class InteractivePlotter:
                     df = self.datasets[fk]
                     # XXY shares same Y axis — always use Y divisor (not Y2)
                     if ptype == "XXY (Dual X)":
-                        curr_yf = yf
+                        curr_yf_s = yf_s
                     else:
-                        curr_yf = yf if ax_idx == 0 else y2f
+                        curr_yf_s = yf_s if ax_idx == 0 else y2f_s
 
-                    x2f = val(self.v_x2_div, 1.0)
-                    
+                    x2f_s = self.v_x2_div.get()
+
                     if X_master is not None:
                         X_plot = X_master[:min(len(X_master), len(df))]
-                        Y_plot = (df[yc].to_numpy() / curr_yf)[:len(X_plot)]
+                        Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s)[:len(X_plot)]
                     elif ptype == "XXY (Dual X)" and ax_idx == 0:
                         x1c = self.xxy_x1_col.get()
-                        X_plot = df[x1c].to_numpy() / xf if x1c and x1c in df.columns else df[xcol].to_numpy() / xf if xcol in df.columns else None
-                        Y_plot = df[yc].to_numpy() / curr_yf if yc in df.columns else None
+                        X_plot = self._axis_transform(df[x1c].to_numpy(), xf_s) if x1c and x1c in df.columns else self._axis_transform(df[xcol].to_numpy(), xf_s) if xcol in df.columns else None
+                        Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s) if yc in df.columns else None
                         if X_plot is None or Y_plot is None: continue
                     elif ptype == "XXY (Dual X)" and ax_idx == 1:
                         x2c = self.xxy_x2_col.get()
                         if x2c and x2c in df.columns:
-                            X_plot = df[x2c].to_numpy() / x2f
+                            X_plot = self._axis_transform(df[x2c].to_numpy(), x2f_s)
                         else: continue
-                        Y_plot = df[yc].to_numpy() / curr_yf if yc in df.columns else None
+                        Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s) if yc in df.columns else None
                         if Y_plot is None: continue
                     elif ptype == "XYXY (Dual X+Y)" and ax_idx == 0:
                         x1c = self.xyxy_x1_col.get()
-                        X_plot = df[x1c].to_numpy() / xf if x1c and x1c in df.columns else df[xcol].to_numpy() / xf if xcol in df.columns else None
-                        Y_plot = df[yc].to_numpy() / curr_yf if yc in df.columns else None
+                        X_plot = self._axis_transform(df[x1c].to_numpy(), xf_s) if x1c and x1c in df.columns else self._axis_transform(df[xcol].to_numpy(), xf_s) if xcol in df.columns else None
+                        Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s) if yc in df.columns else None
                         if X_plot is None or Y_plot is None: continue
                     elif ptype == "XYXY (Dual X+Y)" and ax_idx == 1:
                         x2c = self.xyxy_x2_col.get()
                         if x2c and x2c in df.columns:
-                            X_plot = df[x2c].to_numpy() / x2f
+                            X_plot = self._axis_transform(df[x2c].to_numpy(), x2f_s)
                         else: continue
-                        Y_plot = df[yc].to_numpy() / curr_yf if yc in df.columns else None
+                        Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s) if yc in df.columns else None
                         if Y_plot is None: continue
                     elif xcol in df.columns:
-                        X_plot = df[xcol].to_numpy() / xf
-                        Y_plot = df[yc].to_numpy() / curr_yf
+                        X_plot = self._axis_transform(df[xcol].to_numpy(), xf_s)
+                        Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s)
                     else:
                         continue
 
@@ -2703,9 +2743,9 @@ class InteractivePlotter:
                 # ... (Existing Color Map Logic) ...
                 if len(sel_ds) != 1 or len(ycols) != 1: raise ValueError("Color Map: 1 File, 1 Y.")
                 df = sel_ds[0][1]
-                X = df[xcol].to_numpy() / xf;
-                Y = df[ycols[0]].to_numpy() / yf;
-                Z = df[self.z_combo.get()].to_numpy() / zf
+                X = self._axis_transform(df[xcol].to_numpy(), xf_s)
+                Y = self._axis_transform(df[ycols[0]].to_numpy(), yf_s)
+                Z = self._axis_transform(df[self.z_combo.get()].to_numpy(), zf_s)
 
                 # --- Normalize X and Y to a unit square BEFORE interpolation ---
                 # griddata's cubic interpolator depends on the GEOMETRY of the (X, Y)
@@ -3539,6 +3579,7 @@ class InteractivePlotter:
                 "y_div": self.v_y_div.get(),
                 "y2_div": self.v_y2_div.get(),
                 "z_div": self.v_z_div.get(),
+                "x2_div": self.v_x2_div.get(),
             }
             
             # === AXIS RANGES ===
@@ -5005,6 +5046,7 @@ class InteractivePlotter:
                 self.v_y_div.set(data_transformation.get("y_div", "1"))
                 self.v_y2_div.set(data_transformation.get("y2_div", "1"))
                 self.v_z_div.set(data_transformation.get("z_div", "1"))
+                self.v_x2_div.set(data_transformation.get("x2_div", "1"))
             
             # === RESTORE AXIS RANGES ===
             axis_ranges = session_data.get("axis_ranges", {})
