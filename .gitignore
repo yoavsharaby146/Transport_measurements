@@ -49,3 +49,6 @@ Thumbs.db
 # Local configuration (if you have local configs with sensitive info)
 *_local.py
 *.local.json
+
+# Cline local rules (untracked, persist across branches)
+.clinerules/
