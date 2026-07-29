@@ -1,0 +1,19 @@
+{
+  "use_ppms": false,
+  "ppms_host": "10.0.0.10",
+  "ppms_port": 5000,
+  "use_gate1": false,
+  "gate1_visa": "USB0::0x05E6::0x2450::04416746::INSTR",
+  "use_gate2": false,
+  "gate2_visa": "USB0::0xB506::0x2000::006158::INSTR",
+  "use_srs860_1": false,
+  "srs860_1_visa": "",
+  "use_srs860_2": false,
+  "srs860_2_visa": "",
+  "use_srs830_1": false,
+  "srs830_1_visa": "GPIB0::6::INSTR",
+  "use_srs830_2": false,
+  "srs830_2_visa": "GPIB0::7::INSTR",
+  "use_srs830_3": false,
+  "srs830_3_visa": ""
+}

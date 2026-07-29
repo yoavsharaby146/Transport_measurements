@@ -1,0 +1,9 @@
+numpy
+psutil
+pymeasure
+pyqtgraph
+PyQt5
+pyvisa
+pyvisa-py
+MultiPyVu
+pywin32
