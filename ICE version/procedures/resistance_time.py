@@ -6,8 +6,7 @@ from .base import *
 from . import base
 
 
-
-class Resistance_time_measurement(Procedure):
+class Resistance_time_measurement(ICEProcedure):
 
     Title = Parameter('Rt measurement', default='Rt')
     Resistor = Parameter('Resistance/Gain', default='insert resistor size/gain')
@@ -30,131 +29,19 @@ class Resistance_time_measurement(Procedure):
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
 
-    # --- Metadata Definitions ---
-    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
-    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
-    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
-    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
-
-    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
-    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
-    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
-    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
-    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
-    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
-
-    MFLI_1_sine_voltage = Metadata("MFLI_1 sine voltage", default=math.nan)
-    MFLI_1_frequency = Metadata("MFLI_1 frequency (Hz)", default=math.nan)
-    MFLI_1_bias = Metadata("MFLI_1 bias offset(V)", default=math.nan)
-    MFLI_1_aux = Metadata("MFLI_1 aux output", default=math.nan)
-
-    MFLI_2_sine_voltage = Metadata("MFLI_2 sine voltage", default=math.nan)
-    MFLI_2_frequency = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
-
-    MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
-    MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
-
-    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
-
     def startup(self):
-        # Capture metadata for active instruments
-        if self.use_srs860_1:
-            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
-            self.srs860_1_frequency = SRS860_1.frequency
-        if self.use_srs860_2:
-            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
-            self.srs860_2_frequency = SRS860_2.frequency
-
-        if self.use_MFLI_1:
-            self.MFLI_1_sine_voltage = MFLI_1.sine_amplitude
-            self.MFLI_1_frequency = MFLI_1.frequency
-            self.MFLI_1_bias = MFLI_1.dc_offset
-            self.MFLI_1_aux = MFLI_1.get_auxout()
-
-        if self.use_MFLI_2:
-            self.MFLI_2_sine_voltage = MFLI_2.sine_amplitude
-            self.MFLI_2_frequency = MFLI_2.frequency
-        if self.use_MFLI_3:
-            self.MFLI_3_sine_voltage = MFLI_3.sine_amplitude
-            self.MFLI_3_frequency = MFLI_3.frequency
-
-        if self.use_srs830_1:
-            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
-            self.srs830_1_frequency = SRS830_1.frequency
-        if self.use_srs830_2:
-            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
-            self.srs830_2_frequency = SRS830_2.frequency
-        if self.use_srs830_3:
-            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
-            self.srs830_3_frequency = SRS830_3.frequency
+        self._capture_metadata()
 
     def getmeas(self, t0):
-        temperature = read_temperature()
-        magnet = base.magnet
-        vals = [time.time() - t0]+ list(temperature)
-
-        if self.use_magnet:
-            magnet.magnet_field_write_query()
-
-        if self.use_dual_gate:
-            vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
-                     Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
-        else:
-            vals += [math.nan] * 4
-        if self.use_keithley_1:
-            vals += [Gate_1.measure__voltage(), Gate_1.measure__current()]
-        else:
-            vals += [math.nan] * 2
-        if self.use_keithley_2:
-            vals += [Gate_2.measure__voltage(), Gate_2.measure__current()]
-        else:
-            vals += [math.nan] * 2
-        if self.use_srs860_1:
-            r, th = SRS860_1.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan] * 2
-        if self.use_srs860_2:
-            r, th = SRS860_2.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan] * 2
-
-        for use, inst in [(self.use_MFLI_1, MFLI_1),
-                          (self.use_MFLI_2, MFLI_2),
-                          (self.use_MFLI_3, MFLI_3)]:
-            if use:
-                vals += list(inst.read_demod())
-            else:
-                vals += [math.nan] * 2
-        if self.use_srs830_1:
-            r, th = SRS830_1.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan] * 2
-        if self.use_srs830_2:
-            r, th = SRS830_2.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan] * 2
-        if self.use_srs830_3:
-            r, th = SRS830_3.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan] * 2
-        if self.use_magnet:
-            vals += [magnet.magnet_field_read_response()]
-        else:
-            vals.append(math.nan)
-        return vals
+        if self.use_magnet and _is_connected(base.magnet):
+            base.magnet.magnet_field_write_query()
+        return self._read_standard(t0)
 
     def execute(self):
         time_0 = time.time()
         log.info("starting to measure for %d seconds", self.acq_length)
 
-        # While Loop through until acquisition length is done
         current_time = 0.0
-
 
         while current_time < self.acq_length:
             data = self.getmeas(time_0)

@@ -4,18 +4,11 @@ Resistance Magnet and 2-Gate Mapping Measurement.
 2D mapping using Magnetic field and two gate voltages simultaneously.
 """
 
-from .base import (
-    log, time, math, np,
-    Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
-    magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2,
-    read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
-)
+from .base import *
 from . import base
 
 
-
-class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
+class Resistance_magnet_and_2gate_mapping_measurement(ICEProcedure):
     # --- Parameters ---
     Title = Parameter('Rn or RD measurement', default='Rn')
     Resistor = Parameter('Resistance/Gain', default='insert resistor size/gain')
@@ -69,106 +62,13 @@ class Resistance_magnet_and_2gate_mapping_measurement(Procedure):
     smu_points = IntegerParameter('Number of Gate Points', default=50, group_by='mapping', group_condition=True)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=0.1)
 
-    # --- Metadata ---
-    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
-    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
-    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
-    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
-    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
-    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
-    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
-    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
-    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
-    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
-    MFLI_1_sine_voltage = Metadata("MFLI_1 sine voltage", default=math.nan)
-    MFLI_1_frequency = Metadata("MFLI_1 frequency (Hz)", default=math.nan)
-    MFLI_2_sine_voltage = Metadata("MFLI_2 sine voltage", default=math.nan)
-    MFLI_2_frequency = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
-    MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
-    MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
-
-    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
-
     def startup(self):
-        if self.use_srs860_1:
-            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
-            self.srs860_1_frequency = SRS860_1.frequency
-        if self.use_srs860_2:
-            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
-            self.srs860_2_frequency = SRS860_2.frequency
-        if self.use_MFLI_1:
-            self.MFLI_1_sine_voltage = MFLI_1.sine_amplitude
-            self.MFLI_1_frequency = MFLI_1.frequency
-        if self.use_MFLI_2:
-            self.MFLI_2_sine_voltage = MFLI_2.sine_amplitude
-            self.MFLI_2_frequency = MFLI_2.frequency
-        if self.use_MFLI_3:
-            self.MFLI_3_sine_voltage = MFLI_3.sine_amplitude
-            self.MFLI_3_frequency = MFLI_3.frequency
-        if self.use_srs830_1:
-            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
-            self.srs830_1_frequency = SRS830_1.frequency
-        if self.use_srs830_2:
-            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
-            self.srs830_2_frequency = SRS830_2.frequency
-        if self.use_srs830_3:
-            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
-            self.srs830_3_frequency = SRS830_3.frequency
+        self._capture_metadata()
 
     def getmeas(self, t0):
-        magnet = base.magnet
-        if self.use_magnet:
-            magnet.magnet_field_write_query()
-
-        temperature = read_temperature()
-        vals = [time.time() - t0] + list(temperature)
-
-        if self.use_dual_gate:
-            vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
-                     Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
-        else:
-            vals += [math.nan] * 4
-
-        vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
-        vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
-
-        vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
-        vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
-
-        for use, inst in [(self.use_MFLI_1, MFLI_1), (self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
-            vals += list(inst.read_demod()) if use else [math.nan] * 2
-
-        for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2), (self.use_srs830_3, SRS830_3)]:
-            vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
-
-        if self.use_magnet:
-            vals.append(magnet.magnet_field_read_response())
-        else:
-            vals.append(math.nan)
-
-        return vals
-
-    def smu_choice(self, Gate_name):
-        if Gate_name == 'Gate_1': return Gate_1
-        if Gate_name == 'Gate_2': return Gate_2
-        if Gate_name == 'smua': return Dual_gate.smua
-        if Gate_name == 'smub': return Dual_gate.smub
-        raise ValueError(f"Unknown SMU: {Gate_name}")
-
-    def smu_output(self, Gate, Gate_name):
-        if not Gate.is_output_on():
-            log.info(f"{Gate_name} output was OFF. Turning it ON.")
-            if Gate_name in ['Gate_1', 'Gate_2']:
-                Gate.configure_voltage_source(nplc=1, current=1e-7, auto_range=False)
-            else:
-                Gate.configure_voltage_source(voltage=0, current_limit=110e-9)
-            Gate.output_on()
-
-    def generate_range(self, start, end, step_units):
-        step = abs(step_units / 1000.0)
-        if step == 0: step = 0.001
-        num_points = int(abs(end - start) / step) + 1
-        return np.linspace(start, end, num_points)
+        if self.use_magnet and _is_connected(base.magnet):
+            base.magnet.magnet_field_write_query()
+        return self._read_standard(t0)
 
     def execute(self):
         magnet = base.magnet

@@ -6,18 +6,11 @@ Supports Snake, Forward/Backward, and Hysteresis scan modes.
 Magnet field can be optionally recorded.
 """
 
-from .base import (
-    log, time, math, np,
-    Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
-    magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2,
-    read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
-)
+from .base import *
 from . import base
 
 
-
-class Differential_Resistance_Zurich_AUX_map(Procedure):
+class Differential_Resistance_Zurich_AUX_map(ICEProcedure):
     """
     2D mapping measurement with Gate voltage stepped and AUX voltage swept.
     
@@ -27,7 +20,7 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
     Three scan modes are available for the AUX sweep:
     - Snake: Alternates sweep direction at each gate step
     - Forward/Backward: Full forward then backward sweep at each gate step
-    - Hysteresis: Origin → Start → End → Origin at each gate step
+    - Hysteresis: Origin -> Start -> End -> Origin at each gate step
     """
     
     # --- Parameters ---
@@ -80,137 +73,21 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
     gate_delay = FloatParameter('Delay after gate step (s)', default=5, group_by='mapping', group_condition=True)
     acq_delay = FloatParameter('Acquisition delay (s)', default=0.1)
 
-    # --- Metadata ---
-    MFLI_1_sine_voltage = Metadata("MFLI_1 sine voltage", default=math.nan)
-    MFLI_1_frequency = Metadata("MFLI_1 frequency (Hz)", default=math.nan)
-    MFLI_2_sine_voltage = Metadata("MFLI_2 sine voltage", default=math.nan)
-    MFLI_2_frequency = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
-    MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
-    MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
-    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
-    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
-    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
-    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
-    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
-    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
-    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
-    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
-    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
-    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
-
-    DATA_COLUMNS = BASE_DATA_COLUMNS +['AUX_DC_offset(V)'] + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS 
+    # --- Dynamic column recipe ---
+    _MID_COLUMNS = ['AUX_DC_offset(V)']
+    _LOCKIN_COL_TYPE = 'voltage'
 
     def startup(self):
         """Record instrument metadata at startup."""
-        if self.use_srs860_1:
-            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
-            self.srs860_1_frequency = SRS860_1.frequency
-        if self.use_srs860_2:
-            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
-            self.srs860_2_frequency = SRS860_2.frequency
-        if self.use_MFLI_1:
-            self.MFLI_1_sine_voltage = MFLI_1.sine_amplitude
-            self.MFLI_1_frequency = MFLI_1.frequency
-        if self.use_MFLI_2:
-            self.MFLI_2_sine_voltage = MFLI_2.sine_amplitude
-            self.MFLI_2_frequency = MFLI_2.frequency
-        if self.use_MFLI_3:
-            self.MFLI_3_sine_voltage = MFLI_3.sine_amplitude
-            self.MFLI_3_frequency = MFLI_3.frequency
-        if self.use_srs830_1:
-            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
-            self.srs830_1_frequency = SRS830_1.frequency
-        if self.use_srs830_2:
-            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
-            self.srs830_2_frequency = SRS830_2.frequency
-        if self.use_srs830_3:
-            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
-            self.srs830_3_frequency = SRS830_3.frequency
+        self._capture_metadata()
 
     def getmeas(self, t0):
-        magnet = base.magnet
         """Acquire measurements from all enabled instruments."""
-        temperature = read_temperature()
-        vals = [time.time() - t0] + list(temperature)
-
-        # Magnet field query
-        if self.use_magnet:
-            magnet.magnet_field_write_query()
-
-        # Dual gate measurements
-        if self.use_dual_gate:
-            vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
-                     Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
-        else:
-            vals += [math.nan] * 4
-
-        # Keithley gate measurements
-        vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
-        vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
-
-        if self.use_MFLI_1:
-            auxout = MFLI_1.get_auxout(self.aux_signal)
-            vals += [auxout]
-        else:
-            vals += [math.nan]
-        
-        # Lock-in measurements
-        vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
-        vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
-
-        if self.use_MFLI_1:
-            vals += list(MFLI_1.read_demod())
-        else:
-            vals += [math.nan] * 2
-
-        for use, inst in [(self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
-            vals += list(inst.read_demod()) if use else [math.nan] * 2
-
-        for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2), (self.use_srs830_3, SRS830_3)]:
-            vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
-
-        # Magnet field reading
-        vals.append(magnet.magnet_field_read_response() if self.use_magnet else math.nan)
-        return vals
-
-    def smu_choice(self, name):
-        """Return the SMU object based on name selection."""
-        if name == 'Gate_1':
-            return Gate_1
-        if name == 'Gate_2':
-            return Gate_2
-        if name == 'smua':
-            return Dual_gate.smua
-        if name == 'smub':
-            return Dual_gate.smub
-        raise ValueError(f"Unknown SMU: {name}")
-
-    def smu_output(self, Gate, name):
-        """Enable SMU output with appropriate configuration."""
-        if not Gate.is_output_on():
-            log.info(f"{name} output was OFF. Turning it ON.")
-            if name in ['Gate_1', 'Gate_2']:
-                Gate.configure_voltage_source(nplc=1, current=1e-7, auto_range=False)
-            else:
-                Gate.configure_voltage_source(voltage=0, current_limit=110e-9)
-            Gate.output_on()
-
-    def generate_range(self, start, end, step_units):
-        """Generate a voltage range array from start to end with given step size.
-        
-        Args:
-            start: Start voltage in Volts
-            end: End voltage in Volts  
-            step_units: Step size in millivolts (mV)
-            
-        Returns:
-            numpy array of voltage values
-        """
-        step = abs(step_units / 1000.0)
-        if step == 0:
-            step = 0.001
-        num_points = int(abs(end - start) / step) + 1
-        return np.linspace(start, end, num_points)
+        if self.use_magnet and _is_connected(base.magnet):
+            base.magnet.magnet_field_write_query()
+        # Mid column: MFLI_1 AUX value
+        aux = MFLI_1.get_auxout(self.aux_signal) if (self.use_MFLI_1 and _is_connected(MFLI_1)) else math.nan
+        return self._read_standard(t0, mid_extras=[aux])
 
     def ramp_gate_with_abort(self, gate, target_voltage, step_size_mv=2, delay=0.1):
         """Ramp gate voltage to target using while loop for abort capability.
@@ -222,7 +99,7 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
             gate: The gate SMU object
             target_voltage: Target voltage in Volts
             step_size_mv: Step size in millivolts (default: 2 mV)
-            delay: Delay between steps in seconds (default: 0.1)
+            delay: Delay between steps in seconds (default: 0.1 s)
             
         Returns:
             bool: True if completed, False if aborted
@@ -249,7 +126,6 @@ class Differential_Resistance_Zurich_AUX_map(Procedure):
         return True
 
     def execute(self):
-        magnet = base.magnet
         """Execute the 2D AUX vs Gate mapping measurement."""
         time_0 = time.time()
         log.info("Starting dV/dI AUX map measurement")
@@ -416,9 +292,9 @@ proc_differential_resistance_Zurich_AUX_map = {
         description="2D Gate vs AUX map measurement.\n\n"
                     "Gate voltage is stepped (outer loop) and AUX voltage is swept (inner loop).\n\n"
                     "Scan modes (AUX sweep at each gate step):\n"
-                    "• Snake - Alternates sweep direction at each gate step\n"
-                    "• Forward/Backward - Full forward then backward sweep\n"
-                    "• Hysteresis - Origin → Start → End → Origin\n\n"
+                    "- Snake: Alternates sweep direction at each gate step\n"
+                    "- Forward/Backward: Full forward then backward sweep\n"
+                    "- Hysteresis: Origin -> Start -> End -> Origin\n\n"
                     "AUX output is controlled via MFLI_1.\n"
                     "Magnet field can be optionally recorded.",
         inputs=[

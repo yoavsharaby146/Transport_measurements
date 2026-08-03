@@ -6,7 +6,7 @@ from .base import *
 from . import base
 
 
-class Resistance_gate_sweep_measurement(Procedure):
+class Resistance_gate_sweep_measurement(ICEProcedure):
     Title = Parameter(' RV gate sweep ', default='RV')
     Resistor = Parameter('Resistance/Gain', default='insert resistor size/gain')
     Contacts = Parameter('Contacts ', default='Insert contact numbers')
@@ -32,95 +32,15 @@ class Resistance_gate_sweep_measurement(Procedure):
     use_keithley_1 = BooleanParameter('Use k2450_1',group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2',group_by='devices', default=False)
 
-    # --- Metadata ---
-    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
-    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
-    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
-    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
-    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
-    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
-    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
-    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
-    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
-    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
-    MFLI_1_sine_voltage = Metadata("MFLI_1 sine voltage", default=math.nan)
-    MFLI_1_frequency = Metadata("MFLI_1 frequency (Hz)", default=math.nan)
-    MFLI_2_sine_voltage = Metadata("MFLI_2 sine voltage", default=math.nan)
-    MFLI_2_frequency = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
-    MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
-    MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
-
-    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
-
     def startup(self):
-        if self.use_srs860_1:
-            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
-            self.srs860_1_frequency = SRS860_1.frequency
-        if self.use_srs860_2:
-            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
-            self.srs860_2_frequency = SRS860_2.frequency
-        if self.use_MFLI_1:
-            self.MFLI_1_sine_voltage = MFLI_1.sine_amplitude
-            self.MFLI_1_frequency = MFLI_1.frequency
-        if self.use_MFLI_2:
-            self.MFLI_2_sine_voltage = MFLI_2.sine_amplitude
-            self.MFLI_2_frequency = MFLI_2.frequency
-        if self.use_MFLI_3:
-            self.MFLI_3_sine_voltage = MFLI_3.sine_amplitude
-            self.MFLI_3_frequency = MFLI_3.frequency
-        if self.use_srs830_1:
-            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
-            self.srs830_1_frequency = SRS830_1.frequency
-        if self.use_srs830_2:
-            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
-            self.srs830_2_frequency = SRS830_2.frequency
-        if self.use_srs830_3:
-            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
-            self.srs830_3_frequency = SRS830_3.frequency
+        self._capture_metadata()
 
     def getmeas(self, t0):
-        magnet = base.magnet
-        if self.use_magnet:
-            magnet.magnet_field_write_query()
-
-        temperature = read_temperature()
-        vals = [time.time() - t0] + list(temperature)
-
-        if self.use_dual_gate:
-            vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
-                     Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
-        else:
-            vals += [math.nan] * 4
-
-        vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
-        vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
-
-        vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
-        vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
-
-        for use, inst in [(self.use_MFLI_1, MFLI_1), (self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
-            vals += list(inst.read_demod()) if use else [math.nan] * 2
-
-        for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2), (self.use_srs830_3, SRS830_3)]:
-            vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
-
-        if self.use_magnet:
-            vals.append(magnet.magnet_field_read_response())
-        else:
-            vals.append(math.nan)
-
-        return vals
-
-    def smu_choice(self, Gate_name):
-        if self.smu == 'Gate_1': return Gate_1
-        if self.smu == 'Gate_2': return Gate_2
-        if self.smu == 'smua': return Dual_gate.smua
-        if self.smu == 'smub': return Dual_gate.smub
-        log.error("SMU selection not supported")
-        raise ValueError("Invalid SMU selected")
+        if self.use_magnet and _is_connected(base.magnet):
+            base.magnet.magnet_field_write_query()
+        return self._read_standard(t0)
 
     def execute(self):
-        magnet = base.magnet
         #### Begin of measurement
         log.info(f"starting voltage sweep to {self.target_voltage} V")
         time_0 = time.time()
