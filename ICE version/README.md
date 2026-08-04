@@ -140,8 +140,8 @@ Each procedure is an **`ICEProcedure`** subclass (which itself extends the PyMea
 
 | Procedure | Module | Category | Description |
 |---|---|---|---|
-| **Resistance time measurement** | `resistance_time.py` | Time-based,  | Monitors resistance over time with temperature, magnetic field, and lock-in readings |
-| **Resistance gate sweep** | `resistance_gate_sweep.py` | Gate Sweep,  | Sweeps gate voltage and measures resistance |
+| **Resistance time measurement** | `resistance_time.py` | Time-based  | Monitors resistance over time with temperature, magnetic field, and lock-in readings |
+| **Resistance gate sweep** | `resistance_gate_sweep.py` | Gate Sweep  | Sweeps gate voltage and measures resistance |
 | **Resistance magnet sweep** | `resistance_magnet_sweep.py` | Magnetic Field | Sweeps magnetic field and measures resistance |
 | **Two gate sweep** | `resistance_two_gate_sweep.py` | Gate Sweep | Sweeps two gates simultaneously along a vector |
 | **Two gate map** | `resistance_two_gate_map.py` | 2D Mapping | 2D mapping of two independent gate voltages |
