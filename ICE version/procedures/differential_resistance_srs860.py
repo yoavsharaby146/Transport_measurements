@@ -46,10 +46,10 @@ class Differential_Resistance_SRS860(ICEProcedure):
         self._capture_metadata()
 
     def getmeas(self, t0):
-        if self.use_magnet and _is_connected(base.magnet):
+        if self.use_magnet and base._is_connected(base.magnet):
             base.magnet.magnet_field_write_query()
         # Mid column: SRS860_1 AUX DAC value
-        aux = getattr(SRS860_1, f'dac{self.aux_signal}') if (self.use_srs860_1 and _is_connected(SRS860_1)) else math.nan
+        aux = getattr(SRS860_1, f'dac{self.aux_signal}') if (self.use_srs860_1 and base._is_connected(SRS860_1)) else math.nan
         return self._read_standard(t0, mid_extras=[aux])
 
     def execute(self):

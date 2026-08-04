@@ -46,10 +46,10 @@ class Differential_conductance_Zurich(ICEProcedure):
         self._capture_metadata()
 
     def getmeas(self, t0):
-        if self.use_magnet and _is_connected(base.magnet):
+        if self.use_magnet and base._is_connected(base.magnet):
             base.magnet.magnet_field_write_query()
         # Mid column: DC offset of MFLI_1
-        dc = MFLI_1.dc_offset if (self.use_MFLI_1 and _is_connected(MFLI_1)) else math.nan
+        dc = MFLI_1.dc_offset if (self.use_MFLI_1 and base._is_connected(MFLI_1)) else math.nan
         return self._read_standard(t0, mid_extras=[dc])
 
     def execute(self):

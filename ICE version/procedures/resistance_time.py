@@ -33,7 +33,7 @@ class Resistance_time_measurement(ICEProcedure):
         self._capture_metadata()
 
     def getmeas(self, t0):
-        if self.use_magnet and _is_connected(base.magnet):
+        if self.use_magnet and base._is_connected(base.magnet):
             base.magnet.magnet_field_write_query()
         return self._read_standard(t0)
 
