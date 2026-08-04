@@ -209,8 +209,8 @@ This is a **two-layer model**:
 
 | Session | Connected hardware | Resulting columns |
 |---|---|---|
-| Session #1 | 2× Keithley 2450, 1× SRS860, 1× SRS830 | Temperature + 2 SMU pairs + 2 lock-in pairs + (magnet if connected) |
-| Session #2 | 1× Keithley 2604B (dual), 3× MFLI | Temperature + dual-gate (4 values) + 3 MFLI pairs + (magnet if connected) |
+| Session #1 | 2× Keithley 2450, 1× SRS860, 1× SRS830 | Time + Temperature + 2 SMU pairs + 2 lock-in pairs + (magnet if connected) |
+| Session #2 | 1× Keithley 2604B (dual), 3× MFLI | Time + Temperature + dual-gate (4 values) + 3 MFLI pairs + (magnet if connected) |
 
 > **Self-checks:** Run `python -m procedures.self_check_columns` and `python -m procedures.self_check_runtime` from the `ICE version/` directory to verify column/value alignment across all connection scenarios.
 
