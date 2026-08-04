@@ -164,7 +164,7 @@ class Rt_RV_RH_sequencer_measurement(ICEProcedure):
 proc_Rt_RV_RH_sequencer = {
     "Rt_RV_RH sequencer measurement": dict(
         cls=Rt_RV_RH_sequencer_measurement,
-        category=["Magnetic Field", "Gate Sweep", "Keithley 2450", "Time-based"],
+        category=["Magnetic Field", "Gate Sweep", "Time-based"],
         description="Procedure to sequence between Rt, RV and RH measurements.",
         inputs=['Title', 'Resistor', 'Contacts', 'Gate_contacts', 'Type', 'Target_field','sweep_rate',
                 'Target_voltage', 'step_size', 'smu', 'acq_length', 'devices', 'use_magnet',

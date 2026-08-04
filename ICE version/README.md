@@ -35,7 +35,7 @@ Key capabilities:
 - **Magnetic Field Sweeps** — sweep superconducting magnet field
 - **2D Mapping** — gate × bias, gate × magnetic field, and dual-gate maps
 - **Differential Conductance (dI/dV)** — using SRS860 or Zurich MFLI
-- **Differential Resistance (dV/dI)** — using Zurich MFLI aux output
+- **Differential Resistance (dV/dI)** — using SRS860 Zurich MFLI aux output
 - **Sequenced Measurements** — automated Rt → RV → RH or RV → dV/dI sequences
 
 ---
@@ -79,11 +79,15 @@ ICE version/
     │
     ├── differential_conductance_srs860.py      # dI/dV via SRS860
     ├── differential_conductance_zurich.py      # dI/dV via Zurich MFLI
+    ├── differential_resistance_srs860.py       # dV/dI via SRS860 aux output
     ├── differential_resistance_zurich.py       # dV/dI via Zurich MFLI
     ├── differential_resistance_zurich_AUX_map.py  # dV/dI AUX output mapping
     │
     ├── sequencer_rt_rv_rh.py       # Automated Rt → RV → RH sequence
-    └── sequencer_rv_dvdi.py        # Automated RV → dV/dI sequence
+    ├── sequencer_rv_dvdi.py        # Automated RV → dV/dI sequence
+    │
+    ├── self_check_columns.py       # Column-count verification (8 scenarios)
+    └── self_check_runtime.py       # Runtime value-count verification
 ```
 
 ---
@@ -144,11 +148,12 @@ Each procedure is an **`ICEProcedure`** subclass (which itself extends the PyMea
 | **Resistance gate sweep** | `resistance_gate_sweep.py` | Gate Sweep  | Sweeps gate voltage and measures resistance |
 | **Resistance magnet sweep** | `resistance_magnet_sweep.py` | Magnetic Field | Sweeps magnetic field and measures resistance |
 | **Two gate sweep** | `resistance_two_gate_sweep.py` | Gate Sweep | Sweeps two gates simultaneously along a vector |
-| **Two gate map** | `resistance_two_gate_map.py` | 2D Mapping | 2D mapping of two independent gate voltages |
+| **Two gate map** | `resistance_two_gate_map.py` | 2D Mapping, Gate Sweep | 2D mapping of two independent gate voltages |
 | **Magnet & gate map** | `resistance_magnet_gate_map.py` | Magnetic Field, 2D Mapping | 2D map of magnetic field vs. gate voltage |
 | **Magnet & 2-gate map** | `resistance_magnet_2gate_map.py` | Magnetic Field, 2D Mapping | 2D map of magnetic field vs. dual gate voltages |
 | **Differential conductance (SRS860)** | `differential_conductance_srs860.py` | Tunneling junction | dI/dV measurement using SRS860 lock-in |
 | **Differential conductance (Zurich)** | `differential_conductance_zurich.py` | Tunneling junction | dI/dV measurement using Zurich MFLI |
+| **Differential resistance (SRS860)** | `differential_resistance_srs860.py` | Differential Resistance | dV/dI measurement using SRS860 aux output |
 | **Differential resistance (Zurich)** | `differential_resistance_zurich.py` | Differential Resistance | dV/dI measurement using Zurich MFLI |
 | **Differential resistance AUX map** | `differential_resistance_zurich_AUX_map.py` | Differential Resistance, 2D Mapping | Gate-dependent dV/dI mapping via MFLI aux output |
 | **Rt/RV/RH sequencer** | `sequencer_rt_rv_rh.py` | Time-based, Gate Sweep, Magnetic Field | Automated sequence of Rt, RV, and RH measurements |
@@ -166,7 +171,6 @@ The launcher displays procedures with color-coded category chips:
 | 2D Mapping | Light Purple |
 | Tunneling junction | Light Pink |
 | Differential Resistance | Light Orange |
-
 
 ---
 
