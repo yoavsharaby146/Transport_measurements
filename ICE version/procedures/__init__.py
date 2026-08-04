@@ -37,8 +37,7 @@ CATAGORIES = {
     "Magnetic Field": "#F6F9BE",
     "2D Mapping": "#EABEF9",
     "Tunneling junction": "#F9BEC2",
-    "Differential Resistance": "#F9E3BE",
-    "Keithley 2450": "#FCBBD5"
+    "Differential Resistance": "#F9E3BE"
 }
 
 # Build the PROCEDURES dictionary

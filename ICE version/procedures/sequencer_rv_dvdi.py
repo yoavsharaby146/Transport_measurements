@@ -131,7 +131,7 @@ class RV_dV_dI_sequencer_measurement(ICEProcedure):
 proc_RV_dV_dI_sequencer = {
     "RV dV_dI sequencer measurement": dict(
         cls=RV_dV_dI_sequencer_measurement,
-        category=["Differential Resistance", "Gate Sweep", "Keithley 2450"],
+        category=["Differential Resistance", "Gate Sweep"],
         description="Sequencer for RV and dV/dI measurements.",
         inputs=['Title', 'Resistor', 'Contacts', 'Gate_contacts', 'acq_delay', 'Type', 'scan_mode',
                 'Target_voltage', 'step_size', 'smu', 'devices', 'use_magnet', 'use_MFLI_1',

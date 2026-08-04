@@ -109,7 +109,7 @@ class Launcher(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Procedure Launcher")
-        self.resize(800, 400)
+        self.resize(850, 400)
         self.setMinimumSize(400, 350)
         central = QtWidgets.QWidget(self)
         self.setCentralWidget(central)

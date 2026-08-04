@@ -60,7 +60,7 @@ class Resistance_time_measurement(ICEProcedure):
 proc_resistance_time = {
 "Resistance time measurement": dict(
         cls=Resistance_time_measurement,
-        category=["Time-based","Keithley 2450"],
+        category="Time-based",
         description="Measurement of resistance over a specified time period.\n"
                     "Monitors temperature,magnetic field, and various lock-in amplifier readings.",
         inputs=[

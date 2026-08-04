@@ -99,7 +99,7 @@ class Resistance_two_gate_scan_sweep_measurement(ICEProcedure):
 proc_resistance_two_gate_sweep = {
 "Resistance two gate sweep measurement": dict(
         cls=Resistance_two_gate_scan_sweep_measurement,
-        category=["Gate Sweep"],
+        category="Gate Sweep",
     description="Sweeps two gates simultaneously along a line defined by Start/End points for each gate.\n"
                 "Useful for Carrier Density/Displacement Field scans.",
         inputs=[
