@@ -35,7 +35,7 @@ Key capabilities:
 - **Magnetic Field Sweeps** — sweep superconducting magnet field
 - **2D Mapping** — gate × bias, gate × magnetic field, and dual-gate maps
 - **Differential Conductance (dI/dV)** — using SRS860 or Zurich MFLI
-- **Differential Resistance (dV/dI)** — using SRS860 Zurich MFLI aux output
+- **Differential Resistance (dV/dI)** — using SRS860 or Zurich MFLI aux output
 - **Sequenced Measurements** — automated Rt → RV → RH or RV → dV/dI sequences
 
 ---
