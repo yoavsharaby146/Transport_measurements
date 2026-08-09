@@ -78,12 +78,12 @@ class InstrumentConfig:
     use_mfli_1: bool = False
     mfli_1_host: str = ""  # e.g. "192.168.93.134" or "localhost"
     mfli_1_port: int = 8004
-    mfli_1_dev: str = ""
+    mfli_1_dev: str = ""   # e.g. "dev5985"
 
     use_mfli_2: bool = False
     mfli_2_host: str = ""  # e.g. "192.168.93.134" or "localhost"
     mfli_2_port: int = 8004
-    mfli_2_dev: str = ""
+    mfli_2_dev: str = ""   #e.g. "dev32114"
 
     use_mfli_3: bool = False
     mfli_3_host: str = ""  # e.g. "192.168.93.134" or "localhost"
