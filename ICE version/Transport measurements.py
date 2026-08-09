@@ -25,6 +25,7 @@ pg.setConfigOption("useOpenGL", True)
 from procedures import (
     # Utilities
     _as_cat_list, _proc_matches, _rebind_instruments_from_configuration,
+    filter_inputs_by_connection,
     # Procedure classes
     Resistance_time_measurement,
     Resistance_gate_sweep_measurement,
@@ -70,9 +71,13 @@ class GenericWindow(ManagedDockWindow):
         spec = PROCEDURES[spec_name]
 
         # 1. Define the base arguments that every window needs
+        # Filter inputs: hide checkboxes for instruments not connected this session
+        import configuration as _cfg
+        filtered_inputs = filter_inputs_by_connection(spec['inputs'], _cfg)
+
         kwargs = {
             "procedure_class": spec['cls'],
-            "inputs": spec['inputs'],
+            "inputs": filtered_inputs,
             "displays": spec['displays'],
             "x_axis": spec.get('x'),
             "y_axis": spec.get('y'),
@@ -104,7 +109,7 @@ class Launcher(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Procedure Launcher")
-        self.resize(800, 400)
+        self.resize(850, 400)
         self.setMinimumSize(400, 350)
         central = QtWidgets.QWidget(self)
         self.setCentralWidget(central)

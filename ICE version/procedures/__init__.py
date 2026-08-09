@@ -7,9 +7,11 @@ Each procedure class is in its own module for easier maintenance.
 from .base import (
     log, time, math, np,
     Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
+    ICEProcedure,
     magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2,
     read_temperature, _rebind_instruments_from_configuration,
     _as_cat_list, _proc_matches,
+    filter_inputs_by_connection,
 )
 
 # Import procedure classes and their registration dicts
@@ -35,8 +37,7 @@ CATAGORIES = {
     "Magnetic Field": "#F6F9BE",
     "2D Mapping": "#EABEF9",
     "Tunneling junction": "#F9BEC2",
-    "Differential Resistance": "#F9E3BE",
-    "Keithley 2450": "#FCBBD5"
+    "Differential Resistance": "#F9E3BE"
 }
 
 # Build the PROCEDURES dictionary
@@ -61,9 +62,11 @@ __all__ = [
     # Base utilities
     'log', 'time', 'math', 'np',
     'Procedure', 'BooleanParameter', 'IntegerParameter', 'FloatParameter', 'Parameter', 'Metadata', 'ListParameter',
+    'ICEProcedure',
     'magnet', 'MFLI_1', 'MFLI_2', 'MFLI_3', 'SRS860_1', 'SRS860_2', 'SRS830_1', 'SRS830_2', 'SRS830_3', 'Dual_gate', 'Gate_1', 'Gate_2',
     'read_temperature', '_rebind_instruments_from_configuration',
     '_as_cat_list', '_proc_matches',
+    'filter_inputs_by_connection',
     # Procedure classes
     'Resistance_time_measurement',
     'Resistance_gate_sweep_measurement',
