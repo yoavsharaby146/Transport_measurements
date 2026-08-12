@@ -120,6 +120,6 @@ proc_differential_conductance_Zurich = {
         ],
         displays=['Title', 'scan_mode', 'dc_offset_setpoint', 'dc_offset_step'],
         x=['DC_offset(V)'],
-        y=['MFLI_Lockin_1_Current_X(A)', 'MFLI_Lockin_1_Current_Y(A)'],
+        y=['MFLI_Lockin_1_Current_X(A)', 'MFLI_Lockin_1_Current_Y(A)', 'time(s)'],
     ),
 }

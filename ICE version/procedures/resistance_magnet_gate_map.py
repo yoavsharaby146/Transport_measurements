@@ -182,6 +182,6 @@ proc_resistance_magnet_gate_map = {
         'field_start', 'field_end'
     ],
         x = 'time(s)',
-        y = ['field(T)','SMUa(V)']
+        y = ['field(T)', 'time(s)']
     ),
 }

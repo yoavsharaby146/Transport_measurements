@@ -317,6 +317,6 @@ proc_differential_resistance_Zurich_AUX_map = {
             'aux_start', 'aux_end',
         ],
         x='time(s)',
-        y=['AUX_DC_offset(V)', 'Gate_1_voltage(V)'],
+        y=['AUX_DC_offset(V)', 'Gate_1_voltage(V)', 'time(s)'],
     ),
 }

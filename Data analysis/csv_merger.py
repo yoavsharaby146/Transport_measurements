@@ -115,7 +115,7 @@ def main():
         return
 
     # Step 3: Concatenate all
-    merged = pl.concat(dfs)
+    merged = pl.concat(dfs, how = "vertical_relaxed")
     print(f"\nMerged shape (before sort): {merged.shape}")
 
     # Step 4: Let user pick the sort column

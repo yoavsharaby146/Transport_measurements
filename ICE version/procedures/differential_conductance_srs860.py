@@ -121,6 +121,6 @@ proc_differential_conductance_SRS860 = {
         ],
         displays=['Title', 'scan_mode', 'dc_offset_setpoint', 'dc_offset_step'],
         x=['DC_offset(V)'],
-        y=['Lockin_Current_SRS860_1_X(A)', 'Lockin_Current_SRS860_1_Y(A)'],
+        y=['Lockin_Current_SRS860_1_X(A)', 'Lockin_Current_SRS860_1_Y(A)', 'time(s)'],
     ),
 }

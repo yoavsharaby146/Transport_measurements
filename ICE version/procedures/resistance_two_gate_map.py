@@ -168,6 +168,6 @@ proc_resistance_two_gate_map = {
             'fast_start', 'fast_end', 'fast_step', 'fast_smu'
         ],
         x=['time(s)'],
-        y=['probe_temp(K)', 'SMUa(V)'],
+        y=['probe_temp(K)', 'time(s)'],
     ),
 }

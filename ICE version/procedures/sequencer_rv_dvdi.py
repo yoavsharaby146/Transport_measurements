@@ -140,7 +140,7 @@ proc_RV_dV_dI_sequencer = {
                 'use_dual_gate', 'use_keithley_1', 'use_keithley_2'],
         displays=['Type', 'Target_voltage', 'scan_mode', 'aux_Target'],
         x=['AUX_DC_offset(V)'],
-        y=['MFLI_Lockin_1_Voltage_X(V)', 'MFLI_Lockin_1_Voltage_Y(V)'],
+        y=['MFLI_Lockin_1_Voltage_X(V)', 'MFLI_Lockin_1_Voltage_Y(V)', 'time(s)'],
         sequencer=True,
         sequencer_inputs=['Type', 'Target_voltage', 'step_size', 'smu', 'scan_mode', 'aux_Target', 'aux_step'],
     ),
