@@ -129,7 +129,7 @@ class Resistance_magnet_and_gate_mapping_measurement(ICEProcedure):
 
             # --- CASE 2: FORWARD/BACKWARD MODE ---
             elif self.scan_mode == 'Forward/Backward':
-                log.info("Forward/Backward scanning")
+                log.info(f"Forward scanning at B={field}T")
                 # Part A: Forward
                 for g_volt in gate_range_fwd:
                     gate.ramp_voltage(g_volt, 5, 0.01)
@@ -141,6 +141,7 @@ class Resistance_magnet_and_gate_mapping_measurement(ICEProcedure):
                         log.warning("User stopped measurement")
                         return
                 # Part B: Backward
+                log.info(f"Backward scanning at B={field}T")
                 for g_volt in gate_range_bwd:
                     gate.ramp_voltage(g_volt, 5, 0.01)
                     time.sleep(self.acq_delay)

@@ -96,6 +96,7 @@ class Resistance_two_gate_mapping_measurement(ICEProcedure):
         for i, slow_v in enumerate(slow_range):
             # To avoid voltage spikes, ramp slower for larger slow gate steps sizes.
             #  Threshold of 50 mV is arbitrary and can be adjusted based on the specific device and requirements.
+            log.info(f"Sweeping at Slow={slow_v}V")
             if self.slow_step > 50:
                 slow_gate.voltage_ramping(slow_v, 2, 0.001)
             else:
@@ -116,6 +117,7 @@ class Resistance_two_gate_mapping_measurement(ICEProcedure):
                         return
 
             elif self.scan_mode == 'Forward/Backward':
+                log.info(f"Forward sweep at Slow={slow_v}V")
                 for fast_v in fast_range_forward:
                     fast_gate.ramp_voltage(fast_v, 5, 0.001)
                     time.sleep(self.short_delay)
@@ -128,6 +130,7 @@ class Resistance_two_gate_mapping_measurement(ICEProcedure):
                         return
 
                 for fast_v in fast_range_backward:
+                    log.info(f"Backward sweep at Slow={slow_v}V")
                     fast_gate.ramp_voltage(fast_v, 2, 0.001)
                     time.sleep(self.short_delay)
                     data = self.getmeas(time_0)
