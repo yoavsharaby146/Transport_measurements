@@ -121,7 +121,7 @@ proc_differential_resistance_Zurich = {
         ],
         displays=[
             'Title', 'scan_mode', 'aux_Target'],
-        x=['AUX_DC_offset(V)'],
-        y=['MFLI_Lockin_1_Voltage_X(V)', 'MFLI_Lockin_1_Voltage_Y(V)', 'time(s)'],
+        x=['time(s)'],
+        y=['time(s)', 'time(s)'],
     ),
 }

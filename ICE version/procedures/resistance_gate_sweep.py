@@ -114,6 +114,6 @@ proc_resistance_gate = {
             'Title',
             'target_voltage', 'step_size'],
         x=['time(s)'],
-        y=['probe_temp(K)', 'time(s)']
+        y=['time(s)', 'time(s)']
     ),
 }

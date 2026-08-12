@@ -181,7 +181,7 @@ proc_resistance_magnet_gate_map = {
         'smu', 'gate_start', 'gate_end',
         'field_start', 'field_end'
     ],
-        x = 'time(s)',
-        y = ['field(T)', 'time(s)']
+        x = ['time(s)'],
+        y = ['time(s)', 'time(s)']
     ),
 }

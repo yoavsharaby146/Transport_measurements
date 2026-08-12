@@ -134,6 +134,6 @@ proc_resistance_magnet = {
             'Title',
             'Target_field'],
         x=['time(s)'],
-        y=['probe_temp(K)', 'field(T)', 'time(s)'],
+        y=['time(s)', 'time(s)'],
     ),
 }

@@ -77,6 +77,6 @@ proc_resistance_time = {
             'Title',
             'acq_delay', 'acq_length'],
         x = ['time(s)'],
-        y =  ['probe_temp(K)', 'VTI_temp(K)', 'time(s)']
+        y =  ['time(s)', 'time(s)']
     ),
 }

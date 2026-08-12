@@ -121,7 +121,7 @@ proc_resistance_two_gate_sweep = {
             'smu_2', "smu_2_sp1", "smu_2_sp2",
             'smu_points',
         ],
-        x='time(s)',
-        y=['probe_temp(K)', 'time(s)']
+        x=['time(s)'],
+        y=['time(s)', 'time(s)']
     ),
 }

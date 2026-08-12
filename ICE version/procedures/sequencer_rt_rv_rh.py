@@ -172,7 +172,7 @@ proc_Rt_RV_RH_sequencer = {
                 'use_dual_gate', 'use_keithley_1', 'use_keithley_2', 'acq_delay'],
         displays=['Type','Target_field', 'sweep_rate','smu','Target_voltage','step_size','acq_length','acq_delay'],
         x=['time(s)'],
-        y=['probe_temp(K)', 'field(T)', 'time(s)'],
+        y=['time(s)', 'time(s)'],
         sequencer=True,
         sequencer_inputs=['Type', 'Target_field', 'sweep_rate', 'use_magnet', 'Target_voltage', 'step_size', 'smu', 'acq_length','acq_delay'],
     ),
