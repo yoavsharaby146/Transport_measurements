@@ -4664,7 +4664,12 @@ class InteractivePlotter:
         return [d['distance'] for d in profile]
 
     def _show_all_profiles(self):
-        """Show a popup with all line profiles overlaid, with interactive legend."""
+        """Show a popup with all line profiles overlaid, with interactive legend.
+
+        The profile plot is fully editable via the "🎨 Format Profile" button
+        (labels, ranges, ticks, fonts, grid, legend) using local Tk variables
+        scoped to this popup — they do NOT affect the main window's settings.
+        """
         if not self._cmap_completed_lines:
             messagebox.showinfo("Info", "No lines drawn yet. Draw a line on the color map first.")
             return
@@ -4675,49 +4680,152 @@ class InteractivePlotter:
 
         popup = tk.Toplevel(self.root)
         popup.title("Line Profiles — All Lines")
-        popup.geometry("850x600")
+        popup.geometry("900x650")
         popup.transient(self.root)
+
+        # --- Profile format state: LOCAL Tk variables (do not touch self.*) ---
+        pfs = {
+            'title': tk.StringVar(value="Line Profiles (Z vs Distance)" if not use_position
+                                  else "Line Profiles (Z vs Position)"),
+            'xlabel': tk.StringVar(value="Distance along line" if not use_position
+                                  else "Position along line (X / Y)"),
+            'ylabel': tk.StringVar(value=self.v_zlabel.get() or self.z_combo.get() or "Z Value"),
+            'show_legend': tk.BooleanVar(value=True),
+            'x_min': tk.StringVar(), 'x_max': tk.StringVar(),
+            'y_min': tk.StringVar(), 'y_max': tk.StringVar(),
+            'x_maj': tk.StringVar(), 'y_maj': tk.StringVar(),
+            'x_min_div': tk.StringVar(), 'y_min_div': tk.StringVar(),
+            'font_fam': tk.StringVar(value="Arial"),
+            't_size': tk.StringVar(value="13"),
+            'l_size': tk.StringVar(value="11"),
+            'tick_size': tk.StringVar(value="10"),
+            'leg_size': tk.StringVar(value="10"),
+            'show_major_grid': tk.BooleanVar(value=True),
+            'show_minor_grid': tk.BooleanVar(value=False),
+            'grid_alpha': tk.StringVar(value="0.3"),
+            'grid_ls': tk.StringVar(value="-"),
+            'grid_lw': tk.StringVar(value="0.5"),
+            'legend_cols': tk.StringVar(value="1"),
+            'legend_pos': tk.StringVar(value="Best"),
+        }
 
         fig_profile = Figure(figsize=(8, 4.5), dpi=100)
         ax_profile = fig_profile.add_subplot(111)
+        canvas_profile = CanvasTkAgg(fig_profile, master=popup)
 
         plotted_lines = []
         plotted_labels = []
 
-        for line_data in self._cmap_completed_lines:
-            profile = line_data.get('profile_data', [])
-            if not profile:
-                continue
-            x_vals = self._profile_xvalues(line_data)
-            z_vals = [d['z'] for d in profile]
-            color = line_data.get('color', 'blue')
-            name = line_data.get('name', 'Line')
-            ls = line_data.get('linestyle', '-')
-            lw = line_data.get('width', 1.5)
-            ln, = ax_profile.plot(x_vals, z_vals, color=color, linestyle=ls, linewidth=lw, label=name)
-            plotted_lines.append(ln)
-            plotted_labels.append(name)
+        def _fval(var, default=None):
+            try:
+                v = var.get().strip()
+                return float(v) if v else default
+            except Exception:
+                return default
 
-        if use_position:
-            ax_profile.set_xlabel("Position along line (X / Y)", fontsize=11)
-            ax_profile.set_title("Line Profiles (Z vs Position)", fontsize=13, fontweight='bold')
-        else:
-            ax_profile.set_xlabel("Distance along line", fontsize=11)
-            ax_profile.set_title("Line Profiles (Z vs Distance)", fontsize=13, fontweight='bold')
-        ax_profile.set_ylabel(self.v_zlabel.get() or self.z_combo.get() or "Z Value", fontsize=11)
-        ax_profile.grid(True, alpha=0.3)
-        
-        # Add interactive legend
-        if plotted_lines:
-            legend = ax_profile.legend(plotted_lines, plotted_labels, loc='best',
-                                       prop={'size': 10})
-            legend.set_picker(10)
-        
-        fig_profile.tight_layout()
-        
-        canvas_profile = CanvasTkAgg(fig_profile, master=popup)
+        def redraw_profile():
+            """Re-render the profile axes from the local pfs settings + line data."""
+            ax_profile.clear()
+            plotted_lines.clear()
+            plotted_labels.clear()
+
+            for line_data in self._cmap_completed_lines:
+                profile = line_data.get('profile_data', [])
+                if not profile:
+                    continue
+                x_vals = self._profile_xvalues(line_data)
+                z_vals = [d['z'] for d in profile]
+                color = line_data.get('color', 'blue')
+                name = line_data.get('name', 'Line')
+                ls = line_data.get('linestyle', '-')
+                lw = line_data.get('width', 1.5)
+                ln, = ax_profile.plot(x_vals, z_vals, color=color, linestyle=ls,
+                                      linewidth=lw, label=name)
+                plotted_lines.append(ln)
+                plotted_labels.append(name)
+
+            font = pfs['font_fam'].get()
+            t_sz = _fval(pfs['t_size'], 13)
+            l_sz = _fval(pfs['l_size'], 11)
+            tick_sz = _fval(pfs['tick_size'], 10)
+            leg_sz = _fval(pfs['leg_size'], 10)
+
+            ax_profile.set_title(pfs['title'].get(), fontsize=t_sz, fontweight='bold', fontname=font)
+            ax_profile.set_xlabel(pfs['xlabel'].get(), fontsize=l_sz, fontname=font)
+            ax_profile.set_ylabel(pfs['ylabel'].get(), fontsize=l_sz, fontname=font)
+            ax_profile.tick_params(labelsize=tick_sz)
+
+            # Ranges
+            xmin = _fval(pfs['x_min'])
+            xmax = _fval(pfs['x_max'])
+            ymin = _fval(pfs['y_min'])
+            ymax = _fval(pfs['y_max'])
+            if xmin is not None: ax_profile.set_xlim(left=xmin)
+            if xmax is not None: ax_profile.set_xlim(right=xmax)
+            if ymin is not None: ax_profile.set_ylim(bottom=ymin)
+            if ymax is not None: ax_profile.set_ylim(top=ymax)
+
+            # Major tick step
+            x_maj = _fval(pfs['x_maj'])
+            y_maj = _fval(pfs['y_maj'])
+            if x_maj and x_maj > 0:
+                ax_profile.xaxis.set_major_locator(ticker.MultipleLocator(x_maj))
+            if y_maj and y_maj > 0:
+                ax_profile.yaxis.set_major_locator(ticker.MultipleLocator(y_maj))
+
+            # Minor divisions
+            try:
+                x_md = int(float(pfs['x_min_div'].get()))
+            except Exception:
+                x_md = 0
+            try:
+                y_md = int(float(pfs['y_min_div'].get()))
+            except Exception:
+                y_md = 0
+            if x_md > 1:
+                ax_profile.xaxis.set_minor_locator(ticker.AutoMinorLocator(x_md))
+            if y_md > 1:
+                ax_profile.yaxis.set_minor_locator(ticker.AutoMinorLocator(y_md))
+
+            # Grid
+            ga = _fval(pfs['grid_alpha'], 0.3)
+            gls = pfs['grid_ls'].get() or '-'
+            glw = _fval(pfs['grid_lw'], 0.5)
+            if pfs['show_major_grid'].get():
+                ax_profile.grid(True, which='major', alpha=ga, linestyle=gls, linewidth=glw)
+            else:
+                ax_profile.grid(False, which='major')
+            if pfs['show_minor_grid'].get():
+                ax_profile.grid(True, which='minor', alpha=ga * 0.7, linestyle=gls, linewidth=glw * 0.7)
+            else:
+                ax_profile.grid(False, which='minor')
+
+            # Legend
+            if pfs['show_legend'].get() and plotted_lines:
+                loc_map = {
+                    "Best": "best", "Upper Right": "upper right", "Upper Left": "upper left",
+                    "Lower Right": "lower right", "Lower Left": "lower left",
+                    "Center": "center", "Outside Right": "center left",
+                }
+                loc = loc_map.get(pfs['legend_pos'].get(), "best")
+                try:
+                    ncol = int(pfs['legend_cols'].get() or 1)
+                except Exception:
+                    ncol = 1
+                bbox = (1.02, 0.5) if pfs['legend_pos'].get() == "Outside Right" else None
+                leg = ax_profile.legend(plotted_lines, plotted_labels, loc=loc, ncol=ncol,
+                                        bbox_to_anchor=bbox,
+                                        prop={'size': leg_sz, 'family': font})
+                leg.set_picker(10)
+
+            fig_profile.tight_layout()
+            canvas_profile.draw_idle()
+
         canvas_profile.draw()
         canvas_profile.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Initial draw (applies pfs defaults)
+        redraw_profile()
 
         # Matplotlib navigation toolbar (zoom/pan/save/home) — same library as the main plot
         from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk as ProfileToolbar
@@ -4744,38 +4852,50 @@ class InteractivePlotter:
                         text.set_alpha(1.0 if not vis else 0.3)
                         canvas_profile.draw_idle()
                     break
-        
+
         canvas_profile.mpl_connect('pick_event', on_legend_pick)
-        
+
         # Info label
         total_pts = sum(len(ld.get('profile_data', [])) for ld in self._cmap_completed_lines)
         info_frame = ttk.Frame(popup)
         info_frame.pack(fill='x', padx=10, pady=2)
         ttk.Label(info_frame, text=f"{len(self._cmap_completed_lines)} line(s), {total_pts} total sampled points. Click legend to toggle.",
                   font=('Arial', 9), foreground='gray').pack(side='left')
-        
+
         # Button frame
         btn_frame = ttk.Frame(popup)
         btn_frame.pack(fill='x', padx=10, pady=5)
-        
-        def export_all_csv():
-            filepath = filedialog.asksaveasfilename(
-                parent=popup, defaultextension=".csv",
-                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
-                title="Export All Line Profiles")
-            if not filepath:
+
+        def export_per_line_csv():
+            """Export one CSV file per line into a user-chosen folder."""
+            folder = filedialog.askdirectory(
+                parent=popup, title="Select Folder for Per-Line CSV Export")
+            if not folder:
                 return
+            count = 0
+            used_names = set()
             try:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write("Line,Distance,X,Y,Z\n")
-                    for ld in self._cmap_completed_lines:
-                        name = ld.get('name', 'Line')
+                for ld in self._cmap_completed_lines:
+                    name = ld.get('name', 'Line')
+                    # Sanitize for filesystem
+                    safe = re.sub(r'[<>:"/\\|?*]', '_', name).strip() or 'Line'
+                    # Avoid collisions
+                    fname = safe
+                    n = 1
+                    while fname.lower() in used_names:
+                        fname = f"{safe}_{n}"
+                        n += 1
+                    used_names.add(fname.lower())
+                    fpath = os.path.join(folder, f"{fname}.csv")
+                    with open(fpath, 'w', encoding='utf-8') as f:
+                        f.write("Distance,X,Y,Z\n")
                         for d in ld.get('profile_data', []):
-                            f.write(f"{name},{d['distance']:.6g},{d['x']:.6g},{d['y']:.6g},{d['z']:.6g}\n")
-                messagebox.showinfo("Exported", f"Data exported to:\n{filepath}", parent=popup)
+                            f.write(f"{d['distance']:.6g},{d['x']:.6g},{d['y']:.6g},{d['z']:.6g}\n")
+                    count += 1
+                messagebox.showinfo("Exported", f"Exported {count} file(s) to:\n{folder}", parent=popup)
             except Exception as e:
                 messagebox.showerror("Export Error", str(e), parent=popup)
-        
+
         def export_plot():
             filepath = filedialog.asksaveasfilename(
                 parent=popup, defaultextension=".svg",
@@ -4787,11 +4907,128 @@ class InteractivePlotter:
                     messagebox.showinfo("Exported", f"Plot saved to:\n{filepath}", parent=popup)
                 except Exception as e:
                     messagebox.showerror("Error", str(e), parent=popup)
-        
-        ttk.Button(btn_frame, text="📊 Export All CSV", command=export_all_csv).pack(side='left', expand=True, fill='x', padx=3)
+
+        ttk.Button(btn_frame, text="🎨 Format Profile",
+                   command=lambda: self._open_profile_format_dialog(popup, pfs, redraw_profile)
+                   ).pack(side='left', expand=True, fill='x', padx=3)
+        ttk.Button(btn_frame, text="📊 Export CSV (per line)", command=export_per_line_csv).pack(side='left', expand=True, fill='x', padx=3)
         ttk.Button(btn_frame, text="🖼 Export Plot", command=export_plot).pack(side='left', expand=True, fill='x', padx=3)
         ttk.Button(btn_frame, text="Close", command=popup.destroy).pack(side='left', expand=True, fill='x', padx=3)
-    
+
+    def _open_profile_format_dialog(self, popup, pfs, redraw_profile):
+        """Open a tabbed dialog to edit the profile plot's appearance.
+
+        Args:
+            popup: the profile Toplevel window.
+            pfs: dict of local Tk variables controlling the profile plot.
+            redraw_profile: closure that re-renders ax_profile from pfs.
+        """
+        d, notebook, main_container, btn_container = self._create_scrollable_tabbed_dialog(
+            popup, "Format Profile",
+            width_pct=0.40, height_pct=0.80, max_width=550, max_height=650,
+            min_width=450, min_height=500
+        )
+
+        def add_entry(parent, txt, var, width=15):
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            ttk.Label(f, text=txt, width=width).pack(side='left')
+            ttk.Entry(f, textvariable=var).pack(side='right', expand=True, fill='x')
+
+        # ============================================
+        # TAB 1: Labels & Title
+        # ============================================
+        tab_text = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_text, text="Labels & Title")
+
+        ttk.Label(tab_text, text="Profile Text", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_text, "Title:", pfs['title'])
+        add_entry(tab_text, "X Label:", pfs['xlabel'])
+        add_entry(tab_text, "Y Label:", pfs['ylabel'])
+
+        ttk.Separator(tab_text, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_text, text="Legend", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Checkbutton(tab_text, text="Show Legend", variable=pfs['show_legend']).pack(anchor='w', pady=2)
+
+        lc_frame = ttk.Frame(tab_text)
+        lc_frame.pack(fill='x', pady=2)
+        ttk.Label(lc_frame, text="Columns:", width=12).pack(side='left')
+        ttk.Combobox(lc_frame, textvariable=pfs['legend_cols'],
+                     values=["1", "2", "3", "4"], width=6, state='readonly').pack(side='left', padx=4)
+        ttk.Label(lc_frame, text="Position:").pack(side='left', padx=(8, 0))
+        ttk.Combobox(lc_frame, textvariable=pfs['legend_pos'],
+                     values=["Best", "Upper Right", "Upper Left", "Lower Right", "Lower Left",
+                             "Center", "Outside Right"],
+                     width=14, state='readonly').pack(side='left', padx=4)
+
+        # ============================================
+        # TAB 2: Ranges & Ticks
+        # ============================================
+        tab_rt = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_rt, text="Ranges & Ticks")
+
+        ttk.Label(tab_rt, text="Axis Ranges (blank = auto)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_rt, "X Min:", pfs['x_min'])
+        add_entry(tab_rt, "X Max:", pfs['x_max'])
+        add_entry(tab_rt, "Y Min:", pfs['y_min'])
+        add_entry(tab_rt, "Y Max:", pfs['y_max'])
+
+        ttk.Separator(tab_rt, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rt, text="Major Tick Step (blank = auto)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_rt, "X Major:", pfs['x_maj'])
+        add_entry(tab_rt, "Y Major:", pfs['y_maj'])
+
+        ttk.Separator(tab_rt, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rt, text="Minor Divisions (0/blank = auto)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_rt, "X Minor Divs:", pfs['x_min_div'])
+        add_entry(tab_rt, "Y Minor Divs:", pfs['y_min_div'])
+
+        # ============================================
+        # TAB 3: Fonts & Grid
+        # ============================================
+        tab_fg = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_fg, text="Fonts & Grid")
+
+        ttk.Label(tab_fg, text="Fonts", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ff_frame = ttk.Frame(tab_fg)
+        ff_frame.pack(fill='x', pady=2)
+        ttk.Label(ff_frame, text="Font Family:", width=15).pack(side='left')
+        from matplotlib.font_manager import fontManager
+        available_fonts = sorted(set([f.name for f in fontManager.ttflist]))
+        ttk.Combobox(ff_frame, textvariable=pfs['font_fam'], values=available_fonts, width=22).pack(side='left', padx=4)
+
+        add_entry(tab_fg, "Title Size:", pfs['t_size'])
+        add_entry(tab_fg, "Label Size:", pfs['l_size'])
+        add_entry(tab_fg, "Tick Size:", pfs['tick_size'])
+        add_entry(tab_fg, "Legend Size:", pfs['leg_size'])
+
+        ttk.Separator(tab_fg, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_fg, text="Grid", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        g_frame = ttk.Frame(tab_fg)
+        g_frame.pack(fill='x', pady=2)
+        ttk.Checkbutton(g_frame, text="Major Grid", variable=pfs['show_major_grid']).pack(side='left', padx=5)
+        ttk.Checkbutton(g_frame, text="Minor Grid", variable=pfs['show_minor_grid']).pack(side='left', padx=5)
+
+        add_entry(tab_fg, "Grid Alpha:", pfs['grid_alpha'])
+        add_entry(tab_fg, "Grid Width:", pfs['grid_lw'])
+        gls_frame = ttk.Frame(tab_fg)
+        gls_frame.pack(fill='x', pady=2)
+        ttk.Label(gls_frame, text="Grid Style:", width=15).pack(side='left')
+        ttk.Combobox(gls_frame, textvariable=pfs['grid_ls'],
+                     values=['-', '--', ':', '-.'], width=8, state='readonly').pack(side='left', padx=2)
+
+        # ============================================
+        # Button frame (pinned)
+        # ============================================
+        btn_width = 12
+        ttk.Button(btn_container, text="Apply", command=redraw_profile, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="OK",
+                   command=lambda: [redraw_profile(), d.destroy()], width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(btn_container, text="Cancel", command=d.destroy, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+
     def _open_line_config_dialog(self):
         """Open dialog to change line colors, names, types, and widths."""
         if not self._cmap_completed_lines:
