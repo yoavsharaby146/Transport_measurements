@@ -128,9 +128,9 @@ class Resistance_two_gate_mapping_measurement(ICEProcedure):
                     if self.should_stop():
                         log.warning("User stopped measurement")
                         return
-
+                    
+                log.info(f"Backward sweep at Slow={slow_v}V")
                 for fast_v in fast_range_backward:
-                    log.info(f"Backward sweep at Slow={slow_v}V")
                     fast_gate.ramp_voltage(fast_v, 2, 0.001)
                     time.sleep(self.short_delay)
                     data = self.getmeas(time_0)
