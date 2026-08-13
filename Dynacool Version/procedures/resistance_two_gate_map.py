@@ -3,15 +3,21 @@ Resistance two gate mapping measurement procedure.
 """
 from .base import *
 from . import base
-class Resistance_two_gate_mapping_measurement(Procedure):
+
+
+class Resistance_two_gate_mapping_measurement(DynacoolProcedure):
     # --- Parameters ---
     Title = Parameter('RVV measurement', default='RVV')
     Resistor = Parameter('Resistance/Gain', default='insert resistor size/gain')
     Contacts = Parameter('Contact numbers', default='Insert contact numbers')
     Gate_contacts = Parameter('Gate contacts', default='insert gate contacts')
+
     # --- Hardware Selection ---
     devices = BooleanParameter('Devices in use', default=False)
     use_magnet = BooleanParameter('Use Magnet', group_by='devices', default=False)
+    use_MFLI_1 = BooleanParameter('use_MFLI_1', group_by='devices', default=False)
+    use_MFLI_2 = BooleanParameter('use_MFLI_2', group_by='devices', default=False)
+    use_MFLI_3 = BooleanParameter('use_MFLI_3', group_by='devices', default=False)
     use_srs860_1 = BooleanParameter('Use srs860_1', group_by='devices', default=False)
     use_srs860_2 = BooleanParameter('Use srs860_2', group_by='devices', default=False)
     use_srs830_1 = BooleanParameter('Use srs830_1', group_by='devices', default=False)
@@ -19,87 +25,35 @@ class Resistance_two_gate_mapping_measurement(Procedure):
     use_srs830_3 = BooleanParameter('Use srs830_3', group_by='devices', default=False)
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+    use_keithley_3 = BooleanParameter('Use k2450_3', group_by='devices', default=False)
+
     # --- Mapping Configuration ---
     mapping = BooleanParameter('Mapping', default=True)
     scan_mode = ListParameter('Scan Mode', default='Snake',
                               choices=['Snake', 'Forward/Backward'],
                               group_by='mapping', group_condition=True)
     slow_smu = ListParameter('Slow Axis SMU', default='Gate_1', group_by='mapping', group_condition=True,
-                             choices=['Gate_1', 'Gate_2', 'smua', 'smub'])
+                             choices=['Gate_1', 'Gate_2', 'Gate_3'])
     slow_start = FloatParameter('Slow Start (V)', default=-1, group_by='mapping', group_condition=True)
     slow_end = FloatParameter('Slow End (V)', default=1, group_by='mapping', group_condition=True)
     slow_step = FloatParameter('Slow Step (mV)', default=10, group_by='mapping', group_condition=True)
     long_delay = FloatParameter('Slow Axis Delay (s)', default=1.0, group_by='mapping', group_condition=True)
     fast_smu = ListParameter('Fast Axis SMU', default='Gate_2', group_by='mapping', group_condition=True,
-                             choices=['Gate_1', 'Gate_2', 'smua', 'smub'])
+                             choices=['Gate_1', 'Gate_2', 'Gate_3'])
     fast_start = FloatParameter('Fast Start (V)', default=-2, group_by='mapping', group_condition=True)
     fast_end = FloatParameter('Fast End (V)', default=2, group_by='mapping', group_condition=True)
     fast_step = FloatParameter('Fast Step (mV)', default=5, group_by='mapping', group_condition=True)
     short_delay = FloatParameter('Fast Axis Delay (s)', default=0.1, group_by='mapping', group_condition=True)
-    # --- Metadata ---
-    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
-    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
-    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
-    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
-    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
-    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
-    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
-    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
-    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
-    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
-    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS + MAGNET_COLUMNS
+
     def startup(self):
-        if self.use_srs860_1:
-            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
-            self.srs860_1_frequency = SRS860_1.frequency
-        if self.use_srs860_2:
-            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
-            self.srs860_2_frequency = SRS860_2.frequency
-        if self.use_srs830_1:
-            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
-            self.srs830_1_frequency = SRS830_1.frequency
-        if self.use_srs830_2:
-            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
-            self.srs830_2_frequency = SRS830_2.frequency
-        if self.use_srs830_3:
-            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
-            self.srs830_3_frequency = SRS830_3.frequency
+        self._capture_metadata()
+
     def getmeas(self, t0):
-        magnet = base.magnet
-        temperature = read_temperature()
-        vals = [time.time() - t0] + list(temperature)
-        vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
-        vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
-        vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
-        vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
-        for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2), (self.use_srs830_3, SRS830_3)]:
-            vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
-        if self.use_magnet:
-            vals.append(magnet.getMagneticField())
-        else:
-            vals.append(math.nan)
-        return vals
-    def smu_choice(self, name):
-        if name == 'Gate_1': return Gate_1
-        if name == 'Gate_2': return Gate_2
-        if name == 'smua': return Dual_gate.smua
-        if name == 'smub': return Dual_gate.smub
-        raise ValueError(f"Unknown SMU: {name}")
-    def smu_output(self, Gate, name):
-        if not Gate.is_output_on():
-            log.info(f"{name} output was OFF. Turning it ON.")
-            if name in ['Gate_1', 'Gate_2']:
-                Gate.configure_voltage_source(nplc=1, current=1e-7, auto_range=False)
-            else:
-                Gate.configure_voltage_source(voltage=0, current_limit=110e-9)
-            Gate.output_on()
-    def generate_range(self, start, end, step_mv):
-        step_v = abs(step_mv / 1000.0)
-        if step_v == 0: step_v = 0.001
-        num_points = int(abs(end - start) / step_v) + 1
-        return np.linspace(start, end, num_points)
+        if self.use_magnet and base._is_connected(base.magnet):
+            base.magnet.getMagneticField()
+        return self._read_standard(t0)
+
     def execute(self):
-        magnet = base.magnet
         time_0 = time.time()
         slow_gate = self.smu_choice(self.slow_smu)
         fast_gate = self.smu_choice(self.fast_smu)
@@ -169,8 +123,11 @@ class Resistance_two_gate_mapping_measurement(Procedure):
                     if self.should_stop():
                         log.warning("User stopped measurement")
                         return
+
     def shutdown(self):
         log.info(f"Finished measuring {self.scan_mode} 2D mapping")
+
+
 proc_resistance_two_gate_map = {
 "Resistance two gate mapping measurement": dict(
         cls=Resistance_two_gate_mapping_measurement,
@@ -182,9 +139,10 @@ proc_resistance_two_gate_map = {
             'Title', 'Resistor', 'Contacts', 'Gate_contacts',
             'devices',
             'use_magnet',
+            'use_MFLI_1', 'use_MFLI_2', 'use_MFLI_3',
             'use_srs860_1', 'use_srs860_2',
             'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
-            'use_keithley_1', 'use_keithley_2',
+            'use_keithley_1', 'use_keithley_2', 'use_keithley_3',
             'mapping',
             'scan_mode',
             'slow_smu', 'slow_start', 'slow_end', 'slow_step', 'long_delay',
@@ -196,6 +154,6 @@ proc_resistance_two_gate_map = {
             'fast_start', 'fast_end', 'fast_step', 'fast_smu'
         ],
         x=['time(s)'],
-        y=['sample_temp(K)', 'Gate_1_voltage(V)'],
+        y=['time(s)', 'time(s)'],
     ),
 }

@@ -2,22 +2,22 @@
 Differential Conductance SRS860 Measurement.
 dI/dV measurement for Tunnel junction using SRS860.
 """
-from .base import (
-    log, time, math, np,
-    Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
-    magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2,
-    read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_CURRENT_COLUMNS, MAGNET_COLUMNS
-)
+from .base import *
 from . import base
-class Differential_conductance_SRS860(Procedure):
+
+
+class Differential_conductance_SRS860(DynacoolProcedure):
     # --- Parameters ---
     Title = Parameter('dI/dV measurement', default='Rt')
     Contacts = Parameter('Contacts ', default='insert contact numbers')
     Gate_contacts = Parameter('Gate contacts', default='insert gate contacts')
+
     # --- Hardware Selection ---
     devices = BooleanParameter('Devices in use', default=False)
     use_magnet = BooleanParameter('Use Magnet', group_by='devices', default=False)
+    use_MFLI_1 = BooleanParameter('use_MFLI_1', group_by='devices', default=False)
+    use_MFLI_2 = BooleanParameter('use_MFLI_2', group_by='devices', default=False)
+    use_MFLI_3 = BooleanParameter('use_MFLI_3', group_by='devices', default=False)
     use_srs860_1 = BooleanParameter('Use srs860_1', group_by='devices', default=False)
     use_srs860_2 = BooleanParameter('Use srs860_2', group_by='devices', default=False)
     use_srs830_1 = BooleanParameter('Use srs830_1', group_by='devices', default=False)
@@ -25,6 +25,8 @@ class Differential_conductance_SRS860(Procedure):
     use_srs830_3 = BooleanParameter('Use srs830_3', group_by='devices', default=False)
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+    use_keithley_3 = BooleanParameter('Use k2450_3', group_by='devices', default=False)
+
     # --- Sweep Configuration ---
     scan_mode = ListParameter('Scan Mode', default='Sweep and Return',
                               choices=['Sweep to Setpoint', 'Sweep and Return'],
@@ -32,54 +34,22 @@ class Differential_conductance_SRS860(Procedure):
     dc_offset_setpoint = FloatParameter('Target Setpoint (V)', group_by='use_srs860_1', default=0.1)
     dc_offset_step = FloatParameter('DC Step Size (mV)', group_by='use_srs860_1', default=1)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=0.3)
-    # --- Metadata ---
-    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
-    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
-    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
-    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
-    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
-    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
-    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
-    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
-    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
-    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
-    DATA_COLUMNS = BASE_DATA_COLUMNS +['DC_offset(V)'] + LOCKIN_CURRENT_COLUMNS + MAGNET_COLUMNS
+
+    # --- Dynamic column recipe ---
+    _MID_COLUMNS = ['DC_offset(V)']
+    _LOCKIN_COL_TYPE = 'current'
+
     def startup(self):
-        if self.use_srs860_1:
-            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
-            self.srs860_1_frequency = SRS860_1.frequency
-        if self.use_srs860_2:
-            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
-            self.srs860_2_frequency = SRS860_2.frequency
-        if self.use_srs830_1:
-            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
-            self.srs830_1_frequency = SRS830_1.frequency
-        if self.use_srs830_2:
-            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
-            self.srs830_2_frequency = SRS830_2.frequency
-        if self.use_srs830_3:
-            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
-            self.srs830_3_frequency = SRS830_3.frequency
+        self._capture_metadata()
+
     def getmeas(self, t0):
-        temperature = read_temperature()
-        magnet = base.magnet
-        vals = [time.time() - t0] + list(temperature)
-        vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
-        vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
-        vals.append(SRS860_1.dc_offset if self.use_srs860_1 else math.nan)
-        for use, inst in [(self.use_srs860_1, SRS860_1), (self.use_srs860_2, SRS860_2)]:
-            vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
-        for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2), (self.use_srs830_3, SRS830_3)]:
-            vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
-        vals.append(magnet.getMagneticField() if self.use_magnet else math.nan)
-        return vals
-    def generate_range(self, start, end, step_units):
-        step = abs(step_units / 1000.0)
-        if step == 0: step = 0.001
-        num_points = int(abs(end - start) / step) + 1
-        return np.linspace(start, end, num_points)
+        if self.use_magnet and base._is_connected(base.magnet):
+            base.magnet.getMagneticField()
+        # Mid column: DC offset of SRS860_1
+        dc = SRS860_1.dc_offset if (self.use_srs860_1 and base._is_connected(SRS860_1)) else math.nan
+        return self._read_standard(t0, mid_extras=[dc])
+
     def execute(self):
-        magnet = base.magnet
         time_0 = time.time()
         start_v = SRS860_1.dc_offset
         target_v = self.dc_offset_setpoint
@@ -113,8 +83,11 @@ class Differential_conductance_SRS860(Procedure):
                 if self.should_stop():
                     log.warning("Measurement stopped by user")
                     return
+
     def shutdown(self):
         log.info("Finished measuring")
+
+
 proc_differential_conductance_SRS860 = {
     "Differential conductance SRS860": dict(
         cls=Differential_conductance_SRS860,
@@ -126,14 +99,15 @@ proc_differential_conductance_SRS860 = {
             'Title', 'Contacts', 'Gate_contacts',
             'devices',
             'use_magnet',
+            'use_MFLI_1', 'use_MFLI_2', 'use_MFLI_3',
             'use_srs860_1', 'use_srs860_2',
             'scan_mode', 'dc_offset_setpoint', 'dc_offset_step',
             'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
-            'use_keithley_1', 'use_keithley_2',
+            'use_keithley_1', 'use_keithley_2', 'use_keithley_3',
             'acq_delay',
         ],
         displays=['Title', 'scan_mode', 'dc_offset_setpoint', 'dc_offset_step'],
-        x=['DC_offset(V)'],
-        y=['Lockin_Current_SRS860_X(A)', 'Lockin_Current_SRS860_Y(A)'],
+        x=['time(s)'],
+        y=['time(s)', 'time(s)'],
     ),
 }

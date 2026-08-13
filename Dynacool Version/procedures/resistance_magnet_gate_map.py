@@ -2,23 +2,23 @@
 Resistance Magnet and Gate Mapping Measurement.
 2D mapping using Magnetic field and SMU gate voltage.
 """
-from .base import (
-    log, time, math, np,
-    Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
-    magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2,
-    read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_VOLTAGE_COLUMNS, MAGNET_COLUMNS
-)
+from .base import *
 from . import base
-class Resistance_magnet_and_gate_mapping_measurement(Procedure):
+
+
+class Resistance_magnet_and_gate_mapping_measurement(DynacoolProcedure):
     # --- Parameters ---
     Title = Parameter(' RHV measurement', default='RHV')
     Resistor = Parameter('Resistance/Gain', default='insert resistor size/gain')
     Contacts = Parameter('Contact numbers ', default='Insert contact numbers')
     Gate_contacts = Parameter('Gate contacts', default='insert gate contacts')
+
     # --- Hardware Selection ---
     devices = BooleanParameter('Devices in use', default=False)
     use_magnet = BooleanParameter('Use Magnet', group_by='devices', default=False)
+    use_MFLI_1 = BooleanParameter('use_MFLI_1', group_by='devices', default=False)
+    use_MFLI_2 = BooleanParameter('use_MFLI_2', group_by='devices', default=False)
+    use_MFLI_3 = BooleanParameter('use_MFLI_3', group_by='devices', default=False)
     use_srs860_1 = BooleanParameter('Use srs860_1', group_by='devices', default=False)
     use_srs860_2 = BooleanParameter('Use srs860_2', group_by='devices', default=False)
     use_srs830_1 = BooleanParameter('Use srs830_1', group_by='devices', default=False)
@@ -26,13 +26,15 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
     use_srs830_3 = BooleanParameter('Use srs830_3', group_by='devices', default=False)
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+    use_keithley_3 = BooleanParameter('Use k2450_3', group_by='devices', default=False)
+
     # --- Mapping Configuration ---
     mapping = BooleanParameter('Mapping RHV', default=True)
     line_transition = BooleanParameter('Document between gate sweeps', default=False, group_by='mapping', group_condition=True)
     scan_mode = ListParameter('Gate Scan Mode', default='Snake',
                               choices=['Snake', 'Forward/Backward'],
                               group_by='mapping', group_condition=True)
-    smu = ListParameter('User defined SMU', default='Gate_1', choices=['smua', 'smub', 'Gate_1', 'Gate_2'],
+    smu = ListParameter('User defined SMU', default='Gate_1', choices=['Gate_1', 'Gate_2', 'Gate_3'],
                         group_by='mapping', group_condition=True)
     gate_start = FloatParameter('Gate min voltage(V)', default=-1, group_by='mapping', group_condition=True)
     gate_end = FloatParameter('Gate max voltage(V)', default=1, group_by='mapping', group_condition=True)
@@ -42,96 +44,15 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
     field_step = FloatParameter('Magnetic field step size (mT)', default=50, group_by='mapping', group_condition=True)
     mag_delay = FloatParameter('Delay after Magnetic sweep (s)', default=120, group_by='mapping', group_condition=True)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=1)
-    # --- Metadata ---
-    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
-    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
-    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
-    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
-    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
-    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
-    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
-    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
-    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
-    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
-    DATA_COLUMNS = BASE_DATA_COLUMNS + LOCKIN_VOLTAGE_COLUMNS +MAGNET_COLUMNS
+
     def startup(self):
-        if self.use_srs860_1:
-            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
-            self.srs860_1_frequency = SRS860_1.frequency
-        if self.use_srs860_2:
-            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
-            self.srs860_2_frequency = SRS860_2.frequency
-        if self.use_srs830_1:
-            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
-            self.srs830_1_frequency = SRS830_1.frequency
-        if self.use_srs830_2:
-            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
-            self.srs830_2_frequency = SRS830_2.frequency
-        if self.use_srs830_3:
-            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
-            self.srs830_3_frequency = SRS830_3.frequency
+        self._capture_metadata()
+
     def getmeas(self, t0):
-        magnet = base.magnet
-        temperature = read_temperature()
-        vals = [time.time() - t0] + list(temperature)
-        if self.use_keithley_1:
-            vals += [Gate_1.measure__voltage(), Gate_1.measure__current()]
-        else:
-            vals += [math.nan, math.nan]
-        if self.use_keithley_2:
-            vals += [Gate_2.measure__voltage(), Gate_2.measure__current()]
-        else:
-            vals += [math.nan, math.nan]
-        if self.use_srs860_1:
-            r, th = SRS860_1.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan, math.nan]
-        if self.use_srs860_2:
-            r, th = SRS860_2.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan, math.nan]
-        if self.use_srs830_1:
-            r, th = SRS830_1.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan, math.nan]
-        if self.use_srs830_2:
-            r, th = SRS830_2.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan, math.nan]
-        if self.use_srs830_3:
-            r, th = SRS830_3.snap("X", "Y")
-            vals += [r, th]
-        else:
-            vals += [math.nan, math.nan]
-        if self.use_magnet:
-            vals += [magnet.getMagneticField()]
-        else:
-            vals += [math.nan]
-        return vals
-    def smu_choice(self, name):
-        if name == 'Gate_1': return Gate_1
-        if name == 'Gate_2': return Gate_2
-        if name == 'smua': return Dual_gate.smua
-        if name == 'smub': return Dual_gate.smub
-        raise ValueError(f"Unknown SMU: {name}")
-    def smu_output(self, Gate, name):
-        if not Gate.is_output_on():
-            log.info(f"{name} output was OFF. Turning it ON.")
-            if name in ['Gate_1', 'Gate_2']:
-                Gate.configure_voltage_source(nplc=1, current=1e-7, auto_range=False)
-            else:
-                Gate.configure_voltage_source(voltage=0, current_limit=110e-9)
-            Gate.output_on()
-    def generate_range(self, start, end, step_units):
-        # step_units is mT for magnet, mV for gate
-        step = abs(step_units / 1000.0)
-        if step == 0: step = 0.001
-        num_points = int(abs(end - start) / step) + 1
-        return np.linspace(start, end, num_points)
+        if self.use_magnet and base._is_connected(base.magnet):
+            base.magnet.getMagneticField()
+        return self._read_standard(t0)
+
     def execute(self):
         magnet = base.magnet
         time_0 = time.time()
@@ -213,23 +134,27 @@ class Resistance_magnet_and_gate_mapping_measurement(Procedure):
                     if self.should_stop():
                         log.warning("User stopped measurement")
                         return
+
     def shutdown(self):
         magnet = base.magnet
         magnet.pause_field()
         log.info("Finished measuring")
+
+
 proc_resistance_magnet_gate_map = {
 "Resistance magnet and gate mapping measurement": dict(
         cls=Resistance_magnet_and_gate_mapping_measurement,
-        category=["2D Mapping","Gate Sweep", "Magnetic Field"],
+        category=["2D Mapping", "Gate Sweep", "Magnetic Field"],
     description="Resistance vs Magnet and Gate."
                 " Includes Snake or Hysteresis (Forward/Backward) gate sweep options.",
     inputs=[
         'Title', 'Resistor', 'Contacts', 'Gate_contacts',
         'devices',
         'use_magnet',
+        'use_MFLI_1', 'use_MFLI_2', 'use_MFLI_3',
         'use_srs860_1', 'use_srs860_2',
         'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
-        'use_keithley_1', 'use_keithley_2',
+        'use_keithley_1', 'use_keithley_2', 'use_keithley_3',
         'mapping', 'line_transition', 'scan_mode',
         'field_start', 'field_end', 'field_step',
         'smu', 'gate_start', 'gate_end', 'gate_step',
@@ -240,7 +165,7 @@ proc_resistance_magnet_gate_map = {
         'smu', 'gate_start', 'gate_end',
         'field_start', 'field_end'
     ],
-        x = 'time(s)',
-        y = ['field(T)','SMUa(V)']
+        x=['time(s)'],
+        y=['time(s)', 'time(s)'],
     ),
 }

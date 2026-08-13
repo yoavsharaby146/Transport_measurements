@@ -27,10 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from Instruments.SR830_with_add_ons import SR830
 from Instruments.SR860_with_add_ons import SR860
 from Instruments.keithley2450_with_add_ons import Keithley2450
-# Dual_gate (Keithley 2604B) disabled by request
-# from Instruments.keithley2604B import Keithley2604B
-# MFLI disabled by request
-# from Instruments.MFLI import MFLIController
+from Instruments.MFLI import MFLIController
 from DynacoolPPMSClient import Cryostat
 
 
@@ -136,7 +133,7 @@ def read_temperature():
         return np.array([math.nan], dtype=float)
     return np.array([magnet.getSampleTemperature()], dtype=float)
 
-# Keithley 2450 (Gate_1, Gate_2)
+# Keithley 2450 (Gate_1, Gate_2, Gate_3)
 Gate_1 = _maybe(
     Keithley2450,
     enabled=overrides.get("use_gate1", False),
@@ -151,32 +148,12 @@ Gate_2 = _maybe(
     name="Gate_2"
 )
 
-# Dual_gate disabled by request
-# Dual_gate = _maybe(
-#     Keithley2604B,
-#     enabled=overrides.get("use_dual_gate", False),
-#     addr=overrides.get("dual_gate_visa", ""),
-#     name="Dual_gate"
-# )
-Dual_gate = None
-# Dual_gate = Keithley2600 only
-# Dual_gate = None
-# if overrides.get("use_dual_gate") and overrides.get("dual_gate_visa"):
-#     if Keithley2600 is None:
-#         print("[configuration] Keithley2600 driver not available; Dual_gate disabled.")
-#     else:
-#         addr = overrides["dual_gate_visa"]
-#         visa_lib = overrides.get("dual_gate_visa_library") or None
-#         try:
-#             kwargs = {"visa_library": visa_lib} if visa_lib else {}
-#             Dual_gate = Keithley2600(addr, **kwargs)
-#             print(f"[configuration] Dual_gate connected via Keithley2600 at {addr}"
-#                   + (f" (visa_library={visa_lib})" if visa_lib else ""))
-#         except Exception as e:
-#             print(f"[configuration] Dual_gate (Keithley2600) failed to open: {e}")
-#             Dual_gate = None
-# else:
-#     Dual_gate = None
+Gate_3 = _maybe(
+    Keithley2450,
+    enabled=overrides.get("use_gate3", False),
+    addr=overrides.get("gate3_visa", ""),
+    name="Gate_3"
+)
 
 
 # SRS lock-ins
@@ -216,49 +193,46 @@ SRS830_3 = _maybe(
 )
 
 
-# Zurich MFLI disabled by request
-# MFLI_1 = None
-# if overrides.get("use_mfli_1") and overrides.get("mfli_1_host") and overrides.get("mfli_1_dev"):
-#     try:
-#         MFLI_1 = MFLIController(
-#             overrides["mfli_1_host"],
-#             int(overrides.get("mfli_1_port", 8004)),
-#             6,
-#             overrides["mfli_1_dev"],
-#         )
-#         print(f"[configuration] MFLI connected successfully at {overrides['mfli_1_host']}")
-#     except Exception as e:
-#         print(f"[configuration] MFLI not opened: {e}")
-#         MFLI_1 = None
+# Zurich MFLI
 MFLI_1 = None
+if overrides.get("use_mfli_1") and overrides.get("mfli_1_host") and overrides.get("mfli_1_dev"):
+    try:
+        MFLI_1 = MFLIController(
+            overrides["mfli_1_host"],
+            int(overrides.get("mfli_1_port", 8004)),
+            6,
+            overrides["mfli_1_dev"],
+        )
+        print(f"[configuration] MFLI connected successfully at {overrides['mfli_1_host']}")
+    except Exception as e:
+        print(f"[configuration] MFLI not opened: {e}")
+        MFLI_1 = None
 
-# MFLI_2 = None
-# if overrides.get("use_mfli_2") and overrides.get("mfli_2_host") and overrides.get("mfli_2_dev"):
-#     try:
-#         MFLI_2 = MFLIController(
-#             overrides["mfli_2_host"],
-#             int(overrides.get("mfli_2_port", 8004)),
-#             6,
-#             overrides["mfli_2_dev"],
-#         )
-#         print(f"[configuration] MFLI connected successfully at {overrides['mfli_2_host']}")
-#     except Exception as e:
-#         print(f"[configuration] MFLI not opened: {e}")
-#         MFLI_2 = None
 MFLI_2 = None
+if overrides.get("use_mfli_2") and overrides.get("mfli_2_host") and overrides.get("mfli_2_dev"):
+    try:
+        MFLI_2 = MFLIController(
+            overrides["mfli_2_host"],
+            int(overrides.get("mfli_2_port", 8004)),
+            6,
+            overrides["mfli_2_dev"],
+        )
+        print(f"[configuration] MFLI connected successfully at {overrides['mfli_2_host']}")
+    except Exception as e:
+        print(f"[configuration] MFLI not opened: {e}")
+        MFLI_2 = None
 
-# MFLI_3 = None
-# if overrides.get("use_mfli_3") and overrides.get("mfli_3_host") and overrides.get("mfli_3_dev"):
-#     try:
-#         MFLI_3 = MFLIController(
-#             overrides["mfli_3_host"],
-#             int(overrides.get("mfli_3_port", 8004)),
-#             6,
-#             overrides["mfli_3_dev"],
-#         )
-#         print(f"[configuration] MFLI connected successfully at {overrides['mfli_3_host']}")
-#     except Exception as e:
-#         print(f"[configuration] MFLI not opened: {e}")
-#         MFLI_3 = None
 MFLI_3 = None
+if overrides.get("use_mfli_3") and overrides.get("mfli_3_host") and overrides.get("mfli_3_dev"):
+    try:
+        MFLI_3 = MFLIController(
+            overrides["mfli_3_host"],
+            int(overrides.get("mfli_3_port", 8004)),
+            6,
+            overrides["mfli_3_dev"],
+        )
+        print(f"[configuration] MFLI connected successfully at {overrides['mfli_3_host']}")
+    except Exception as e:
+        print(f"[configuration] MFLI not opened: {e}")
+        MFLI_3 = None
 

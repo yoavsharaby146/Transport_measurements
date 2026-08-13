@@ -56,10 +56,8 @@ class InstrumentConfig:
     use_gate2: bool = False
     gate2_visa: str = ""
 
-    # Dual_gate disabled by request
-    # use_dual_gate: bool = False
-    # dual_gate_visa: str = ""
-    # dual_gate_visa_library: str = 'C:\\Windows\\System32\\visa64.dll'
+    use_gate3: bool = False
+    gate3_visa: str = ""
 
     use_srs860_1: bool = False
     srs860_1_visa: str = ""
@@ -76,19 +74,18 @@ class InstrumentConfig:
     use_srs830_3: bool = False
     srs830_3_visa: str = ""
 
-    # MFLI disabled by request
-    # use_mfli_1: bool = False
-    # mfli_1_host: str = ""
-    # mfli_1_port: int = 8004
-    # mfli_1_dev: str = ""
-    # use_mfli_2: bool = False
-    # mfli_2_host: str = ""
-    # mfli_2_port: int = 8004
-    # mfli_2_dev: str = ""
-    # use_mfli_3: bool = False
-    # mfli_3_host: str = ""
-    # mfli_3_port: int = 8004
-    # mfli_3_dev: str = ""
+    use_mfli_1: bool = False
+    mfli_1_host: str = ""
+    mfli_1_port: int = 8004
+    mfli_1_dev: str = ""
+    use_mfli_2: bool = False
+    mfli_2_host: str = ""
+    mfli_2_port: int = 8004
+    mfli_2_dev: str = ""
+    use_mfli_3: bool = False
+    mfli_3_host: str = ""
+    mfli_3_port: int = 8004
+    mfli_3_dev: str = ""
 
     def to_json(self) -> Dict:
         return asdict(self)
@@ -115,13 +112,12 @@ class ConfigDialog(QtWidgets.QDialog):
         self._ppms_tab = self._build_ppms_tab()
         self._keithley_tab = self._build_keithley_tab()
         self._lockins_tab = self._build_lockins_tab()
-        # MFLI tab disabled by request
-        # self._mfli_tab = self._build_mfli_tab()
+        self._mfli_tab = self._build_mfli_tab()
 
         self.tabs.addTab(self._ppms_tab, "Dynacool PPMS")
         self.tabs.addTab(self._keithley_tab, "Keithley SMUs")
         self.tabs.addTab(self._lockins_tab, "Lock-ins")
-        # self.tabs.addTab(self._mfli_tab, "Zurich MFLI")
+        self.tabs.addTab(self._mfli_tab, "Zurich MFLI")
 
 
         # Buttons
@@ -181,13 +177,13 @@ class ConfigDialog(QtWidgets.QDialog):
         self.chk_magnet.setChecked(self._cfg.use_ppms)
         self.edt_ppms_host.setText(self._cfg.ppms_host or "10.0.0.10")
         self.spn_ppms_port.setValue(int(self._cfg.ppms_port or 5000))
-        # Gate 1/2 (Dual_gate disabled by request)
+        # Gate 1/2/3
         self.chk_gate1.setChecked(self._cfg.use_gate1)
         self.cmb_gate1.setEditText(self._cfg.gate1_visa)
         self.chk_gate2.setChecked(self._cfg.use_gate2)
         self.cmb_gate2.setEditText(self._cfg.gate2_visa)
-        # self.chk_dual.setChecked(self._cfg.use_dual_gate)
-        # self.cmb_dual.setEditText(self._cfg.dual_gate_visa)
+        self.chk_gate3.setChecked(self._cfg.use_gate3)
+        self.cmb_gate3.setEditText(self._cfg.gate3_visa)
 
         # Lock-ins
         self.chk_srs860_1.setChecked(self._cfg.use_srs860_1)
@@ -202,19 +198,19 @@ class ConfigDialog(QtWidgets.QDialog):
         self.chk_srs830_3.setChecked(self._cfg.use_srs830_3)
         self.cmb_srs830_3.setEditText(self._cfg.srs830_3_visa)
 
-        # MFLI widget apply disabled by request
-        # self.chk_mfli_1.setChecked(self._cfg.use_mfli_1)
-        # self.edt_mfli_1_host.setText(self._cfg.mfli_1_host or "")
-        # self.spn_mfli_1_port.setValue(int(self._cfg.mfli_1_port or 8004))
-        # self.cmb_mfli_1_dev.setEditText(self._cfg.mfli_1_dev or "")
-        # self.chk_mfli_2.setChecked(self._cfg.use_mfli_2)
-        # self.edt_mfli_2_host.setText(self._cfg.mfli_2_host or "")
-        # self.spn_mfli_2_port.setValue(int(self._cfg.mfli_2_port or 8004))
-        # self.cmb_mfli_2_dev.setEditText(self._cfg.mfli_2_dev or "")
-        # self.chk_mfli_3.setChecked(self._cfg.use_mfli_3)
-        # self.edt_mfli_3_host.setText(self._cfg.mfli_3_host or "")
-        # self.spn_mfli_3_port.setValue(int(self._cfg.mfli_3_port or 8004))
-        # self.cmb_mfli_3_dev.setEditText(self._cfg.mfli_3_dev or "")
+        # MFLI
+        self.chk_mfli_1.setChecked(self._cfg.use_mfli_1)
+        self.edt_mfli_1_host.setText(self._cfg.mfli_1_host or "")
+        self.spn_mfli_1_port.setValue(int(self._cfg.mfli_1_port or 8004))
+        self.cmb_mfli_1_dev.setEditText(self._cfg.mfli_1_dev or "")
+        self.chk_mfli_2.setChecked(self._cfg.use_mfli_2)
+        self.edt_mfli_2_host.setText(self._cfg.mfli_2_host or "")
+        self.spn_mfli_2_port.setValue(int(self._cfg.mfli_2_port or 8004))
+        self.cmb_mfli_2_dev.setEditText(self._cfg.mfli_2_dev or "")
+        self.chk_mfli_3.setChecked(self._cfg.use_mfli_3)
+        self.edt_mfli_3_host.setText(self._cfg.mfli_3_host or "")
+        self.spn_mfli_3_port.setValue(int(self._cfg.mfli_3_port or 8004))
+        self.cmb_mfli_3_dev.setEditText(self._cfg.mfli_3_dev or "")
 
     def _refresh_all(self):
         self._fill_visa_comboboxes(self._visa_list())
@@ -245,13 +241,12 @@ class ConfigDialog(QtWidgets.QDialog):
         self.cmb_gate1 = QtWidgets.QComboBox(); self.cmb_gate1.setEditable(True)
         self.chk_gate2 = QtWidgets.QCheckBox("Use Gate_2 (Keithley 2450)")
         self.cmb_gate2 = QtWidgets.QComboBox(); self.cmb_gate2.setEditable(True)
-        # Dual_gate disabled by request
-        # self.chk_dual = QtWidgets.QCheckBox("Use Dual_gate (Keithley 2604B)")
-        # self.cmb_dual = QtWidgets.QComboBox(); self.cmb_dual.setEditable(True)
+        self.chk_gate3 = QtWidgets.QCheckBox("Use Gate_3 (Keithley 2450)")
+        self.cmb_gate3 = QtWidgets.QComboBox(); self.cmb_gate3.setEditable(True)
 
         grid.addWidget(self.chk_gate1, 0, 0); grid.addWidget(self.cmb_gate1, 0, 1)
         grid.addWidget(self.chk_gate2, 1, 0); grid.addWidget(self.cmb_gate2, 1, 1)
-        # grid.addWidget(self.chk_dual, 2, 0); grid.addWidget(self.cmb_dual, 2, 1)
+        grid.addWidget(self.chk_gate3, 2, 0); grid.addWidget(self.cmb_gate3, 2, 1)
         grid.setColumnStretch(1, 1)
         return w
 
@@ -405,7 +400,7 @@ class ConfigDialog(QtWidgets.QDialog):
 
     # ---------- Fillers ----------
     def _fill_visa_comboboxes(self, resources: List[str]):
-        for cmb in (self.cmb_gate1, self.cmb_gate2,
+        for cmb in (self.cmb_gate1, self.cmb_gate2, self.cmb_gate3,
                      self.cmb_srs860_1, self.cmb_srs860_2,
                        self.cmb_srs830_1, self.cmb_srs830_2, self.cmb_srs830_3):
             cmb.clear(); cmb.addItems(resources); cmb.setEditable(True)
@@ -424,9 +419,8 @@ class ConfigDialog(QtWidgets.QDialog):
             use_gate2=self.chk_gate2.isChecked(),
             gate2_visa=self.cmb_gate2.currentText().strip(),
 
-            # Dual_gate disabled by request
-            # use_dual_gate=self.chk_dual.isChecked(),
-            # dual_gate_visa=self.cmb_dual.currentText().strip(),
+            use_gate3=self.chk_gate3.isChecked(),
+            gate3_visa=self.cmb_gate3.currentText().strip(),
 
             use_srs860_1=self.chk_srs860_1.isChecked(),
             srs860_1_visa=self.cmb_srs860_1.currentText().strip(),
@@ -443,19 +437,18 @@ class ConfigDialog(QtWidgets.QDialog):
             use_srs830_3=self.chk_srs830_3.isChecked(),
             srs830_3_visa=self.cmb_srs830_3.currentText().strip(),
 
-            # MFLI disabled by request
-            # use_mfli_1=self.chk_mfli_1.isChecked(),
-            # mfli_1_host=self.edt_mfli_1_host.text().strip(),
-            # mfli_1_port=int(self.spn_mfli_1_port.value()),
-            # mfli_1_dev=self.cmb_mfli_1_dev.currentText().strip(),
-            # use_mfli_2=self.chk_mfli_2.isChecked(),
-            # mfli_2_host=self.edt_mfli_2_host.text().strip(),
-            # mfli_2_port=int(self.spn_mfli_2_port.value()),
-            # mfli_2_dev=self.cmb_mfli_2_dev.currentText().strip(),
-            # use_mfli_3=self.chk_mfli_3.isChecked(),
-            # mfli_3_host=self.edt_mfli_3_host.text().strip(),
-            # mfli_3_port=int(self.spn_mfli_3_port.value()),
-            # mfli_3_dev=self.cmb_mfli_3_dev.currentText().strip(),
+            use_mfli_1=self.chk_mfli_1.isChecked(),
+            mfli_1_host=self.edt_mfli_1_host.text().strip(),
+            mfli_1_port=int(self.spn_mfli_1_port.value()),
+            mfli_1_dev=self.cmb_mfli_1_dev.currentText().strip(),
+            use_mfli_2=self.chk_mfli_2.isChecked(),
+            mfli_2_host=self.edt_mfli_2_host.text().strip(),
+            mfli_2_port=int(self.spn_mfli_2_port.value()),
+            mfli_2_dev=self.cmb_mfli_2_dev.currentText().strip(),
+            use_mfli_3=self.chk_mfli_3.isChecked(),
+            mfli_3_host=self.edt_mfli_3_host.text().strip(),
+            mfli_3_port=int(self.spn_mfli_3_port.value()),
+            mfli_3_dev=self.cmb_mfli_3_dev.currentText().strip(),
 
         )
         # empty fields are fine; configuration.py will turn those into 0

@@ -3,17 +3,11 @@ Differential Conductance Zurich Measurement.
 
 dI/dV measurement for Tunnel junction using Zurich MFLI.
 """
-
-from .base import (
-    log, time, math, np,
-    Procedure, BooleanParameter, IntegerParameter, FloatParameter, Parameter, Metadata, ListParameter,
-    magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2,
-    read_temperature,
-    BASE_DATA_COLUMNS, LOCKIN_CURRENT_COLUMNS, MAGNET_COLUMNS
-)
+from .base import *
 from . import base
 
-class Differential_conductance_Zurich(Procedure):
+
+class Differential_conductance_Zurich(DynacoolProcedure):
     # --- Parameters ---
     Title = Parameter('dI/dV measurement', default='Rt')
     Contacts = Parameter('Contacts ', default='insert contact numbers')
@@ -30,149 +24,61 @@ class Differential_conductance_Zurich(Procedure):
     use_srs830_1 = BooleanParameter('Use srs830_1', group_by='devices', default=False)
     use_srs830_2 = BooleanParameter('Use srs830_2', group_by='devices', default=False)
     use_srs830_3 = BooleanParameter('Use srs830_3', group_by='devices', default=False)
-    use_dual_gate = BooleanParameter('Use dual gate', group_by='devices', default=False)
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+    use_keithley_3 = BooleanParameter('Use k2450_3', group_by='devices', default=False)
 
     # --- Sweep Configuration ---
     scan_mode = ListParameter('Scan Mode', default='Sweep and Return',
                               choices=['Sweep to Setpoint', 'Sweep and Return'],
                               group_by='use_MFLI_1', group_condition=True)
-
     dc_offset_setpoint = FloatParameter('Target Setpoint (V)', group_by='use_MFLI_1', default=0.1)
     dc_offset_step = FloatParameter('DC Step Size (mV)', group_by='use_MFLI_1', default=1)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=0.3)
 
-    # --- Metadata ---
-    srs860_1_sine_voltage = Metadata("SRS860_1 sine voltage", default=math.nan)
-    srs860_1_frequency = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
-    srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
-    srs860_2_frequency = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
-    srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
-    srs830_1_frequency = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
-    srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
-    srs830_2_frequency = Metadata("SRS830_2 frequency (Hz)", default=math.nan)
-    srs830_3_sine_voltage = Metadata("SRS830_3 sine voltage", default=math.nan)
-    srs830_3_frequency = Metadata("SRS830_3 frequency (Hz)", default=math.nan)
-    MFLI_1_sine_voltage = Metadata("MFLI_1 sine voltage", default=math.nan)
-    MFLI_1_frequency = Metadata("MFLI_1 frequency (Hz)", default=math.nan)
-    MFLI_2_sine_voltage = Metadata("MFLI_2 sine voltage", default=math.nan)
-    MFLI_2_frequency = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
-    MFLI_3_sine_voltage = Metadata("MFLI_3 sine voltage", default=math.nan)
-    MFLI_3_frequency = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
-
-    DATA_COLUMNS = BASE_DATA_COLUMNS + ['DC_offset(V)'] + LOCKIN_CURRENT_COLUMNS + MAGNET_COLUMNS
+    # --- Dynamic column recipe ---
+    _MID_COLUMNS = ['DC_offset(V)']
+    _LOCKIN_COL_TYPE = 'current'
 
     def startup(self):
-        if self.use_srs860_1:
-            self.srs860_1_sine_voltage = SRS860_1.sine_voltage
-            self.srs860_1_frequency = SRS860_1.frequency
-        if self.use_srs860_2:
-            self.srs860_2_sine_voltage = SRS860_2.sine_voltage
-            self.srs860_2_frequency = SRS860_2.frequency
-        if self.use_MFLI_1:
-            self.MFLI_1_sine_voltage = MFLI_1.sine_amplitude
-            self.MFLI_1_frequency = MFLI_1.frequency
-        if self.use_MFLI_2:
-            self.MFLI_2_sine_voltage = MFLI_2.sine_amplitude
-            self.MFLI_2_frequency = MFLI_2.frequency
-        if self.use_MFLI_3:
-            self.MFLI_3_sine_voltage = MFLI_3.sine_amplitude
-            self.MFLI_3_frequency = MFLI_3.frequency
-        if self.use_srs830_1:
-            self.srs830_1_sine_voltage = SRS830_1.sine_voltage
-            self.srs830_1_frequency = SRS830_1.frequency
-        if self.use_srs830_2:
-            self.srs830_2_sine_voltage = SRS830_2.sine_voltage
-            self.srs830_2_frequency = SRS830_2.frequency
-        if self.use_srs830_3:
-            self.srs830_3_sine_voltage = SRS830_3.sine_voltage
-            self.srs830_3_frequency = SRS830_3.frequency
+        self._capture_metadata()
 
     def getmeas(self, t0):
-        magnet = base.magnet
-        temperature = read_temperature()
-        vals = [time.time() - t0] + list(temperature)
-
-        if self.use_dual_gate:
-            vals += [Dual_gate.smua.measure__voltage(), Dual_gate.smua.measure__current(),
-                     Dual_gate.smub.measure__voltage(), Dual_gate.smub.measure__current()]
-        else:
-            vals += [math.nan] * 4
-
-        vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
-        vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
-
-        if self.use_MFLI_1:
-            dc_offset = MFLI_1.dc_offset
-            vals += [dc_offset]
-
-        else:
-            vals += [math.nan]
-            
-        vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
-        vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
-
-        if self.use_MFLI_1:
-            vals += list(MFLI_1.read_demod())
-        else:
-            vals += [math.nan] * 2
-
-        for use, inst in [(self.use_MFLI_2, MFLI_2), (self.use_MFLI_3, MFLI_3)]:
-            vals += list(inst.read_demod()) if use else [math.nan] * 2
-
-        for use, inst in [(self.use_srs830_1, SRS830_1), (self.use_srs830_2, SRS830_2), (self.use_srs830_3, SRS830_3)]:
-            vals += list(inst.snap("X", "Y")) if use else [math.nan] * 2
-
-        vals.append(magnet.getMagneticField() if self.use_magnet else math.nan)
-        return vals
-
-    def generate_range(self, start, end, step_mv):
-        step_v = abs(step_mv / 1000.0)
-        if step_v == 0:
-            step_v = 0.001
-        num_points = int(abs(end - start) / step_v) + 1
-        return np.linspace(start, end, num_points)
+        if self.use_magnet and base._is_connected(base.magnet):
+            base.magnet.getMagneticField()
+        # Mid column: MFLI_1 DC offset
+        dc = MFLI_1.dc_offset if (self.use_MFLI_1 and base._is_connected(MFLI_1)) else math.nan
+        return self._read_standard(t0, mid_extras=[dc])
 
     def execute(self):
-        magnet = base.magnet
         time_0 = time.time()
         start_v = MFLI_1.dc_offset
         target_v = self.dc_offset_setpoint
         log.info(f"Starting dI/dV {self.scan_mode}. Start={start_v:.4f}V, Target={target_v:.4f}V")
-
         range_to_target = self.generate_range(start_v, target_v, self.dc_offset_step)
         range_return = self.generate_range(target_v, start_v, self.dc_offset_step)
-
         total_points = len(range_to_target)
         if self.scan_mode == 'Sweep and Return':
             total_points += len(range_return)
-
         point_counter = 0
-
         log.info("Sweeping to Setpoint...")
         for v in range_to_target:
             MFLI_1.dc_offset = v
             time.sleep(self.acq_delay)
-
             data = self.getmeas(time_0)
             self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
-
             point_counter += 1
             self.emit('progress', 100 * point_counter / total_points)
             if self.should_stop():
                 log.warning("Measurement stopped by user")
                 return
-
         if self.scan_mode == 'Sweep and Return':
             log.info("Returning to Origin...")
             for v in range_return:
                 MFLI_1.dc_offset = v
                 time.sleep(self.acq_delay)
-
                 data = self.getmeas(time_0)
                 self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
-
                 point_counter += 1
                 self.emit('progress', 100 * point_counter / total_points)
                 if self.should_stop():
@@ -198,11 +104,11 @@ proc_differential_conductance_Zurich = {
             'scan_mode', 'dc_offset_setpoint', 'dc_offset_step',
             'use_MFLI_2', 'use_MFLI_3',
             'use_srs860_1', 'use_srs860_2', 'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
-            'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
+            'use_keithley_1', 'use_keithley_2', 'use_keithley_3',
             'acq_delay',
         ],
         displays=['Title', 'scan_mode', 'dc_offset_setpoint', 'dc_offset_step'],
-        x=['DC_offset(V)'],
-        y=['MFLI_Lockin_1_Current_X(A)', 'MFLI_Lockin_1_Current_Y(A)'],
+        x=['time(s)'],
+        y=['time(s)', 'time(s)'],
     ),
 }

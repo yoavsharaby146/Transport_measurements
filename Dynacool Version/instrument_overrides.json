@@ -6,6 +6,8 @@
   "gate1_visa": "USB0::0x05E6::0x2450::04416746::INSTR",
   "use_gate2": false,
   "gate2_visa": "USB0::0xB506::0x2000::006158::INSTR",
+  "use_gate3": false,
+  "gate3_visa": "",
   "use_srs860_1": false,
   "srs860_1_visa": "",
   "use_srs860_2": false,
@@ -15,5 +17,17 @@
   "use_srs830_2": false,
   "srs830_2_visa": "GPIB0::7::INSTR",
   "use_srs830_3": false,
-  "srs830_3_visa": ""
+  "srs830_3_visa": "",
+  "use_mfli_1": false,
+  "mfli_1_host": "",
+  "mfli_1_dev": "",
+  "mfli_1_port": 8004,
+  "use_mfli_2": false,
+  "mfli_2_host": "",
+  "mfli_2_dev": "",
+  "mfli_2_port": 8004,
+  "use_mfli_3": false,
+  "mfli_3_host": "",
+  "mfli_3_dev": "",
+  "mfli_3_port": 8004
 }
