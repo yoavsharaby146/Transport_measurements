@@ -5,8 +5,9 @@ Load multiple CSV files, reference columns as f1.col, f2.col, etc.,
 define computed columns via math expressions, copy raw columns,
 and export the result to a new CSV.
 
-Requirements: Python 3.8+ (tkinter is included in the standard library)
-Run: python csv_column_math.py
+Requirements: Python 3.8+, tkinter (stdlib), polars, numpy
+    pip install polars numpy
+Run: python csv_operations.py
 """
 
 import tkinter as tk
@@ -15,6 +16,9 @@ import csv
 import math
 import os
 import re
+
+import numpy as np
+import polars as pl
 
 
 # ── palette ──────────────────────────────────────────────────────────────────
@@ -34,21 +38,19 @@ class CSVFile:
         self.name = os.path.basename(path)
         self.alias = alias
         self.headers = []
-        self.rows = []   # list of dicts {col: float}
+        self.n_rows = 0
+        self._cols = {}   # header -> numpy float array (NaN for non-numeric)
         self._load()
 
     def _load(self):
-        with open(self.path, newline="", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            self.headers = reader.fieldnames or []
-            for row in reader:
-                parsed = {}
-                for h in self.headers:
-                    try:
-                        parsed[h] = float(row[h])
-                    except (ValueError, TypeError):
-                        parsed[h] = float("nan")
-                self.rows.append(parsed)
+        # ponytail: whole-file load; for truly huge CSVs upgrade to
+        # pl.read_csv(batched=True) and chunk the math per batch.
+        df = pl.read_csv(self.path)
+        # every column as float64; non-numeric cells become NaN (old behavior)
+        df = df.cast({c: pl.Float64 for c in df.columns}, strict=False)
+        self.headers = df.columns
+        self.n_rows = len(df)
+        self._cols = {c: df[c].to_numpy() for c in self.headers}
 
 
 class AppState:
@@ -56,10 +58,12 @@ class AppState:
         self.files: list[CSVFile] = []
         self.copy_cols: list[tuple] = []   # list of (alias, col)
         self.ops: list[dict] = []          # list of {"name": str, "expr": str}
+        self._cache = {}                   # expr -> (code, var namespace)
 
     def add_file(self, path):
         alias = f"f{len(self.files) + 1}"
         self.files.append(CSVFile(path, alias))
+        self._cache.clear()
 
     def remove_file(self, idx):
         self.files.pop(idx)
@@ -69,45 +73,86 @@ class AppState:
         # clean copy cols that referenced removed file
         valid = {(f.alias, h) for f in self.files for h in f.headers}
         self.copy_cols = [c for c in self.copy_cols if c in valid]
+        self._cache.clear()
 
-    def eval_expr(self, expr: str, row_by_alias: dict) -> float:
-        """Evaluate a formula expression for one row."""
-        js = expr
-        # replace f1.col, f2.col, etc.
-        for f in self.files:
-            for h in f.headers:
-                val = row_by_alias.get(f.alias, {}).get(h, float("nan"))
-                js = js.replace(f"{f.alias}.{h}", str(val))
-        # replace bare col names → first file values
+    def _compile(self, expr: str):
+        """Translate formula once into evaluable code over numpy arrays.
+        Returns (code, var_ns) or (None, None). Cached per expression."""
+        if expr in self._cache:
+            return self._cache[expr]
+
+        ns = {}   # _vN -> numpy array
+
+        def sub_tokens(tokens):
+            nonlocal code
+            # longest tokens first so 'f1.temp_c' wins over 'f1.temp'
+            for tok in sorted(tokens, key=len, reverse=True):
+                var = f"_v{len(ns)}"
+                ns[var] = tokens[tok]
+                pat = re.compile(r"(?<![a-zA-Z0-9_.])" + re.escape(tok)
+                                 + r"(?![a-zA-Z0-9_.])")
+                code = pat.sub(var, code)
+
+        code = expr
+        # qualified refs f1.col, f2.col, ...
+        sub_tokens({f"{f.alias}.{h}": f._cols[h]
+                    for f in self.files for h in f.headers})
+        # bare col names → first file values
         if self.files:
-            for h in self.files[0].headers:
-                pattern = r'(?<![a-zA-Z0-9_\.])' + re.escape(h) + r'(?![a-zA-Z0-9_\.])'
-                val = row_by_alias.get(self.files[0].alias, {}).get(h, float("nan"))
-                js = re.sub(pattern, str(val), js)
-        try:
-            allowed = {k: getattr(math, k) for k in dir(math) if not k.startswith("_")}
-            allowed["abs"] = abs
-            return float(eval(js, {"__builtins__": {}}, allowed))  # noqa: S307
-        except Exception:
-            return float("nan")
+            sub_tokens({h: self.files[0]._cols[h]
+                        for h in self.files[0].headers})
 
-    def build_output(self):
+        result = (code, ns) if ns or code.strip() else (None, None)
+        self._cache[expr] = result
+        return result
+
+    def compute_expr(self, expr: str, n_rows: int):
+        """Evaluate a formula vectorized over whole columns.
+        Returns a float numpy array of length n_rows (NaN on failure)."""
+        code, var_ns = self._compile(expr)
+        if code is None:
+            return np.full(n_rows, np.nan)
+        allowed = {k: getattr(np, k, getattr(math, k))
+                   for k in dir(math) if not k.startswith("_")}
+        allowed["abs"] = abs
+        # slice every column to n_rows so cross-file length mismatches
+        # align (old code used min row count across files)
+        var_ns = {k: (v[:n_rows] if isinstance(v, np.ndarray) else v)
+                  for k, v in var_ns.items()}
+        locs = {**allowed, **var_ns}
+        try:
+            with np.errstate(all="ignore"):
+                out = eval(code, {"__builtins__": {}}, locs)  # noqa: S307
+            arr = np.asarray(out, dtype=float)
+        except Exception:
+            return np.full(n_rows, np.nan)
+        if arr.ndim == 0:   # constant expression like "2*pi"
+            arr = np.full(n_rows, float(arr))
+        return arr[:n_rows]
+
+    def build_output(self, n_rows=None):
+        """Return (headers, rows). When n_rows given (preview) only that
+        many rows are computed; None means all rows (export)."""
         if not self.files:
             return [], []
-        n_rows = min(len(f.rows) for f in self.files)
+        total = min(f.n_rows for f in self.files)
+        if n_rows is not None:
+            total = min(total, n_rows)
         out_headers = [f"{a}.{c}" for a, c in self.copy_cols] + \
                       [op["name"] or op["expr"] or f"col_{i}" for i, op in enumerate(self.ops)]
-        out_rows = []
-        for i in range(n_rows):
-            row_by_alias = {f.alias: f.rows[i] for f in self.files}
-            row = {}
-            for alias, col in self.copy_cols:
-                row[f"{alias}.{col}"] = row_by_alias.get(alias, {}).get(col, float("nan"))
-            for j, op in enumerate(self.ops):
-                h = op["name"] or op["expr"] or f"col_{j}"
-                row[h] = self.eval_expr(op["expr"], row_by_alias) if op["expr"].strip() else ""
-            out_rows.append(row)
-        return out_headers, out_rows
+        by_alias = {f.alias: f for f in self.files}
+        cols = []
+        for alias, col in self.copy_cols:
+            f = by_alias.get(alias)
+            arr = f._cols.get(col) if f else None
+            cols.append(np.full(total, np.nan) if arr is None else arr[:total])
+        for op in self.ops:
+            if op["expr"].strip():
+                cols.append(self.compute_expr(op["expr"], total))
+            else:
+                cols.append([""] * total)   # blank column, matches old behavior
+        rows = [[c[i] for c in cols] for i in range(total)]
+        return out_headers, rows
 
 
 def fmt(v):
@@ -131,6 +176,7 @@ class App(tk.Tk):
         self.minsize(700, 560)
         self.configure(bg="#F8F8F7")
         self.state = AppState()
+        self._preview_job = None
         self._build_ui()
 
     # ── layout ────────────────────────────────────────────────────────────────
@@ -255,7 +301,7 @@ class App(tk.Tk):
             alias_lbl.pack(side="left")
             tk.Label(row, text=f"  {f.name}", bg="#F4F4F2", fg="#3A3A38",
                      font=("", 10)).pack(side="left")
-            info = f"  ({len(f.rows)} rows)"
+            info = f"  ({f.n_rows} rows)"
             tk.Label(row, text=info, bg="#F4F4F2", fg="#8A8A88",
                      font=("", 9)).pack(side="left")
             idx = i
@@ -264,7 +310,7 @@ class App(tk.Tk):
 
         # row count warning
         if len(self.state.files) >= 2:
-            counts = [len(f.rows) for f in self.state.files]
+            counts = [f.n_rows for f in self.state.files]
             if len(set(counts)) > 1:
                 self.row_warn_lbl.config(
                     text=f"⚠ Row counts differ: {counts} — will use min ({min(counts)})")
@@ -418,7 +464,10 @@ class App(tk.Tk):
     def _update_op(self, idx, key, val):
         if idx < len(self.state.ops):
             self.state.ops[idx][key] = val
-            self._render_preview()
+            # debounce: recompute preview at most ~3x/second while typing
+            if self._preview_job is not None:
+                self.after_cancel(self._preview_job)
+            self._preview_job = self.after(300, self._render_preview)
 
     # ── load / save formulas from a .txt file ──────────────────────────────────
     def _parse_formula_text(self, text):
@@ -514,23 +563,21 @@ class App(tk.Tk):
     def _render_preview(self):
         for w in self.preview_frame.winfo_children():
             w.destroy()
-        headers, rows = self.state.build_output()
+        headers, rows = self.state.build_output(n_rows=20)
         if not headers:
             tk.Label(self.preview_frame,
                      text="Select copy columns or add formulas above.",
                      bg="#FFFFFF", fg="#9B9B98", font=("", 10)).pack(anchor="w")
             return
 
-        preview = rows[:20]
-
         # treeview
         tree = ttk.Treeview(self.preview_frame, columns=headers, show="headings",
-                            height=min(len(preview), 12))
+                            height=min(len(rows), 12))
         for h in headers:
             tree.heading(h, text=h)
             tree.column(h, width=max(80, len(h)*9), anchor="center")
-        for row in preview:
-            tree.insert("", "end", values=[fmt(row.get(h, "")) for h in headers])
+        for row in rows:
+            tree.insert("", "end", values=[fmt(v) for v in row])
 
         vsb = ttk.Scrollbar(self.preview_frame, orient="vertical", command=tree.yview)
         hsb = ttk.Scrollbar(self.preview_frame, orient="horizontal", command=tree.xview)
@@ -539,9 +586,10 @@ class App(tk.Tk):
         vsb.pack(side="right", fill="y")
         tree.pack(side="left", fill="both", expand=True)
 
-        if len(rows) > 20:
+        full_total = min((f.n_rows for f in self.state.files), default=0)
+        if full_total > len(rows):
             tk.Label(self.preview_frame,
-                     text=f"Showing 20 of {len(rows)} rows",
+                     text=f"Showing 20 of {full_total} rows",
                      bg="#FFFFFF", fg="#9B9B98", font=("", 9)).pack(anchor="w", pady=4)
 
     def _export(self):
@@ -555,10 +603,10 @@ class App(tk.Tk):
         if not path:
             return
         with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
-            writer.writeheader()
+            writer = csv.writer(f)
+            writer.writerow(headers)
             for row in rows:
-                writer.writerow({h: fmt(row.get(h, "")) for h in headers})
+                writer.writerow([fmt(v) for v in row])
         self.export_msg.config(text=f"✓ Exported {len(rows)} rows → {os.path.basename(path)}")
         self.after(4000, lambda: self.export_msg.config(text=""))
 
