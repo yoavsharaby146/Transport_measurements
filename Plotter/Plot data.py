@@ -216,6 +216,12 @@ class InteractivePlotter:
         self.y_log = tk.BooleanVar()
         self.z_log = tk.BooleanVar()  # Log scale for Color Map Z (colormap/colorbar)
 
+        # --- COLOR MAP INTERPOLATION (performance) ---
+        self._cmap_interp_method = tk.StringVar(value="cubic")   # cubic | linear | nearest
+        self._cmap_grid_res = tk.StringVar(value="300")
+        self._cmap_cache_key = None   # cache key of the last computed zi
+        self._cmap_cache_zi = None    # cached interpolated grid (avoids re-running griddata)
+
         # --- TICK DIRECTION & LENGTH (Origin Pro-like) ---
         self.v_tick_dir_x = tk.StringVar(value="out")       # "out", "in", "inout", "none"
         self.v_tick_dir_y = tk.StringVar(value="out")
@@ -565,6 +571,17 @@ class InteractivePlotter:
         ttk.Checkbutton(control_frame, text="Z Log Scale (Color Map)",
                         variable=self.z_log,
                         command=self.update_plot).grid(row=row, column=0, columnspan=4, sticky='w', pady=2)
+        row += 1
+        # Interpolation method + grid resolution (cubic is slow on large datasets)
+        interp_frame = ttk.Frame(control_frame)
+        interp_frame.grid(row=row, column=0, columnspan=4, sticky='w', pady=2)
+        ttk.Label(interp_frame, text="Interp:").pack(side='left')
+        ttk.Combobox(interp_frame, textvariable=self._cmap_interp_method,
+                     values=["cubic", "linear", "nearest"], state='readonly', width=8).pack(side='left', padx=2)
+        ttk.Label(interp_frame, text="Grid:").pack(side='left', padx=(8, 0))
+        ttk.Entry(interp_frame, textvariable=self._cmap_grid_res, width=6).pack(side='left', padx=2)
+        ttk.Label(interp_frame, text="(linear/nearest are much faster)", font=('Arial', 8, 'italic'),
+                  foreground='gray').pack(side='left', padx=4)
         row += 1
         ttk.Separator(control_frame, orient='horizontal').grid(row=row, column=0, columnspan=4, sticky='ew', pady=10)
         row += 1
@@ -1519,25 +1536,55 @@ class InteractivePlotter:
     # --- MAIN LOGIC ---
 
     def _load_csv(self, filepath):
-        """Load a CSV file with header detection and footer skipping."""
-        with open(filepath, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+        """Load a CSV file with header detection and footer skipping.
+
+        Performance: never materialises the whole file as Python strings.
+        Only the first 50 lines and the last 64 KB are decoded for
+        header/footer detection; the full pass is a C-speed newline count.
+        """
+        with open(filepath, 'rb') as f:
+            head = []
+            for _ in range(50):
+                raw = f.readline()
+                if not raw:
+                    break
+                head.append(raw.decode('utf-8', errors='replace'))
+            f.seek(0, os.SEEK_END)
+            fsize = f.tell()
+            f.seek(max(0, fsize - 65536))
+            tail = f.read().decode('utf-8', errors='replace').splitlines()
+            if fsize > 65536 and tail:
+                tail = tail[1:]  # drop possibly-truncated first line of the window
+            # total line count via C-speed byte scan
+            total_lines = 0
+            f.seek(0)
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    break
+                total_lines += chunk.count(b'\n')
+            if fsize:
+                f.seek(fsize - 1)
+                if f.read(1) != b'\n':
+                    total_lines += 1
+
         header_line = 0
-        for i, line in enumerate(lines[:50]):
+        for i, line in enumerate(head):
             if 'time(s)' in line.lower(): header_line = i; break
 
         skip_footer = 0
-        header_cols = len(lines[header_line].split(','))
-        for i in range(len(lines) - 1, header_line, -1):
-            line = lines[i].strip()
-            if not line: skip_footer += 1; continue
-            if line.startswith(';') or line.startswith('#'): skip_footer += 1; continue
-            if len(line.split(',')) != header_cols: skip_footer += 1; continue
-            break
+        if head:
+            header_cols = len(head[header_line].split(','))
+            for line in reversed(tail):
+                line = line.strip()
+                if not line: skip_footer += 1; continue
+                if line.startswith(';') or line.startswith('#'): skip_footer += 1; continue
+                if len(line.split(',')) != header_cols: skip_footer += 1; continue
+                break
 
         if skip_footer > 0:
             return pl.read_csv(filepath, skip_rows=header_line,
-                               n_rows=len(lines) - header_line - skip_footer,
+                               n_rows=max(total_lines - header_line - skip_footer, 0),
                                truncate_ragged_lines=True, ignore_errors=True)
         else:
             return pl.read_csv(filepath, skip_rows=header_line,
@@ -1739,6 +1786,9 @@ class InteractivePlotter:
                 errors.append(f"{os.path.basename(filepath)}: {e}")
         if errors:
             messagebox.showerror("Load Errors", "Errors loading files:\n\n" + "\n".join(errors))
+        # Data changed — any cached color-map interpolation is stale
+        self._cmap_cache_key = None
+        self._cmap_cache_zi = None
         self.refresh_dataset_list(new_load=True)
 
     def unload_files(self):
@@ -1747,6 +1797,9 @@ class InteractivePlotter:
         keys = [self.dataset_listbox.get(i) for i in sel]
         for k in keys:
             if k in self.datasets: del self.datasets[k]
+        # Data changed — any cached color-map interpolation is stale
+        self._cmap_cache_key = None
+        self._cmap_cache_zi = None
         self.refresh_dataset_list(new_load=False)
         self.update_plot()
 
@@ -2760,8 +2813,34 @@ class InteractivePlotter:
                 y_range = (cmap_y_max - cmap_y_min) or 1.0
                 Xn = (X - cmap_x_min) / x_range
                 Yn = (Y - cmap_y_min) / y_range
-                xi, yi = np.meshgrid(np.linspace(0.0, 1.0, 300), np.linspace(0.0, 1.0, 300))
-                zi = griddata((Xn, Yn), Z, (xi, yi), method='cubic')
+                # --- Interpolation with cache (recomputed only when the DATA
+                # changes; cosmetic updates reuse the cached grid) ---
+                cache_key = (sel_ds[0][0], xcol, ycols[0], self.z_combo.get(),
+                             xf_s, yf_s, zf_s,
+                             self._cmap_interp_method.get(), self._cmap_grid_res.get())
+                zi_recomputed = self._cmap_cache_key != cache_key
+                if zi_recomputed:
+                    # Fast path: data already forms a complete regular grid
+                    # (typical for measurement maps) → plain reshape, no
+                    # interpolation at all.
+                    xu, x_inv = np.unique(Xn, return_inverse=True)
+                    yu, y_inv = np.unique(Yn, return_inverse=True)
+                    if len(xu) * len(yu) == len(Xn):
+                        zi = np.full((len(yu), len(xu)), np.nan)
+                        zi[y_inv, x_inv] = Z
+                    else:
+                        try:
+                            gres = int(float(self._cmap_grid_res.get()))
+                        except (ValueError, TypeError):
+                            gres = 300
+                        gres = max(gres, 2)
+                        xi, yi = np.meshgrid(np.linspace(0.0, 1.0, gres),
+                                             np.linspace(0.0, 1.0, gres))
+                        zi = griddata((Xn, Yn), Z, (xi, yi),
+                                      method=self._cmap_interp_method.get())
+                    self._cmap_cache_key = cache_key
+                    self._cmap_cache_zi = zi
+                zi = self._cmap_cache_zi
                 # Derive the color range from the ACTUAL Z data (finite values only) when
                 # the user has not set Z Min/Max. Dividing X or Y only rescales the grid
                 # spacing; it must NOT change the Z (color) axis ticks or colors.
@@ -2824,8 +2903,10 @@ class InteractivePlotter:
                 # --- Store interpolated data for line drawing feature ---
                 self._cmap_zi_data = zi.copy()
                 self._cmap_extent = (X.min(), X.max(), Y.min(), Y.max())
-                # Re-draw any previously drawn lines on the new color map
-                self._redraw_cmap_lines()
+                # Re-draw any previously drawn lines on the new color map.
+                # Re-extract profiles ONLY when the interpolated grid was
+                # recomputed (cosmetic updates keep the cached profiles).
+                self._redraw_cmap_lines(reextract=zi_recomputed)
 
             # --- COMMON FORMATTING ---
             def apply_format(ax_obj, char, mode):
@@ -4464,83 +4545,68 @@ class InteractivePlotter:
     
     def _extract_line_profile(self, points):
         """Extract Z values along a polyline path on the color map.
-        
-        Returns a list of dicts with keys: x, y, z, distance
+
+        Vectorized with numpy (was a per-sample Python loop — very slow for
+        long lines / many lines). Returns a dict of numpy arrays with keys:
+        x, y, z, distance.
         """
+        empty = {'x': np.array([]), 'y': np.array([]),
+                 'z': np.array([]), 'distance': np.array([])}
         if self._cmap_zi_data is None or self._cmap_extent is None:
-            return []
-        
+            return empty
+        if len(points) < 2:
+            return empty
+
         zi = self._cmap_zi_data
         xmin, xmax, ymin, ymax = self._cmap_extent
         ny, nx = zi.shape
-        
-        # Sample points along the full path
-        all_sampled = []
+        span = max(xmax - xmin, ymax - ymin) or 1.0
+
+        # Build sample arrays per segment (excludes segment end points,
+        # matching the original per-sample loop), plus the final vertex.
+        segs = []
         cumulative_distance = 0.0
-        
         for i in range(len(points) - 1):
             x0, y0 = points[i]
             x1, y1 = points[i + 1]
-            seg_len = np.sqrt((x1 - x0)**2 + (y1 - y0)**2)
-            
-            # Number of samples proportional to segment length relative to data range
-            n_samples = max(int(seg_len / max(xmax - xmin, ymax - ymin) * 500), 10)
-            
-            for j in range(n_samples):
-                t = j / n_samples
-                sx = x0 + t * (x1 - x0)
-                sy = y0 + t * (y1 - y0)
-                
-                # Convert data coordinates to pixel indices
-                px = (sx - xmin) / (xmax - xmin) * (nx - 1)
-                py = (sy - ymin) / (ymax - ymin) * (ny - 1)
-                
-                # Bilinear interpolation
-                px0 = int(np.floor(px))
-                py0 = int(np.floor(py))
-                px1 = px0 + 1
-                py1 = py0 + 1
-                
-                if 0 <= px0 < nx and 0 <= py0 < ny and 0 <= px1 < nx and 0 <= py1 < ny:
-                    fx = px - px0
-                    fy = py - py0
-                    z_val = (zi[py0, px0] * (1 - fx) * (1 - fy) +
-                             zi[py0, px1] * fx * (1 - fy) +
-                             zi[py1, px0] * (1 - fx) * fy +
-                             zi[py1, px1] * fx * fy)
-                else:
-                    z_val = np.nan
-                
-                all_sampled.append({
-                    'x': sx, 'y': sy, 'z': z_val,
-                    'distance': cumulative_distance + np.sqrt((sx - x0)**2 + (sy - y0)**2)
-                })
-            
+            seg_len = float(np.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2))
+            n_samples = max(int(seg_len / span * 500), 10)
+            t = np.arange(n_samples) / n_samples
+            sx = x0 + t * (x1 - x0)
+            sy = y0 + t * (y1 - y0)
+            d = cumulative_distance + np.sqrt((sx - x0) ** 2 + (sy - y0) ** 2)
+            segs.append((sx, sy, d))
             cumulative_distance += seg_len
-        
-        # Add the last point
         lx, ly = points[-1]
-        px = (lx - xmin) / (xmax - xmin) * (nx - 1)
-        py = (ly - ymin) / (ymax - ymin) * (ny - 1)
-        px0 = int(np.floor(px))
-        py0 = int(np.floor(py))
+        segs.append((np.array([lx]), np.array([ly]),
+                     np.array([cumulative_distance])))
+
+        X = np.concatenate([s[0] for s in segs])
+        Y = np.concatenate([s[1] for s in segs])
+        D = np.concatenate([s[2] for s in segs])
+
+        # Bilinear interpolation on the interpolated grid (vectorized)
+        px = (X - xmin) / (xmax - xmin) * (nx - 1)
+        py = (Y - ymin) / (ymax - ymin) * (ny - 1)
+        px0 = np.floor(px).astype(int)
+        py0 = np.floor(py).astype(int)
         px1 = px0 + 1
         py1 = py0 + 1
-        if 0 <= px0 < nx and 0 <= py0 < ny and 0 <= px1 < nx and 0 <= py1 < ny:
-            fx = px - px0
-            fy = py - py0
-            z_val = (zi[py0, px0] * (1 - fx) * (1 - fy) +
-                     zi[py0, px1] * fx * (1 - fy) +
-                     zi[py1, px0] * (1 - fx) * fy +
-                     zi[py1, px1] * fx * fy)
-        else:
-            z_val = np.nan
-        all_sampled.append({
-            'x': lx, 'y': ly, 'z': z_val,
-            'distance': cumulative_distance
-        })
-        
-        return all_sampled
+        fx = px - px0
+        fy = py - py0
+        # Same validity rule as the original scalar loop
+        valid = (px0 >= 0) & (px1 < nx) & (py0 >= 0) & (py1 < ny)
+        z = np.full(X.shape, np.nan)
+        if np.any(valid):
+            i0, i1 = py0[valid], py1[valid]
+            j0, j1 = px0[valid], px1[valid]
+            zf, yf_ = fx[valid], fy[valid]
+            z[valid] = (zi[i0, j0] * (1 - zf) * (1 - yf_) +
+                        zi[i0, j1] * zf * (1 - yf_) +
+                        zi[i1, j0] * (1 - zf) * yf_ +
+                        zi[i1, j1] * zf * yf_)
+
+        return {'x': X, 'y': Y, 'z': z, 'distance': D}
     
     def _show_line_profile_popup(self, profile_data):
         """Show a popup window with the line profile plot and export option."""
@@ -4559,8 +4625,8 @@ class InteractivePlotter:
         fig_profile = Figure(figsize=(7, 4), dpi=100)
         ax_profile = fig_profile.add_subplot(111)
         
-        distances = [d['distance'] for d in profile_data]
-        z_vals = [d['z'] for d in profile_data]
+        distances = profile_data['distance']
+        z_vals = profile_data['z']
         
         ax_profile.plot(distances, z_vals, 'b-', linewidth=1.5)
         ax_profile.set_xlabel("Distance along line", fontsize=11)
@@ -4575,7 +4641,7 @@ class InteractivePlotter:
         canvas_profile.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Info label
-        n_pts = len(profile_data)
+        n_pts = len(z_vals)
         info_frame = ttk.Frame(popup)
         info_frame.pack(fill='x', padx=10, pady=2)
         ttk.Label(info_frame, text=f"Sampled {n_pts} points along the line", 
@@ -4597,8 +4663,9 @@ class InteractivePlotter:
             try:
                 with open(filepath, 'w', encoding='utf-8') as f:
                     f.write("Distance,X,Y,Z\n")
-                    for d in profile_data:
-                        f.write(f"{d['distance']:.6g},{d['x']:.6g},{d['y']:.6g},{d['z']:.6g}\n")
+                    for dd, xx, yy, zz in zip(profile_data['distance'], profile_data['x'],
+                                              profile_data['y'], profile_data['z']):
+                        f.write(f"{dd:.6g},{xx:.6g},{yy:.6g},{zz:.6g}\n")
                 messagebox.showinfo("Exported", f"Data exported to:\n{filepath}", parent=popup)
             except Exception as e:
                 messagebox.showerror("Export Error", str(e), parent=popup)
@@ -4621,12 +4688,14 @@ class InteractivePlotter:
         ttk.Button(btn_frame, text="🖼 Export Profile Plot", command=export_plot).pack(side='left', expand=True, fill='x', padx=3)
         ttk.Button(btn_frame, text="Close", command=popup.destroy).pack(side='left', expand=True, fill='x', padx=3)
     
-    def _redraw_cmap_lines(self):
+    def _redraw_cmap_lines(self, reextract=True):
         """Redraw persistent line artists on the color map after update_plot.
 
         Also re-extracts the Z profile for each line, because the interpolated
         color-map data (`_cmap_zi_data`/`_cmap_extent`) is regenerated whenever
         the user presses Update Plot, so previously cached profiles would be stale.
+        Pass ``reextract=False`` when the interpolated grid was served from the
+        cache (cosmetic-only update) — the stored profiles are still valid.
         """
         if not hasattr(self, '_cmap_completed_lines'):
             return
@@ -4635,7 +4704,8 @@ class InteractivePlotter:
             if not points or len(points) < 2:
                 continue
             # Re-extract the profile using the freshly interpolated color-map data
-            line_data['profile_data'] = self._extract_line_profile(points)
+            if reextract:
+                line_data['profile_data'] = self._extract_line_profile(points)
             xs = [p[0] for p in points]
             ys = [p[1] for p in points]
             color = line_data.get('color', 'white')
@@ -4653,15 +4723,15 @@ class InteractivePlotter:
         - 'position': for horizontal lines use X, for vertical lines use Y,
           and for free/coord lines fall back to X.
         """
-        profile = line_data.get('profile_data', [])
+        profile = line_data.get('profile_data') or {}
         mode = self._cmap_profile_xmode.get()
         ltype = line_data.get('type', 'free')
         if mode == 'position':
             if ltype == 'vertical':
-                return [d['y'] for d in profile]
+                return profile.get('y', [])
             # horizontal, free, coord → use X
-            return [d['x'] for d in profile]
-        return [d['distance'] for d in profile]
+            return profile.get('x', [])
+        return profile.get('distance', [])
 
     def _show_all_profiles(self):
         """Show a popup with all line profiles overlaid, with interactive legend.
@@ -4684,6 +4754,9 @@ class InteractivePlotter:
         popup.transient(self.root)
 
         # --- Profile format state: LOCAL Tk variables (do not touch self.*) ---
+        # Full parity with the main plot's axis options: log scales, notation,
+        # decimals, tick direction/length/visibility, colors, backgrounds,
+        # axis breaks, custom label positions and rotations.
         pfs = {
             'title': tk.StringVar(value="Line Profiles (Z vs Distance)" if not use_position
                                   else "Line Profiles (Z vs Position)"),
@@ -4695,11 +4768,51 @@ class InteractivePlotter:
             'y_min': tk.StringVar(), 'y_max': tk.StringVar(),
             'x_maj': tk.StringVar(), 'y_maj': tk.StringVar(),
             'x_min_div': tk.StringVar(), 'y_min_div': tk.StringVar(),
+            'x_dec': tk.StringVar(), 'y_dec': tk.StringVar(),
+            'x_not': tk.StringVar(value="Scientific"),
+            'y_not': tk.StringVar(value="Scientific"),
+            'x_log': tk.BooleanVar(value=False),
+            'y_log': tk.BooleanVar(value=False),
+            'x_tick_pad': tk.StringVar(value="3.5"),
+            'y_tick_pad': tk.StringVar(value="3.5"),
+            'tick_dir_x': tk.StringVar(value="out"),
+            'tick_dir_y': tk.StringVar(value="out"),
+            'minor_tick_dir_x': tk.StringVar(value="out"),
+            'minor_tick_dir_y': tk.StringVar(value="out"),
+            'major_tick_length': tk.StringVar(value="4.0"),
+            'minor_tick_length': tk.StringVar(value="2.0"),
+            'x_tick_bottom': tk.BooleanVar(value=True),
+            'x_tick_top': tk.BooleanVar(value=False),
+            'y_tick_left': tk.BooleanVar(value=True),
+            'y_tick_right': tk.BooleanVar(value=False),
+            'x_break_start': tk.StringVar(), 'x_break_end': tk.StringVar(),
+            'y_break_start': tk.StringVar(), 'y_break_end': tk.StringVar(),
+            'use_custom_pos': tk.BooleanVar(value=False),
+            'title_x': tk.StringVar(value="0.5"), 'title_y': tk.StringVar(value="0.98"),
+            'xlabel_x': tk.StringVar(value="0.5"), 'xlabel_y': tk.StringVar(value="0.04"),
+            'ylabel_x': tk.StringVar(value="0.04"), 'ylabel_y': tk.StringVar(value="0.5"),
+            'use_rotation': tk.BooleanVar(value=False),
+            'title_rot': tk.StringVar(value="0"),
+            'xlabel_rot': tk.StringVar(value="0"),
+            'ylabel_rot': tk.StringVar(value="90"),
             'font_fam': tk.StringVar(value="Arial"),
             't_size': tk.StringVar(value="13"),
             'l_size': tk.StringVar(value="11"),
             'tick_size': tk.StringVar(value="10"),
             'leg_size': tk.StringVar(value="10"),
+            'title_color': 'black',
+            'xlabel_color': 'black',
+            'ylabel_color': 'black',
+            'xtick_color': 'black',
+            'ytick_color': 'black',
+            'plot_bg_color': 'white',
+            'fig_bg_color': 'white',
+            'plot_bg_alpha': tk.StringVar(value="1.0"),
+            'fig_bg_alpha': tk.StringVar(value="1.0"),
+            'legend_fill_color': 'white',
+            'legend_frame_color': 'black',
+            'legend_fill_alpha': tk.StringVar(value="1.0"),
+            'legend_draggable': tk.BooleanVar(value=False),
             'show_major_grid': tk.BooleanVar(value=True),
             'show_minor_grid': tk.BooleanVar(value=False),
             'grid_alpha': tk.StringVar(value="0.3"),
@@ -4728,13 +4841,29 @@ class InteractivePlotter:
             ax_profile.clear()
             plotted_lines.clear()
             plotted_labels.clear()
+            # Remove any figure-level texts from a previous custom-position draw
+            for t in list(fig_profile.texts):
+                try:
+                    t.remove()
+                except Exception:
+                    pass
+
+            # --- Axis breaks (same machinery as the main plot) ---
+            x_breaks = self._parse_breaks([(pfs['x_break_start'], pfs['x_break_end'])])
+            y_breaks = self._parse_breaks([(pfs['y_break_start'], pfs['y_break_end'])])
+            has_xb = bool(x_breaks)
+            has_yb = bool(y_breaks)
 
             for line_data in self._cmap_completed_lines:
-                profile = line_data.get('profile_data', [])
-                if not profile:
+                profile = line_data.get('profile_data')
+                if profile is None or len(profile.get('z', ())) == 0:
                     continue
-                x_vals = self._profile_xvalues(line_data)
-                z_vals = [d['z'] for d in profile]
+                x_vals = np.asarray(self._profile_xvalues(line_data), dtype=float)
+                z_vals = np.asarray(profile['z'], dtype=float)
+                if has_xb:
+                    x_vals = self._transform_data(x_vals, x_breaks)
+                if has_yb:
+                    z_vals = self._transform_data(z_vals, y_breaks)
                 color = line_data.get('color', 'blue')
                 name = line_data.get('name', 'Line')
                 ls = line_data.get('linestyle', '-')
@@ -4750,20 +4879,85 @@ class InteractivePlotter:
             tick_sz = _fval(pfs['tick_size'], 10)
             leg_sz = _fval(pfs['leg_size'], 10)
 
-            ax_profile.set_title(pfs['title'].get(), fontsize=t_sz, fontweight='bold', fontname=font)
-            ax_profile.set_xlabel(pfs['xlabel'].get(), fontsize=l_sz, fontname=font)
-            ax_profile.set_ylabel(pfs['ylabel'].get(), fontsize=l_sz, fontname=font)
-            ax_profile.tick_params(labelsize=tick_sz)
+            # Log scales (set before locators / ranges)
+            if pfs['x_log'].get():
+                ax_profile.set_xscale('log')
+            if pfs['y_log'].get():
+                ax_profile.set_yscale('log')
 
-            # Ranges
+            # Label rotations (like the main plot's custom rotation)
+            use_rot = pfs['use_rotation'].get()
+            title_rot = _fval(pfs['title_rot'], 0.0) if use_rot else 0
+            xlabel_rot = _fval(pfs['xlabel_rot'], 0.0) if use_rot else 0
+            ylabel_rot = _fval(pfs['ylabel_rot'], 90.0) if use_rot else 90
+
+            title_text = ax_profile.set_title(pfs['title'].get(), fontsize=t_sz, fontweight='bold',
+                                              fontname=font, color=pfs['title_color'], rotation=title_rot)
+            xlabel_text = ax_profile.set_xlabel(pfs['xlabel'].get(), fontsize=l_sz, fontname=font,
+                                                color=pfs['xlabel_color'], rotation=xlabel_rot)
+            ylabel_text = ax_profile.set_ylabel(pfs['ylabel'].get(), fontsize=l_sz, fontname=font,
+                                                color=pfs['ylabel_color'], rotation=ylabel_rot)
+
+            # --- Tick appearance: direction, length, pad, colors, sides ---
+            maj_len = _fval(pfs['major_tick_length'], 4.0)
+            min_len = _fval(pfs['minor_tick_length'], 2.0)
+            for axis_char, dir_var, mdir_var, pad_var, col_key, side_a, side_b in (
+                    ('x', pfs['tick_dir_x'], pfs['minor_tick_dir_x'], pfs['x_tick_pad'],
+                     'xtick_color', pfs['x_tick_bottom'], pfs['x_tick_top']),
+                    ('y', pfs['tick_dir_y'], pfs['minor_tick_dir_y'], pfs['y_tick_pad'],
+                     'ytick_color', pfs['y_tick_left'], pfs['y_tick_right'])):
+                d_ = dir_var.get()
+                tick_col = pfs[col_key]
+                kw = dict(direction=d_ if d_ != "none" else "out",
+                          length=0 if d_ == "none" else maj_len,
+                          labelsize=tick_sz, pad=_fval(pad_var, 3.5),
+                          labelcolor=tick_col, color=tick_col)
+                if axis_char == 'x':
+                    kw.update(bottom=side_a.get(), top=side_b.get())
+                else:
+                    kw.update(left=side_a.get(), right=side_b.get())
+                ax_profile.tick_params(axis=axis_char, **kw)
+                m_ = mdir_var.get()
+                ax_profile.tick_params(axis=axis_char, which='minor',
+                                       direction=m_ if m_ != "none" else "out",
+                                       length=0 if m_ == "none" else min_len,
+                                       labelcolor=tick_col, color=tick_col)
+
+            # --- Notation + decimals (skipped on log scale / axis breaks) ---
+            def apply_notation(char, mode, dec_var, has_brk):
+                log_on = pfs['x_log'].get() if char == 'x' else pfs['y_log'].get()
+                if log_on or has_brk:
+                    return
+                try:
+                    s = dec_var.get().strip()
+                    dec = int(s) if s else None
+                except (ValueError, TypeError):
+                    dec = None
+                if dec is not None:
+                    (ax_profile.xaxis if char == 'x' else ax_profile.yaxis).set_major_formatter(
+                        ticker.FormatStrFormatter(f'%.{dec}f'))
+                elif mode == "Scientific":
+                    ax_profile.ticklabel_format(axis=char, style='sci', scilimits=(-2, 2), useMathText=True)
+                elif mode == "Plain":
+                    ax_profile.ticklabel_format(axis=char, style='plain', useOffset=False)
+                elif mode == "Engineering":
+                    (ax_profile.xaxis if char == 'x' else ax_profile.yaxis).set_major_formatter(ticker.EngFormatter())
+            apply_notation('x', pfs['x_not'].get(), pfs['x_dec'], has_xb)
+            apply_notation('y', pfs['y_not'].get(), pfs['y_dec'], has_yb)
+
+            # Ranges (limits transformed through breaks, like the main plot)
             xmin = _fval(pfs['x_min'])
             xmax = _fval(pfs['x_max'])
             ymin = _fval(pfs['y_min'])
             ymax = _fval(pfs['y_max'])
-            if xmin is not None: ax_profile.set_xlim(left=xmin)
-            if xmax is not None: ax_profile.set_xlim(right=xmax)
-            if ymin is not None: ax_profile.set_ylim(bottom=ymin)
-            if ymax is not None: ax_profile.set_ylim(top=ymax)
+            if xmin is not None:
+                ax_profile.set_xlim(left=self._transform_data(np.array([xmin]), x_breaks)[0] if has_xb else xmin)
+            if xmax is not None:
+                ax_profile.set_xlim(right=self._transform_data(np.array([xmax]), x_breaks)[0] if has_xb else xmax)
+            if ymin is not None:
+                ax_profile.set_ylim(bottom=self._transform_data(np.array([ymin]), y_breaks)[0] if has_yb else ymin)
+            if ymax is not None:
+                ax_profile.set_ylim(top=self._transform_data(np.array([ymax]), y_breaks)[0] if has_yb else ymax)
 
             # Major tick step
             x_maj = _fval(pfs['x_maj'])
@@ -4786,6 +4980,30 @@ class InteractivePlotter:
                 ax_profile.xaxis.set_minor_locator(ticker.AutoMinorLocator(x_md))
             if y_md > 1:
                 ax_profile.yaxis.set_minor_locator(ticker.AutoMinorLocator(y_md))
+
+            # --- Axis break formatters + indicators (after other formatters) ---
+            if has_xb:
+                ax_profile.xaxis.set_major_formatter(ticker.FuncFormatter(
+                    self._make_break_formatter(x_breaks)))
+                self._draw_break_indicators(ax_profile, [(s, s) for s, e in x_breaks], axis='x')
+            if has_yb:
+                ax_profile.yaxis.set_major_formatter(ticker.FuncFormatter(
+                    self._make_break_formatter(y_breaks)))
+                self._draw_break_indicators(ax_profile, [(s, s) for s, e in y_breaks], axis='y')
+
+            # --- Backgrounds + alpha ---
+            ax_profile.set_facecolor(pfs['plot_bg_color'])
+            try:
+                pa = _fval(pfs['plot_bg_alpha'], 1.0)
+                ax_profile.patch.set_alpha(max(0.0, min(1.0, pa)))
+            except Exception:
+                pass
+            fig_profile.patch.set_facecolor(pfs['fig_bg_color'])
+            try:
+                fa = _fval(pfs['fig_bg_alpha'], 1.0)
+                fig_profile.patch.set_alpha(max(0.0, min(1.0, fa)))
+            except Exception:
+                pass
 
             # Grid
             ga = _fval(pfs['grid_alpha'], 0.3)
@@ -4817,8 +5035,39 @@ class InteractivePlotter:
                                         bbox_to_anchor=bbox,
                                         prop={'size': leg_sz, 'family': font})
                 leg.set_picker(10)
+                leg.get_frame().set_facecolor(pfs['legend_fill_color'])
+                leg.get_frame().set_edgecolor(pfs['legend_frame_color'])
+                try:
+                    la = _fval(pfs['legend_fill_alpha'], 1.0)
+                    leg.get_frame().set_alpha(max(0.0, min(1.0, la)))
+                except Exception:
+                    pass
+                if pfs['legend_draggable'].get():
+                    leg.set_draggable(True)
 
             fig_profile.tight_layout()
+
+            # --- Custom label positions (after tight_layout, like the main plot) ---
+            if pfs['use_custom_pos'].get():
+                if title_text is not None:
+                    title_text.set_visible(False)
+                    fig_profile.text(_fval(pfs['title_x'], 0.5), _fval(pfs['title_y'], 0.98),
+                                     pfs['title'].get(), fontsize=t_sz, fontweight='bold',
+                                     fontname=font, color=pfs['title_color'],
+                                     ha='center', va='top', rotation=title_rot)
+                if xlabel_text is not None:
+                    xlabel_text.set_visible(False)
+                    fig_profile.text(_fval(pfs['xlabel_x'], 0.5), _fval(pfs['xlabel_y'], 0.04),
+                                     pfs['xlabel'].get(), fontsize=l_sz, fontname=font,
+                                     color=pfs['xlabel_color'], ha='center', va='bottom',
+                                     rotation=xlabel_rot)
+                if ylabel_text is not None:
+                    ylabel_text.set_visible(False)
+                    fig_profile.text(_fval(pfs['ylabel_x'], 0.04), _fval(pfs['ylabel_y'], 0.5),
+                                     pfs['ylabel'].get(), fontsize=l_sz, fontname=font,
+                                     color=pfs['ylabel_color'], ha='left', va='center',
+                                     rotation=ylabel_rot)
+
             canvas_profile.draw_idle()
 
         canvas_profile.draw()
@@ -4856,7 +5105,8 @@ class InteractivePlotter:
         canvas_profile.mpl_connect('pick_event', on_legend_pick)
 
         # Info label
-        total_pts = sum(len(ld.get('profile_data', [])) for ld in self._cmap_completed_lines)
+        total_pts = sum(len((ld.get('profile_data') or {}).get('z', ()))
+                        for ld in self._cmap_completed_lines)
         info_frame = ttk.Frame(popup)
         info_frame.pack(fill='x', padx=10, pady=2)
         ttk.Label(info_frame, text=f"{len(self._cmap_completed_lines)} line(s), {total_pts} total sampled points. Click legend to toggle.",
@@ -4889,8 +5139,10 @@ class InteractivePlotter:
                     fpath = os.path.join(folder, f"{fname}.csv")
                     with open(fpath, 'w', encoding='utf-8') as f:
                         f.write("Distance,X,Y,Z\n")
-                        for d in ld.get('profile_data', []):
-                            f.write(f"{d['distance']:.6g},{d['x']:.6g},{d['y']:.6g},{d['z']:.6g}\n")
+                        pd_ = ld.get('profile_data') or {}
+                        for dd, xx, yy, zz in zip(pd_.get('distance', ()), pd_.get('x', ()),
+                                                  pd_.get('y', ()), pd_.get('z', ())):
+                            f.write(f"{dd:.6g},{xx:.6g},{yy:.6g},{zz:.6g}\n")
                     count += 1
                 messagebox.showinfo("Exported", f"Exported {count} file(s) to:\n{folder}", parent=popup)
             except Exception as e:
@@ -4935,6 +5187,24 @@ class InteractivePlotter:
             ttk.Label(f, text=txt, width=width).pack(side='left')
             ttk.Entry(f, textvariable=var).pack(side='right', expand=True, fill='x')
 
+        def add_col(parent, txt, key):
+            """Color picker bound to a plain-string entry in pfs."""
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            ttk.Label(f, text=txt, width=18).pack(side='left')
+            b = tk.Button(f, text=" ", bg=pfs[key], width=8)
+
+            def choose():
+                c = colorchooser.askcolor(parent=d, initialcolor=pfs[key])[1]
+                if c:
+                    pfs[key] = c
+                    b.config(bg=c)
+                    d.lift()
+            b.config(command=choose)
+            b.pack(side='right')
+
+        dir_options = ["out", "in", "inout", "none"]
+
         # ============================================
         # TAB 1: Labels & Title
         # ============================================
@@ -4947,8 +5217,15 @@ class InteractivePlotter:
         add_entry(tab_text, "Y Label:", pfs['ylabel'])
 
         ttk.Separator(tab_text, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_text, text="Text Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_col(tab_text, "Title Color:", 'title_color')
+        add_col(tab_text, "X Label Color:", 'xlabel_color')
+        add_col(tab_text, "Y Label Color:", 'ylabel_color')
+
+        ttk.Separator(tab_text, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_text, text="Legend", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         ttk.Checkbutton(tab_text, text="Show Legend", variable=pfs['show_legend']).pack(anchor='w', pady=2)
+        ttk.Checkbutton(tab_text, text="Draggable Legend", variable=pfs['legend_draggable']).pack(anchor='w', pady=2)
 
         lc_frame = ttk.Frame(tab_text)
         lc_frame.pack(fill='x', pady=2)
@@ -4960,6 +5237,10 @@ class InteractivePlotter:
                      values=["Best", "Upper Right", "Upper Left", "Lower Right", "Lower Left",
                              "Center", "Outside Right"],
                      width=14, state='readonly').pack(side='left', padx=4)
+
+        add_col(tab_text, "Legend Fill:", 'legend_fill_color')
+        add_col(tab_text, "Legend Frame:", 'legend_frame_color')
+        add_entry(tab_text, "Legend Fill Alpha:", pfs['legend_fill_alpha'])
 
         # ============================================
         # TAB 2: Ranges & Ticks
@@ -4974,6 +5255,30 @@ class InteractivePlotter:
         add_entry(tab_rt, "Y Max:", pfs['y_max'])
 
         ttk.Separator(tab_rt, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rt, text="Log Scales", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        lg_frame = ttk.Frame(tab_rt)
+        lg_frame.pack(fill='x', pady=2)
+        ttk.Checkbutton(lg_frame, text="X Log Scale", variable=pfs['x_log']).pack(side='left', padx=5)
+        ttk.Checkbutton(lg_frame, text="Y Log Scale", variable=pfs['y_log']).pack(side='left', padx=5)
+
+        ttk.Separator(tab_rt, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rt, text="Axis Breaks (leave blank to disable)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        bf_x = ttk.Frame(tab_rt)
+        bf_x.pack(fill='x', pady=2)
+        ttk.Label(bf_x, text="X Break:", width=12).pack(side='left')
+        ttk.Label(bf_x, text="Start:").pack(side='left', padx=(5, 2))
+        ttk.Entry(bf_x, textvariable=pfs['x_break_start'], width=10).pack(side='left', padx=2)
+        ttk.Label(bf_x, text="End:").pack(side='left', padx=(10, 2))
+        ttk.Entry(bf_x, textvariable=pfs['x_break_end'], width=10).pack(side='left', padx=2)
+        bf_y = ttk.Frame(tab_rt)
+        bf_y.pack(fill='x', pady=2)
+        ttk.Label(bf_y, text="Y Break:", width=12).pack(side='left')
+        ttk.Label(bf_y, text="Start:").pack(side='left', padx=(5, 2))
+        ttk.Entry(bf_y, textvariable=pfs['y_break_start'], width=10).pack(side='left', padx=2)
+        ttk.Label(bf_y, text="End:").pack(side='left', padx=(10, 2))
+        ttk.Entry(bf_y, textvariable=pfs['y_break_end'], width=10).pack(side='left', padx=2)
+
+        ttk.Separator(tab_rt, orient='horizontal').pack(fill='x', pady=10)
         ttk.Label(tab_rt, text="Major Tick Step (blank = auto)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_entry(tab_rt, "X Major:", pfs['x_maj'])
         add_entry(tab_rt, "Y Major:", pfs['y_maj'])
@@ -4982,6 +5287,29 @@ class InteractivePlotter:
         ttk.Label(tab_rt, text="Minor Divisions (0/blank = auto)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_entry(tab_rt, "X Minor Divs:", pfs['x_min_div'])
         add_entry(tab_rt, "Y Minor Divs:", pfs['y_min_div'])
+
+        ttk.Separator(tab_rt, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rt, text="Tick Pads", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_rt, "X Tick Pad:", pfs['x_tick_pad'])
+        add_entry(tab_rt, "Y Tick Pad:", pfs['y_tick_pad'])
+
+        ttk.Separator(tab_rt, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rt, text="Decimals (blank = auto)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_rt, "X Decimals:", pfs['x_dec'])
+        add_entry(tab_rt, "Y Decimals:", pfs['y_dec'])
+
+        ttk.Separator(tab_rt, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_rt, text="Notation", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        not_frame = ttk.Frame(tab_rt)
+        not_frame.pack(fill='x', pady=2)
+        ttk.Label(not_frame, text="X:", width=8).pack(side='left')
+        ttk.Combobox(not_frame, textvariable=pfs['x_not'],
+                     values=["Scientific", "Plain", "Engineering"], width=13,
+                     state='readonly').pack(side='left', padx=4)
+        ttk.Label(not_frame, text="Y:", width=8).pack(side='left')
+        ttk.Combobox(not_frame, textvariable=pfs['y_not'],
+                     values=["Scientific", "Plain", "Engineering"], width=13,
+                     state='readonly').pack(side='left', padx=4)
 
         # ============================================
         # TAB 3: Fonts & Grid
@@ -5016,6 +5344,105 @@ class InteractivePlotter:
         ttk.Label(gls_frame, text="Grid Style:", width=15).pack(side='left')
         ttk.Combobox(gls_frame, textvariable=pfs['grid_ls'],
                      values=['-', '--', ':', '-.'], width=8, state='readonly').pack(side='left', padx=2)
+
+        # ============================================
+        # TAB 4: Tick Appearance
+        # ============================================
+        tab_ta = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_ta, text="Tick Appearance")
+
+        ttk.Label(tab_ta, text="Major Tick Direction:", font=('Arial', 9, 'bold')).pack(anchor='w', pady=(5, 2))
+        mdir_frame = ttk.Frame(tab_ta)
+        mdir_frame.pack(fill='x', pady=2)
+        ttk.Label(mdir_frame, text="X:", width=8).grid(row=0, column=0)
+        ttk.Combobox(mdir_frame, textvariable=pfs['tick_dir_x'], values=dir_options, width=8, state='readonly').grid(row=0, column=1, padx=2)
+        ttk.Label(mdir_frame, text="Y:", width=8).grid(row=0, column=2)
+        ttk.Combobox(mdir_frame, textvariable=pfs['tick_dir_y'], values=dir_options, width=8, state='readonly').grid(row=0, column=3, padx=2)
+
+        ttk.Label(tab_ta, text="Minor Tick Direction:", font=('Arial', 9, 'bold')).pack(anchor='w', pady=(10, 2))
+        mindir_frame = ttk.Frame(tab_ta)
+        mindir_frame.pack(fill='x', pady=2)
+        ttk.Label(mindir_frame, text="X:", width=8).grid(row=0, column=0)
+        ttk.Combobox(mindir_frame, textvariable=pfs['minor_tick_dir_x'], values=dir_options, width=8, state='readonly').grid(row=0, column=1, padx=2)
+        ttk.Label(mindir_frame, text="Y:", width=8).grid(row=0, column=2)
+        ttk.Combobox(mindir_frame, textvariable=pfs['minor_tick_dir_y'], values=dir_options, width=8, state='readonly').grid(row=0, column=3, padx=2)
+
+        ttk.Label(tab_ta, text="Tick Length (points):", font=('Arial', 9, 'bold')).pack(anchor='w', pady=(10, 2))
+        len_frame = ttk.Frame(tab_ta)
+        len_frame.pack(fill='x', pady=2)
+        ttk.Label(len_frame, text="Major:", width=8).pack(side='left')
+        ttk.Entry(len_frame, textvariable=pfs['major_tick_length'], width=8).pack(side='left', padx=2)
+        ttk.Label(len_frame, text="Minor:", width=8).pack(side='left', padx=(10, 0))
+        ttk.Entry(len_frame, textvariable=pfs['minor_tick_length'], width=8).pack(side='left', padx=2)
+
+        ttk.Separator(tab_ta, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_ta, text="Tick Visibility per Side", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        side_frame = ttk.Frame(tab_ta)
+        side_frame.pack(fill='x', pady=2)
+        ttk.Label(side_frame, text="X Axis:", width=8, font=('Arial', 9, 'bold')).grid(row=0, column=0, sticky='w')
+        ttk.Checkbutton(side_frame, text="Bottom", variable=pfs['x_tick_bottom']).grid(row=0, column=1, padx=5)
+        ttk.Checkbutton(side_frame, text="Top", variable=pfs['x_tick_top']).grid(row=0, column=2, padx=5)
+        ttk.Label(side_frame, text="Y Axis:", width=8, font=('Arial', 9, 'bold')).grid(row=1, column=0, sticky='w')
+        ttk.Checkbutton(side_frame, text="Left", variable=pfs['y_tick_left']).grid(row=1, column=1, padx=5)
+        ttk.Checkbutton(side_frame, text="Right", variable=pfs['y_tick_right']).grid(row=1, column=2, padx=5)
+
+        # ============================================
+        # TAB 5: Colors
+        # ============================================
+        tab_col = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_col, text="Colors")
+
+        ttk.Label(tab_col, text="Tick Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_col(tab_col, "X Tick Color:", 'xtick_color')
+        add_col(tab_col, "Y Tick Color:", 'ytick_color')
+
+        ttk.Separator(tab_col, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_col, text="Background Colors", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_col(tab_col, "Plot Background:", 'plot_bg_color')
+        add_entry(tab_col, "Plot Background Alpha:", pfs['plot_bg_alpha'])
+        add_col(tab_col, "Figure Background:", 'fig_bg_color')
+        add_entry(tab_col, "Figure Background Alpha:", pfs['fig_bg_alpha'])
+
+        # ============================================
+        # TAB 6: Positions & Rotation
+        # ============================================
+        tab_pr = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_pr, text="Positions & Rotation")
+
+        ttk.Checkbutton(tab_pr, text="Use Custom Label Positions",
+                        variable=pfs['use_custom_pos']).pack(pady=5, anchor='w')
+        ttk.Label(tab_pr, text="Figure coordinates: (0,0) = bottom-left, (1,1) = top-right",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 10), anchor='w')
+
+        def add_pos_entry(parent, label, x_var, y_var):
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            ttk.Label(f, text=label, width=12).pack(side='left')
+            ttk.Label(f, text="X:").pack(side='left', padx=(5, 2))
+            ttk.Entry(f, textvariable=x_var, width=8).pack(side='left', padx=2)
+            ttk.Label(f, text="Y:").pack(side='left', padx=(10, 2))
+            ttk.Entry(f, textvariable=y_var, width=8).pack(side='left', padx=2)
+
+        add_pos_entry(tab_pr, "Title:", pfs['title_x'], pfs['title_y'])
+        add_pos_entry(tab_pr, "X Label:", pfs['xlabel_x'], pfs['xlabel_y'])
+        add_pos_entry(tab_pr, "Y Label:", pfs['ylabel_x'], pfs['ylabel_y'])
+
+        ttk.Separator(tab_pr, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Checkbutton(tab_pr, text="Use Custom Text Rotation",
+                        variable=pfs['use_rotation']).pack(pady=5, anchor='w')
+        ttk.Label(tab_pr, text="Rotation in degrees (0 = horizontal, 90 = vertical)",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
+
+        def add_rot_entry(parent, label, var):
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            ttk.Label(f, text=label, width=15).pack(side='left')
+            ttk.Entry(f, textvariable=var, width=8).pack(side='left', padx=2)
+            ttk.Label(f, text="°").pack(side='left')
+
+        add_rot_entry(tab_pr, "Title Rotation:", pfs['title_rot'])
+        add_rot_entry(tab_pr, "X Label Rotation:", pfs['xlabel_rot'])
+        add_rot_entry(tab_pr, "Y Label Rotation:", pfs['ylabel_rot'])
 
         # ============================================
         # Button frame (pinned)
@@ -5416,6 +5843,9 @@ class InteractivePlotter:
                 # will be restored after refresh_dataset_list populates the combos
             
             # Refresh UI to populate combos
+            # Data changed — any cached color-map interpolation is stale
+            self._cmap_cache_key = None
+            self._cmap_cache_zi = None
             self.refresh_dataset_list(new_load=True)
             
             # === RESTORE AXIS SELECTIONS (after combos populated) ===
