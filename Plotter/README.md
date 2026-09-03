@@ -159,9 +159,9 @@ A table showing each series (file + column) with controls for:
 
 ---
 
-## Color Map Line Drawing
+## Color Map Line Drawing & Profile Extraction
 
-When viewing a **Color Map**, you can draw lines on the plot to extract Z-value profiles:
+When viewing a **Color Map**, you can draw lines on the plot to extract Z-value profiles. All controls live in the **"🛠 Line Profile Tools"** dialog.
 
 ### Drawing
 - Click **"✏ Draw Line on Color Map"** to enter drawing mode.
@@ -169,23 +169,37 @@ When viewing a **Color Map**, you can draw lines on the plot to extract Z-value 
 - A red preview line follows your cursor while drawing.
 - Multiple lines can be drawn; each gets a unique color.
 
+### Line Types
+- **Type** dropdown — select how the line is drawn:
+  - **Freehand** — arbitrary polyline (default)
+  - **Horizontal** — snap to a horizontal cut
+  - **Vertical** — snap to a vertical cut
+  - **Coordinates** — enter exact endpoints numerically
+
+### Profile Extraction Settings
+- **X** dropdown — profile horizontal axis: `distance` (along the line) or `position` (X/Y coordinate of the map).
+- **Source** dropdown — where Z values are sampled from:
+  - **Raw - nearest point** — nearest raw data point
+  - **Raw - row/column** — snap to the nearest raw row/column
+  - **Grid - nearest node** — nearest node of the interpolated grid
+  - **Grid - bilinear** — bilinear interpolation on the interpolated grid
+- Changing the source **re-extracts all completed line profiles** automatically.
+- Profiles are also re-extracted automatically whenever the interpolated grid is recomputed (e.g., new interpolation settings); pure style changes reuse the cached grid for fast updates.
+
 ### Line Settings
-- Click **"🎨 Line Colors"** (now **"Line Settings"**) to open the per-line configuration dialog.
-- For each drawn line you can control:
-  - **Color** — Color picker button
-  - **Name** — Custom name for the line
-  - **Line Type** — Solid (—), Dashed (---), Dash-dot (-.-), Dotted (···)
-  - **Width** — Numeric value (default 2.5)
+- Per-line configuration dialog: **Color**, **Name**, **Line Type** (solid, dashed, dash-dot, dotted), **Width** (default 2.5).
 - All changes apply immediately to both the color map line and the profile popup.
 
 ### Profiles
-- Click **"📊 Show Profiles"** to open a popup with all line profiles overlaid.
-- Each profile uses the line's individual color, style, and width.
-- Click legend entries in the popup to toggle visibility.
-- Export all profile data to CSV or save the profile plot as an image.
+- Finishing a line opens a popup with that line's extracted profile, with **📊 Export Data to CSV** and **🖼 Export Profile Plot** buttons.
+- Click **"📊 Show Profiles"** to open a popup with **all line profiles overlaid**:
+  - Each profile uses the line's individual color, style, and width.
+  - Click legend entries in the popup to toggle visibility.
+  - **🎨 Format Profile** — full formatting dialog for the profile plot (title/labels, ranges, major/minor ticks, fonts, grid, legend).
+  - **📊 Export CSV (per line)** — writes one CSV file per line into a chosen folder.
 
 ### Clear
-- **"✖ Clear Lines"** removes all drawn lines and resets the color cycle.
+- **"✖ Clear All"** removes all drawn lines and resets the color cycle.
 
 ---
 

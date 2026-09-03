@@ -1,8 +1,8 @@
 # Dynacool Version — Transport Measurement Suite
 
-A **PyMeasure-based** GUI application for automated transport measurements on quantum devices (tunnel junctions, Hall bars, etc.) using lock-in amplifiers, DC SMUs, and superconducting magnets.
+A **PyMeasure-based** GUI application for automated transport measurements on quantum devices (tunnel junctions, Hall bars, etc.) using lock-in amplifiers, DC SMUs, and a superconducting magnet, on the **Quantum Design Dynacool PPMS**.
 
-Built for the **ICE measurement workstation** and developed by **Yoav Sharaby**.
+Developed by **Yoav Sharaby**.
 
 ---
 
@@ -17,6 +17,7 @@ Built for the **ICE measurement workstation** and developed by **Yoav Sharaby**.
   - [Instrument Overrides (`instrument_overrides.json`)](#instrument-overrides-instrument_overridesjson)
 - [Measurement Procedures](#measurement-procedures)
 - [Scan Modes](#scan-modes)
+- [Dynamic Instrument Columns](#dynamic-instrument-columns)
 - [Supported Instruments](#supported-instruments)
 - [Dependencies](#dependencies)
 - [Troubleshooting](#troubleshooting)
@@ -56,17 +57,18 @@ Key capabilities:
 ## File Structure
 
 ```
-ICE version/
+Dynacool Version/
 ├── Transport measurements.py       # Main entry point — GUI launcher
 ├── config_prelaunch.py             # Pre-launch instrument configuration dialog
 ├── configuration.py                # Instrument initialization & temperature reader
+├── DynacoolPPMSClient.py           # Dynacool PPMS TCP/IP client (MultiPyVu bridge)
 ├── instrument_overrides.json       # Saved instrument settings (auto-generated)
-├── PROCEDURE_README.txt            # Additional procedure documentation
+├── ADDING_INSTRUMENTS.md           # How to add a new instrument
 ├── README.md                       # This file
 │
 └── procedures/                     # Measurement procedure package
     ├── __init__.py                 # Package init — exports all procedures & registries
-    ├── base.py                     # Common imports, instrument bindings, helpers
+    ├── base.py                     # Common imports, instrument bindings, dynamic column helpers
     │
     ├── resistance_time.py          # Resistance vs. time
     ├── resistance_gate_sweep.py    # Resistance vs. gate voltage
@@ -78,11 +80,15 @@ ICE version/
     │
     ├── differential_conductance_srs860.py      # dI/dV via SRS860
     ├── differential_conductance_zurich.py      # dI/dV via Zurich MFLI
+    ├── differential_resistance_srs860.py       # dV/dI via SRS860
     ├── differential_resistance_zurich.py       # dV/dI via Zurich MFLI
     ├── differential_resistance_zurich_AUX_map.py  # dV/dI AUX output mapping
     │
     ├── sequencer_rt_rv_rh.py       # Automated Rt → RV → RH sequence
-    └── sequencer_rv_dvdi.py        # Automated RV → dV/dI sequence
+    ├── sequencer_rv_dvdi.py        # Automated RV → dV/dI sequence (currently disabled)
+    │
+    ├── self_check_columns.py       # Self-check — column registry vs. procedures
+    └── self_check_runtime.py       # Self-check — runtime read/column alignment
 ```
 
 ---
@@ -93,8 +99,8 @@ ICE version/
 
 A PyQt5 dialog that opens **before** the main launcher. It allows you to:
 
-- **Enable/disable** individual instruments with checkboxes
-- **Select COM ports** for the magnet controller (auto-enumerated)
+- **Enable/disable** individual instruments with checkboxes, grouped in tabs: **Dynacool PPMS**, **Keithley SMUs**, **Lock-ins**, **Zurich MFLI**
+- **Configure the Dynacool PPMS** connection (host, default `10.0.0.10`; port, default `5000`)
 - **Select VISA addresses** for Keithley SMUs and SRS lock-ins (auto-enumerated)
 - **Configure Zurich MFLI** connections (host, port, device ID) with scan & test buttons
 - **Save** settings to `instrument_overrides.json`
@@ -106,10 +112,9 @@ When you click **Save & Launch**, the configuration is written to JSON and the m
 This module:
 
 1. Reads `instrument_overrides.json` for user-selected settings.
-2. Initializes each enabled instrument using the appropriate driver class from the `Instruments/` package.
-3. Sets module-level variables (`magnet`, `Gate_1`, `Gate_2`, `Dual_gate`, `SRS860`, `SRS830_1`, `SRS830_2`, `MFLI_1`, `MFLI_2`, `MFLI_3`) — disabled instruments are set to `None`.
-4. Provides `read_temperature()` to read cryostat temperature logs.
-5. Provides `read_dilution_temp()` placeholder for dilution fridge temperature.
+2. Initializes each enabled instrument using the appropriate driver class — the Dynacool PPMS via `DynacoolPPMSClient.py` (TCP/IP, MultiPyVu bridge), SMUs and lock-ins via the parent `Instruments/` package.
+3. Sets module-level variables (`magnet` [Dynacool PPMS], `Gate_1`, `Gate_2`, `Gate_3`, `SRS860_1`, `SRS860_2`, `SRS830_1`–`SRS830_3`, `MFLI_1`, `MFLI_2`, `MFLI_3`) — disabled instruments are set to `None`.
+4. Provides `read_temperature()` returning the Dynacool **sample temperature** (single column, unlike the ICE setup's four log-file stages).
 
 ### Instrument Overrides (`instrument_overrides.json`)
 
@@ -117,11 +122,13 @@ Auto-generated by the pre-launch dialog. Example:
 
 ```json
 {
-  "use_magnet": true,
-  "magnet_com": "COM5",
-  "magnet_baud": 115200,
+  "use_ppms": true,
+  "ppms_host": "10.0.0.10",
+  "ppms_port": 5000,
   "use_gate1": true,
   "gate1_visa": "USB0::0x05E6::0x2450::04416746::INSTR",
+  "use_gate3": true,
+  "gate3_visa": "USB0::0x05E6::0x2450::04416747::INSTR",
   "use_mfli_1": true,
   "mfli_1_host": "192.168.173.170",
   "mfli_1_dev": "Dev32114"
@@ -150,7 +157,7 @@ Each procedure is a PyMeasure `Procedure` subclass with defined parameters, data
 | **Differential resistance (Zurich)** | `differential_resistance_zurich.py` | Differential Resistance | dV/dI measurement using Zurich MFLI |
 | **Differential resistance AUX map** | `differential_resistance_zurich_AUX_map.py` | Differential Resistance, 2D Mapping | Gate-dependent dV/dI mapping via MFLI aux output |
 | **Rt/RV/RH sequencer** | `sequencer_rt_rv_rh.py` | Time-based, Gate Sweep, Magnetic Field | Automated sequence of Rt, RV, and RH measurements |
-| **RV/dV/dI sequencer** | `sequencer_rv_dvdi.py` | Gate Sweep, Differential Resistance | Automated RV followed by dV/dI measurements |
+| **RV/dV/dI sequencer** | `sequencer_rv_dvdi.py` | Gate Sweep, Differential Resistance | Automated RV followed by dV/dI measurements *(currently disabled in the launcher)* |
 
 ### Category Colors
 
@@ -180,15 +187,26 @@ Many procedures support configurable scan modes:
 
 ---
 
+## Dynamic Instrument Columns
+
+The CSV columns produced by each procedure **depend on which instruments are connected** in the pre-launch dialog — same mechanism as the ICE version:
+
+1. `procedures/base.py` builds each procedure's `DATA_COLUMNS` at import time from the column registries (`BASE_DATA_COLUMNS`, `LOCKIN_VOLTAGE_COLUMNS`, `LOCKIN_CURRENT_COLUMNS`, `MAGNET_COLUMNS`) based on `configuration.py` bindings.
+2. `DynacoolProcedure._read_standard()` only reads connected instruments; disconnected ones are skipped with no NaN padding.
+3. `GenericWindow` in `Transport measurements.py` calls `filter_inputs_by_connection()` to hide the `use_*` checkboxes of disconnected instruments from the GUI.
+
+> **Self-checks:** Run `python -m procedures.self_check_columns` and `python -m procedures.self_check_runtime` from the `Dynacool Version/` directory to verify column/value alignment across all connection scenarios.
+
+---
+
 ## Supported Instruments
 
 | Instrument | Driver | Connection | Variable Name |
 |---|---|---|---|
-| Cryomagnetics MPS4G | `Instruments/Cryomagnetics_MPS4G.py` | Serial (COM) | `magnet` |
-| Keithley 2450 (×2) | `Instruments/keithley2450_with_add_ons.py` | VISA (USB/GPIB) | `Gate_1`, `Gate_2` |
-| Keithley 2604B | `Instruments/keithley2604B.py` | VISA (USB/GPIB) | `Dual_gate` |
-| SRS SR860 | `Instruments/SR860_with_add_ons.py` | VISA (USB) | `SRS860` |
-| SRS SR830 (×2) | `Instruments/SR830_with_add_ons.py` | VISA (GPIB) | `SRS830_1`, `SRS830_2` |
+| Quantum Design Dynacool PPMS | `DynacoolPPMSClient.py` (local) | TCP/IP (MultiPyVu) | `magnet` |
+| Keithley 2450 (×3) | `Instruments/keithley2450_with_add_ons.py` | VISA (USB/GPIB) | `Gate_1`, `Gate_2`, `Gate_3` |
+| SRS SR860 (×2) | `Instruments/SR860_with_add_ons.py` | VISA (USB) | `SRS860_1`, `SRS860_2` |
+| SRS SR830 (×3) | `Instruments/SR830_with_add_ons.py` | VISA (GPIB) | `SRS830_1`, `SRS830_2`, `SRS830_3` |
 | Zurich Instruments MFLI (×3) | `Instruments/MFLI.py` | TCP/IP (zhinst) | `MFLI_1`, `MFLI_2`, `MFLI_3` |
 
 ---
@@ -215,8 +233,8 @@ Instrument drivers are located in the parent directory at `Instruments/`.
 |---|---|
 | "Instrument not found" | Open the pre-launch dialog and verify addresses. Check USB/GPIB cables. Click **Refresh lists**. |
 | "Stop flag caught" | The measurement was manually stopped. This is normal. |
-| NaN values in output | Ensure the relevant instrument is toggled **on** in the procedure's **Devices** parameter group. |
-| Magnet COM port access denied | Another program may be using the port. Close other instrument software and retry. |
+| NaN values in output | The instrument is **connected** but its `use_*` toggle is **off** in the procedure's **Devices** group. Toggle it on. (A *disconnected* instrument produces no column at all.) |
+| PPMS not opening / temperature 0 | Verify the PPMS host (`10.0.0.10`) and port (`5000`) in the pre-launch dialog and that MultiPyVu's server is running. |
 | MFLI connection failed | Verify the host IP, port (default 8004), and device ID. Use the **Test connection** button in the pre-launch dialog. |
 | Configuration not updating | Delete `instrument_overrides.json` and re-run to start fresh. |
 
@@ -224,13 +242,12 @@ Instrument drivers are located in the parent directory at `Instruments/`.
 
 ## Data Output
 
-Measurements are saved as CSV files to:
-```
-C:\Users\ICE\Desktop\ICE Measurements\Yoav\
-```
+Measurements are saved as timestamped CSV files to the **same folder as `Transport measurements.py`** (the script directory).
 
-Each CSV includes timestamped columns for temperature, gate voltages, leakage currents, lock-in X/Y readings (voltage and current), and magnetic field, depending on the instruments enabled during the procedure.
+Each CSV includes columns for the sample temperature, gate voltages, leakage currents, lock-in X/Y readings (voltage and current), and magnetic field, depending on the instruments enabled during the procedure.
+
+> **Column count varies per session:** Only instruments connected in the pre-launch dialog produce columns. See [Dynamic Instrument Columns](#dynamic-instrument-columns) for details.
 
 ---
 
-*For additional procedure details, see [`PROCEDURE_README.txt`](./PROCEDURE_README.txt).*
+*For adding new instruments, see [`ADDING_INSTRUMENTS.md`](./ADDING_INSTRUMENTS.md).*

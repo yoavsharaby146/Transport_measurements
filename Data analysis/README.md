@@ -150,6 +150,21 @@ python csv_operations.py
 
 ---
 
+### 6. `txt_csv converter.py` — Text-to-CSV Converter
+
+Converts whitespace/tab-separated text files (e.g., LabView logs from the dilution setup) into proper comma-separated CSV files.
+
+**Usage:**
+```bash
+python "txt_csv converter.py"
+```
+
+**Workflow:**
+1. Select one or more `.txt` input files
+2. Choose an output location — converted `.csv` files are written alongside
+
+---
+
 ## Typical Workflow
 
 ```

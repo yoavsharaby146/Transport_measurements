@@ -18,6 +18,7 @@ Built for the **ICE measurement workstation** and developed by **Yoav Sharaby**.
 - [Measurement Procedures](#measurement-procedures)
 - [Scan Modes](#scan-modes)
 - [Dynamic Instrument Columns](#dynamic-instrument-columns)
+- [Live-Plot Performance Patch](#live-plot-performance-patch)
 - [Supported Instruments](#supported-instruments)
 - [Dependencies](#dependencies)
 - [Troubleshooting](#troubleshooting)
@@ -62,7 +63,7 @@ ICE version/
 ├── config_prelaunch.py             # Pre-launch instrument configuration dialog
 ├── configuration.py                # Instrument initialization & temperature reader
 ├── instrument_overrides.json       # Saved instrument settings (auto-generated)
-├── PROCEDURE_README.txt            # Additional procedure documentation
+├── ADDING_INSTRUMENTS.md           # How to add a new instrument
 ├── README.md                       # This file
 │
 └── procedures/                     # Measurement procedure package
@@ -220,6 +221,16 @@ This is a **two-layer model**:
 
 ---
 
+## Live-Plot Performance Patch
+
+`Transport measurements.py` monkey-patches PyMeasure's `ResultsCurve.update_data()` at the window level (no `site-packages` files are modified):
+
+- **Why:** stock `update_data()` re-reads the whole results CSV and re-uploads every accumulated point to pyqtgraph on each refresh tick (~0.2 s), so GUI cost grows with total points — long maps get progressively slower.
+- **Fix:** only newly appended file bytes are parsed per poll; x/y are kept as plain NumPy arrays and `setData` is skipped when the file has not changed.
+- **Result:** live plots stay responsive over multi-day measurements. A full reload still happens on first poll, axis change, file truncation, or forced reload.
+
+---
+
 ## Supported Instruments
 
 | Instrument | Driver | Connection | Variable Name |
@@ -275,4 +286,4 @@ Each CSV includes timestamped columns for temperature, gate voltages, leakage cu
 
 ---
 
-*For additional procedure details, see [`PROCEDURE_README.txt`](./PROCEDURE_README.txt).*
+*For adding new instruments, see [`ADDING_INSTRUMENTS.md`](./ADDING_INSTRUMENTS.md).*

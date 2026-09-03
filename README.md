@@ -83,9 +83,12 @@ A **PyMeasure-based GUI application** for the ICE measurement workstation. A PyQ
 
 A **PyMeasure-based GUI application** for the Quantum Design **Dynacool PPMS**. Shares the same procedure architecture and launcher design as the ICE version, adapted for the Dynacool platform.
 
-- **Cryostat:** Quantum Design Dynacool PPMS
+- **Cryostat:** Quantum Design Dynacool PPMS (TCP/IP via MultiPyVu bridge)
 - **Client:** `DynacoolPPMSClient.py`
-- **Procedures:** same 13-procedure set as ICE (Rt, RV, RH, maps, dI/dV, dV/dI, sequencers)
+- **Gates:** 3× Keithley 2450 (`Gate_1`–`Gate_3`)
+- **Lock-ins:** 2× SRS SR860, 3× SRS SR830, 3× Zurich MFLI
+- **Procedures:** same procedure set as ICE (Rt, RV, RH, maps, dI/dV, dV/dI, sequencers)
+- **Dynamic columns:** CSV columns adapt to the instruments connected in the pre-launch dialog (same mechanism as ICE)
 - **Entry point:** `python "Transport measurements.py"`
 
 → See [`Dynacool Version/README.md`](Dynacool%20Version/README.md)
@@ -154,7 +157,7 @@ Standalone Tkinter GUI tools for controlling individual instruments outside the 
 
 ### Plotter
 
-An Origin Pro-inspired interactive plotting application (Tkinter + matplotlib). Loads CSV/Excel, supports line/scatter/colormap/dual-axis plots, axis breaks, custom ticks/fonts, session save/load, and color-map line profiling.
+An Origin Pro-inspired interactive plotting application (Tkinter + matplotlib). Loads CSV/Excel, supports line/scatter/colormap/dual-axis plots, axis breaks, custom ticks/fonts, session save/load, and color-map line profiling (freehand/horizontal/vertical/coordinate cuts with raw or interpolated-grid sampling, profile formatting, and per-line CSV export).
 
 ```bash
 python "Plotter/Plot data.py"
@@ -175,6 +178,7 @@ A suite of GUI tools for post-measurement CSV processing:
 | `reverser.py` | Reverse measurement blocks in a CSV |
 | `map_splitter.py` | Split a map CSV into one file per slow-axis setpoint |
 | `csv_operations.py` | Cross-file column math with formula expressions |
+| `txt_csv converter.py` | Convert space/tab-separated text files (e.g., LabView logs) to CSV |
 
 → See [`Data analysis/README.md`](Data%20analysis/README.md)
 
@@ -187,6 +191,7 @@ Sequence generators and calculators that produce measurement-sequence files (`.t
 | Script | Output |
 |---|---|
 | `RH RV Rt sequence generator.py` | Generates RH → Rt → RV forward/backward sequences at multiple fields |
+| `RH RV Rt sequence generator interactive.py` | Interactive block-based generator with **loops** — wrap any group of blocks in a nested sweep loop (field or gate voltage), unrolled at generate time |
 | `RV_dV_dI_sequence generator.py` | Generates RV → dV/dI sequences |
 | `*_interactive.py` variants | Prompted (interactive) versions of the generators |
 | `Calculator.py` | Research calculations |
