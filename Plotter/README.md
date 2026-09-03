@@ -112,7 +112,7 @@ The plot renders in the right panel. You can also press **"Export Plot"** to sav
 **Tab: Ranges & Transform**
 | Field | Description |
 |-------|-------------|
-| **Divide X/Y/Y2/Z** | Divide data by a constant (e.g., `1000` to convert mA to A). Y2 applies to the right axis in Dual Y-Axis. |
+| **Divide X / Y / Y2 / Z / X2** | Transform an axis's data. Enter a plain number to **divide** by it (e.g., `1000` to convert mA to A), **or** a formula using `x` for arbitrary arithmetic: `x*1e-9`, `x/1e10`, `1/x`, `x**2`, `np.sqrt(x)`, `np.log10(x)`, etc. (numpy available as `np`). Y2 applies to the right axis in Dual Y-Axis; X2 to the top axis in XXY/XYXY modes. On formula error the original data is kept. |
 | **Axis Ranges** | Min/Max for X, Y, Z axes. Leave blank for auto. |
 | **Y2 Ranges** | Min/Max for the right Y axis (Dual Y-Axis mode). |
 
