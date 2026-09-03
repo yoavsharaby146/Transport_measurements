@@ -296,6 +296,18 @@ class InteractivePlotter:
         self._cmap_line_mode = tk.StringVar(value="Freehand")
         # Profile x-axis: "distance" (arc length) or "position" (use x for horizontal lines, y for vertical)
         self._cmap_profile_xmode = tk.StringVar(value="distance")
+        # Profile source: how Z is sampled along drawn lines
+        # "Raw - nearest point": KD-tree nearest measured point (no averaging)
+        # "Raw - row/column": actual measured sweep row/column for H/V lines
+        # "Grid - nearest node": snap to closest zi node (no bilinear averaging)
+        # "Grid - bilinear": interpolated grid, bilinear sampling (original)
+        self._cmap_profile_source = tk.StringVar(value="Raw - nearest point")
+        # Raw (uninterpolated) data + KD-tree for raw profile sampling
+        self._cmap_raw_xyz = None
+        self._cmap_kdtree = None
+        self._cmap_raw_tol = float('inf')    # max distance line->nearest point
+        self._cmap_raw_tol_x = float('inf')  # half X spacing (row/col mode)
+        self._cmap_raw_tol_y = float('inf')  # half Y spacing (row/col mode)
         # Manual coordinate entry vars for "Coord" mode
         self._cmap_coord_x = tk.StringVar(value="0")
         self._cmap_coord_y = tk.StringVar(value="0")
@@ -431,6 +443,9 @@ class InteractivePlotter:
                              state='readonly', width=12)
         c_map.grid(row=row, column=2, columnspan=2, sticky='ew', padx=2)
         c_map.bind('<<ComboboxSelected>>', lambda e: (self._draw_cmap_preview(), self.update_plot()))
+        # Arrow keys cycle colormaps instantly (no popdown dance)
+        c_map.bind('<Down>', self._combo_arrow_step)
+        c_map.bind('<Up>', self._combo_arrow_step)
         row += 1
 
         # --- Colormap Preview Bar (labels drawn inside canvas to avoid clipping on small screens) ---
@@ -576,8 +591,12 @@ class InteractivePlotter:
         interp_frame = ttk.Frame(control_frame)
         interp_frame.grid(row=row, column=0, columnspan=4, sticky='w', pady=2)
         ttk.Label(interp_frame, text="Interp:").pack(side='left')
-        ttk.Combobox(interp_frame, textvariable=self._cmap_interp_method,
-                     values=["cubic", "linear", "nearest"], state='readonly', width=8).pack(side='left', padx=2)
+        interp_combo = ttk.Combobox(interp_frame, textvariable=self._cmap_interp_method,
+                                    values=["cubic", "linear", "nearest"], state='readonly', width=8)
+        interp_combo.pack(side='left', padx=2)
+        interp_combo.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
+        interp_combo.bind('<Down>', self._combo_arrow_step)
+        interp_combo.bind('<Up>', self._combo_arrow_step)
         ttk.Label(interp_frame, text="Grid:").pack(side='left', padx=(8, 0))
         ttk.Entry(interp_frame, textvariable=self._cmap_grid_res, width=6).pack(side='left', padx=2)
         ttk.Label(interp_frame, text="(linear/nearest are much faster)", font=('Arial', 8, 'italic'),
@@ -626,6 +645,21 @@ class InteractivePlotter:
         row += 1
         control_frame.columnconfigure(2, weight=1)
         control_frame.columnconfigure(3, weight=1)
+
+        # --- Arrow-key instant cycling on axis selectors ---
+        # Comboboxes: Down/Up steps to the adjacent value and commits
+        # immediately (fires <<ComboboxSelected>> -> update_plot).
+        for _cb in (self.x_combo, self.z_combo, self.y1_combo, self.y2_combo,
+                    self.xxy_y_combo, self.xxy_x1_col, self.xxy_x2_col,
+                    self.xyxy_x1_col, self.xyxy_y1_col,
+                    self.xyxy_x2_col, self.xyxy_y2_col):
+            _cb.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
+            _cb.bind('<Down>', self._combo_arrow_step)
+            _cb.bind('<Up>', self._combo_arrow_step)
+        # Y listbox (multi-select): arrows replace the selection with the
+        # adjacent column; mouse click still toggles multi-select.
+        self.y_listbox.bind('<Down>', self._ylist_arrow_step)
+        self.y_listbox.bind('<Up>', self._ylist_arrow_step)
 
         # Set minimum window size to ensure toolbar is visible on smaller screens
         self.root.minsize(900, 600)
@@ -2840,6 +2874,25 @@ class InteractivePlotter:
                                       method=self._cmap_interp_method.get())
                     self._cmap_cache_key = cache_key
                     self._cmap_cache_zi = zi
+                    # Cache raw (uninterpolated) data + KD-tree for raw
+                    # line profiles (exact measured values, no averaging).
+                    fin = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
+                    Xf, Yf, Zf = X[fin], Y[fin], Z[fin]
+                    self._cmap_raw_xyz = (Xf, Yf, Zf)
+                    try:
+                        self._cmap_raw_tol_x = (float(np.median(np.diff(np.unique(Xf)))) / 2.0
+                                                if Xf.size > 1 else float('inf'))
+                        self._cmap_raw_tol_y = (float(np.median(np.diff(np.unique(Yf)))) / 2.0
+                                                if Yf.size > 1 else float('inf'))
+                    except Exception:
+                        pass
+                    # nearest-point tolerance: one full data spacing beyond the line
+                    self._cmap_raw_tol = 2.0 * max(self._cmap_raw_tol_x, self._cmap_raw_tol_y)
+                    try:
+                        from scipy.spatial import cKDTree
+                        self._cmap_kdtree = cKDTree(np.column_stack((Xf, Yf)))
+                    except Exception:
+                        self._cmap_kdtree = None
                 zi = self._cmap_cache_zi
                 # Derive the color range from the ACTUAL Z data (finite values only) when
                 # the user has not set Z Min/Max. Dividing X or Y only rescales the grid
@@ -3481,6 +3534,43 @@ class InteractivePlotter:
         except Exception as e:
             print(f"Error plotting: {e}")
             messagebox.showerror("Plot Error", str(e))
+
+    def _combo_arrow_step(self, event):
+        """Down/Up on a readonly combobox: step to adjacent value and commit
+        immediately (fires <<ComboboxSelected>>) without opening the popdown.
+        """
+        w = event.widget
+        vals = list(w['values'])
+        if not vals:
+            return 'break'
+        idx = w.current()
+        idx = 0 if idx < 0 else min(max(idx + (1 if event.keysym == 'Down' else -1), 0), len(vals) - 1)
+        w.set(vals[idx])
+        w.event_generate('<<ComboboxSelected>>')
+        return 'break'  # suppress Tk's default open-the-list navigation
+
+    def _ylist_arrow_step(self, event):
+        """Down/Up on the Y-axis multi-select listbox: replace the selection
+        with the adjacent column and replot. Mouse clicks still multi-select.
+        """
+        lb = self.y_listbox
+        size = lb.size()
+        if not size:
+            return 'break'
+        delta = 1 if event.keysym == 'Down' else -1
+        try:
+            cur = lb.index('active')
+        except Exception:
+            cur = 0
+        if cur < 0:
+            cur = 0
+        idx = min(max(cur + delta, 0), size - 1)
+        lb.selection_clear(0, tk.END)
+        lb.selection_set(idx)
+        lb.activate(idx)
+        lb.see(idx)
+        self.update_plot()
+        return 'break'
 
     def _setup_autocomplete_combobox(self, combobox, all_values, parent_window):
         """Setup autocomplete functionality for a combobox.
@@ -4299,18 +4389,32 @@ class InteractivePlotter:
                                           command=self._clear_cmap_lines)
         self.btn_clear_lines.pack(side='left', expand=True, fill='x', padx=2)
 
-        # --- Type + Profile X selectors ---
+        # --- Type + Profile X + Source selectors ---
         type_mode_frame = ttk.Frame(top)
         type_mode_frame.pack(fill='x', pady=4)
         ttk.Label(type_mode_frame, text="Type:").pack(side='left')
         type_combo = ttk.Combobox(type_mode_frame, textvariable=self._cmap_line_mode,
                                    values=["Freehand", "Horizontal", "Vertical", "Coordinates"],
-                                   state='readonly', width=12)
-        type_combo.pack(side='left', padx=4)
+                                   state='readonly', width=11)
+        type_combo.pack(side='left', padx=3)
         type_combo.bind('<<ComboboxSelected>>', lambda e: self._on_line_mode_change())
-        ttk.Label(type_mode_frame, text="Profile X:").pack(side='left', padx=(8, 0))
+        ttk.Label(type_mode_frame, text="X:").pack(side='left', padx=(6, 0))
         ttk.Combobox(type_mode_frame, textvariable=self._cmap_profile_xmode,
-                      values=["distance", "position"], state='readonly', width=9).pack(side='left', padx=4)
+                      values=["distance", "position"], state='readonly', width=8).pack(side='left', padx=3)
+        ttk.Label(type_mode_frame, text="Source:").pack(side='left', padx=(6, 0))
+        src_combo = ttk.Combobox(type_mode_frame, textvariable=self._cmap_profile_source,
+                                  values=["Raw - nearest point", "Raw - row/column",
+                                          "Grid - nearest node", "Grid - bilinear"],
+                                  state='readonly', width=16)
+        src_combo.pack(side='left', padx=3)
+
+        def _on_profile_source_change(_e=None):
+            """Re-extract all completed line profiles with the new source."""
+            for ld in self._cmap_completed_lines:
+                ld['profile_data'] = self._extract_line_profile(ld['points'])
+            self.draw_line_status.set(
+                f"Profiles re-extracted (source: {self._cmap_profile_source.get()}).")
+        src_combo.bind('<<ComboboxSelected>>', _on_profile_source_change)
 
         # --- Parameter panel (swaps based on selected line type) ---
         self._cmap_config_frame = ttk.LabelFrame(top, text="Line Parameters", padding=5)
@@ -4543,27 +4647,11 @@ class InteractivePlotter:
         line_name = self._cmap_completed_lines[-1].get('name', 'Line') if self._cmap_completed_lines else 'Line'
         self.draw_line_status.set(f"{line_name} completed! Click to draw another, or stop drawing.")
     
-    def _extract_line_profile(self, points):
-        """Extract Z values along a polyline path on the color map.
-
-        Vectorized with numpy (was a per-sample Python loop — very slow for
-        long lines / many lines). Returns a dict of numpy arrays with keys:
-        x, y, z, distance.
-        """
-        empty = {'x': np.array([]), 'y': np.array([]),
-                 'z': np.array([]), 'distance': np.array([])}
-        if self._cmap_zi_data is None or self._cmap_extent is None:
-            return empty
-        if len(points) < 2:
-            return empty
-
-        zi = self._cmap_zi_data
+    def _profile_sample_positions(self, points):
+        """Dense sample positions along a polyline. Returns (X, Y, D) arrays
+        where D is cumulative arc length along the drawn line."""
         xmin, xmax, ymin, ymax = self._cmap_extent
-        ny, nx = zi.shape
         span = max(xmax - xmin, ymax - ymin) or 1.0
-
-        # Build sample arrays per segment (excludes segment end points,
-        # matching the original per-sample loop), plus the final vertex.
         segs = []
         cumulative_distance = 0.0
         for i in range(len(points) - 1):
@@ -4580,14 +4668,104 @@ class InteractivePlotter:
         lx, ly = points[-1]
         segs.append((np.array([lx]), np.array([ly]),
                      np.array([cumulative_distance])))
+        return (np.concatenate([s[0] for s in segs]),
+                np.concatenate([s[1] for s in segs]),
+                np.concatenate([s[2] for s in segs]))
 
-        X = np.concatenate([s[0] for s in segs])
-        Y = np.concatenate([s[1] for s in segs])
-        D = np.concatenate([s[2] for s in segs])
+    def _extract_profile_nearest(self, points):
+        """Raw mode: sample the KD-tree-nearest measured data point at each
+        position along the drawn line. No interpolation, no averaging.
+        Returns None when raw data / KD-tree is unavailable."""
+        raw = self._cmap_raw_xyz
+        tree = self._cmap_kdtree
+        if raw is None or tree is None:
+            return None
+        X, Y, D = self._profile_sample_positions(points)
+        dist, idx = tree.query(np.column_stack((X, Y)), k=1)
+        RX, RY, RZ = raw
+        z = np.where(dist <= self._cmap_raw_tol, RZ[idx], np.nan)
+        return {'x': X, 'y': Y, 'z': z, 'distance': D}
 
-        # Bilinear interpolation on the interpolated grid (vectorized)
+    def _extract_profile_rowcol(self, points):
+        """Raw mode for Horizontal/Vertical lines: take the actual measured
+        sweep row/column nearest the line — bit-for-bit the single-line data.
+        Returns None for non-H/V lines or when no points lie near the line."""
+        raw = self._cmap_raw_xyz
+        if raw is None:
+            return None
+        RX, RY, RZ = raw
+        x0, y0 = points[0]
+        x1, y1 = points[-1]
+        dx, dy = abs(x1 - x0), abs(y1 - y0)
+        horizontal = dy <= 1e-9 * max(dx, 1.0)
+        vertical = dx <= 1e-9 * max(dy, 1.0)
+        if horizontal:
+            m = np.abs(RY - y0) <= self._cmap_raw_tol_y
+        elif vertical:
+            m = np.abs(RX - x0) <= self._cmap_raw_tol_x
+        else:
+            return None
+        if not np.any(m):
+            return None
+        xs, ys, zs = RX[m], RY[m], RZ[m]
+        if horizontal:
+            order = np.argsort(xs)
+        else:
+            order = np.argsort(ys)
+        xs, ys, zs = xs[order], ys[order], zs[order]
+        coord = xs if horizontal else ys
+        dist = np.concatenate(([0.0], np.cumsum(np.abs(np.diff(coord)))))
+        return {'x': xs, 'y': ys, 'z': zs, 'distance': dist}
+
+    def _extract_line_profile(self, points):
+        """Extract Z values along a polyline path on the color map.
+
+        Dispatches on self._cmap_profile_source:
+        - "Raw - nearest point": exact measured values via KD-tree (default)
+        - "Raw - row/column": measured sweep row/column for H/V lines
+        - "Grid - nearest node": zi node snap, no bilinear averaging
+        - "Grid - bilinear": interpolated grid, bilinear (original behavior)
+        Raw modes fall back to grid sampling when raw data is unavailable.
+
+        Returns a dict of numpy arrays with keys: x, y, z, distance.
+        """
+        empty = {'x': np.array([]), 'y': np.array([]),
+                 'z': np.array([]), 'distance': np.array([])}
+        if self._cmap_zi_data is None or self._cmap_extent is None:
+            return empty
+        if len(points) < 2:
+            return empty
+
+        source = self._cmap_profile_source.get()
+        if source == "Raw - row/column":
+            res = self._extract_profile_rowcol(points)
+            if res is not None:
+                return res
+            source = "Raw - nearest point"   # not a clean H/V line
+        if source == "Raw - nearest point":
+            res = self._extract_profile_nearest(points)
+            if res is not None:
+                return res
+            source = "Grid - bilinear"       # raw data unavailable
+
+        X, Y, D = self._profile_sample_positions(points)
+        zi = self._cmap_zi_data
+        xmin, xmax, ymin, ymax = self._cmap_extent
+        ny, nx = zi.shape
+
         px = (X - xmin) / (xmax - xmin) * (nx - 1)
         py = (Y - ymin) / (ymax - ymin) * (ny - 1)
+
+        if source == "Grid - nearest node":
+            pxn = np.rint(px).astype(int)
+            pyn = np.rint(py).astype(int)
+            valid = (pxn >= 0) & (pxn < nx) & (pyn >= 0) & (pyn < ny)
+            z = np.full(X.shape, np.nan)
+            if np.any(valid):
+                z[valid] = zi[pyn[valid], pxn[valid]]
+            return {'x': X, 'y': Y, 'z': z, 'distance': D}
+
+        # Grid - bilinear (vectorized)
         px0 = np.floor(px).astype(int)
         py0 = np.floor(py).astype(int)
         px1 = px0 + 1
