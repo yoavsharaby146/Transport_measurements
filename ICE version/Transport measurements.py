@@ -7,6 +7,7 @@ All procedure classes are now organized in the 'procedures' package.
 
 import logging
 import sys
+import os
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
@@ -17,9 +18,88 @@ import numpy as np
 from pymeasure.log import console_log
 from pymeasure.display.Qt import QtWidgets, QtGui, QtCore
 from pymeasure.display.windows.managed_dock_window import ManagedDockWindow
+from pymeasure.display.curves import ResultsCurve
 
 import pyqtgraph as pg
 pg.setConfigOption("useOpenGL", True)
+
+
+# ---------------- Live-plot performance patch ----------------
+#
+# WHY: pymeasure's ResultsCurve.update_data() fires every refresh tick
+# (default 0.2 s) and calls Results.data + setData with ALL accumulated
+# points. Results.data re-reads the CSV (skiprows parses the whole file)
+# and pd.concat-copies the entire frame on EVERY poll, and setData
+# re-uploads every point to pyqtgraph. Cost per poll grows linearly with
+# total points, so over a multi-day map the GUI thread burns
+# quadratically more CPU and (via GIL contention) slows the measurement
+# worker thread — identical sweeps take longer the further the map
+# progresses (e.g. 45 min early, 65 min late).
+#
+# FIX: O(new rows) replacement — parse only newly appended bytes since the
+# last poll, keep x/y as plain numpy arrays, skip work when the file has
+# not changed. No site-packages files are modified.
+def _fast_update_data(self):
+    res = self.results
+    fname = res.data_filename
+    try:
+        size = os.path.getsize(fname)
+    except OSError:
+        return
+    st = getattr(self, '_fast_state', None)
+    if (st is None or st['x'] != self.x or st['y'] != self.y
+            or st['pos'] > size or self.force_reload):
+        # First poll, axis change, file truncated, or forced reload:
+        # do one full load through the original Results.data path.
+        if self.force_reload:
+            res.reload()
+        try:
+            data = res.data
+            xs = data[self.x].to_numpy(dtype=float)
+            ys = data[self.y].to_numpy(dtype=float)
+        except Exception:
+            return
+        self._fast_state = {'x': self.x, 'y': self.y, 'pos': size}
+        self._fast_arrays = (xs, ys)
+        self.setData(xs, ys)
+        return
+    if st['pos'] == size:
+        return  # nothing new — skip even the setData call
+    with open(fname, 'rb') as f:
+        f.seek(st['pos'])
+        chunk = f.read()
+    end = chunk.rfind(b'\n')
+    if end < 0:
+        return  # no complete new line yet
+    st['pos'] += end + 1
+    cols = res.procedure.DATA_COLUMNS
+    try:
+        xi, yi = cols.index(self.x), cols.index(self.y)
+    except ValueError:
+        return
+    ncols = len(cols)
+    xs_add, ys_add = [], []
+    for line in chunk[:end].decode('utf-8', errors='replace').splitlines():
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split(',')
+        if len(parts) != ncols:
+            continue
+        try:
+            xs_add.append(float(parts[xi]))
+            ys_add.append(float(parts[yi]))
+        except ValueError:
+            xs_add.append(float('nan'))
+            ys_add.append(float('nan'))
+    if xs_add:
+        ox, oy = self._fast_arrays
+        nx = np.concatenate((ox, np.asarray(xs_add)))
+        ny = np.concatenate((oy, np.asarray(ys_add)))
+        self._fast_arrays = (nx, ny)
+        self.setData(nx, ny)
+
+
+ResultsCurve.update_data = _fast_update_data
 
 # Import from the procedures package
 from procedures import (
@@ -97,6 +177,19 @@ class GenericWindow(ManagedDockWindow):
         self.filename = f"{spec_name}"
         self.directory = save_dir
 
+        # --- Live-plot performance tuning (see patch note at module top) ---
+        # 1) Poll plots every 1 s instead of pymeasure's default 0.2 s.
+        # 2) pyqtgraph downsampling + clip-to-view so the redraw cost does
+        #    not scale with total accumulated points on long maps.
+        try:
+            for pw in self.dock_widget.plot_frames:
+                pf = pw.plot_frame
+                pf.timer.setInterval(1000)
+                pf.plot.setDownsampling(auto=True, method='peak')
+                pf.plot.setClipToView(True)
+        except Exception:
+            pass
+
         try:
             self.plot_widget.plot.showGrid(x=True, y=True)
         except Exception:
@@ -109,7 +202,7 @@ class Launcher(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Procedure Launcher")
-        self.resize(850, 400)
+        self.resize(1025, 400)
         self.setMinimumSize(400, 350)
         central = QtWidgets.QWidget(self)
         self.setCentralWidget(central)
