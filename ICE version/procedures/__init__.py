@@ -16,6 +16,7 @@ from .base import (
 
 # Import procedure classes and their registration dicts
 from .resistance_time import Resistance_time_measurement, proc_resistance_time
+from .resistance_temperature import Resistance_temperature_measurement, proc_resistance_temperature
 from .resistance_gate_sweep import Resistance_gate_sweep_measurement, proc_resistance_gate
 from .resistance_magnet_sweep import Resistance_magnet_sweep_measurement, proc_resistance_magnet
 from .resistance_two_gate_sweep import Resistance_two_gate_scan_sweep_measurement, proc_resistance_two_gate_sweep
@@ -33,6 +34,7 @@ from .sequencer_rv_dvdi import RV_dV_dI_sequencer_measurement, proc_RV_dV_dI_seq
 # Category colors
 CATAGORIES = {
     "Time-based": "#BEE1F9",
+    "Temperature": "#F9DABE",
     "Gate Sweep": "#BEF9C7",
     "Magnetic Field": "#F6F9BE",
     "2D Mapping": "#EABEF9",
@@ -43,6 +45,7 @@ CATAGORIES = {
 # Build the PROCEDURES dictionary
 PROCEDURES = {}
 PROCEDURES.update(proc_resistance_time)
+PROCEDURES.update(proc_resistance_temperature)
 PROCEDURES.update(proc_resistance_gate)
 PROCEDURES.update(proc_resistance_magnet)
 PROCEDURES.update(proc_resistance_two_gate_sweep)
@@ -69,6 +72,7 @@ __all__ = [
     'filter_inputs_by_connection',
     # Procedure classes
     'Resistance_time_measurement',
+    'Resistance_temperature_measurement',
     'Resistance_gate_sweep_measurement',
     'Resistance_magnet_sweep_measurement',
     'Resistance_two_gate_scan_sweep_measurement',
@@ -84,6 +88,7 @@ __all__ = [
     'RV_dV_dI_sequencer_measurement',
     # Registration dicts
     'proc_resistance_time',
+    'proc_resistance_temperature',
     'proc_resistance_gate',
     'proc_resistance_magnet',
     'proc_resistance_two_gate_sweep',
