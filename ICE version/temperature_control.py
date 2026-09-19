@@ -58,8 +58,9 @@ import time
 # ---------------------------------------------------------------------------
 
 # Exact window title, or a constant part of it (substring match, case-sensitive).
-WINDOW_TITLE = "PUT-LABVIEW-WINDOW-TITLE-HERE"
-
+WINDOW_TITLE = "ICE Lemon & Magnet Control"
+# ICE - Temperature Control
+#ICE Lemon & Magnet Control
 # Field definitions shared by both backends.
 # Regexes match UIA control names from the LabVIEW front panel
 # ("Set Point", "Ramp Rate", "P/I/D", "Heater Output", "Heater Range").
@@ -205,48 +206,6 @@ def ocr_region(box, digits=False):
     return text.strip()
 
 
-def ocr_tokens(box, digits=False):
-    """OCR a region, return [(text, center_x_absolute)] per detected token."""
-    from PIL import ImageGrab
-
-    pytesseract = setup_tesseract()
-    img = ImageGrab.grab(bbox=box)
-    config = "--psm 6"
-    if digits:
-        config += " -c tessedit_char_whitelist=0123456789.-"
-    data = pytesseract.image_to_data(img, config=config,
-                                     output_type=pytesseract.Output.DICT)
-    tokens = []
-    for i, word in enumerate(data["text"]):
-        text = word.strip()
-        if not text:
-            continue
-        cx = box[0] + data["left"][i] + data["width"][i] // 2
-        tokens.append((text, cx))
-    return tokens
-
-
-def number_near(tokens, anchor_x):
-    """Return the float from the token whose center is closest to anchor_x.
-
-    Tolerates stray glyphs (e.g. a spinner arrow misread as a digit) as long
-    as they are farther from the calibrated point than the real value.
-    """
-    best = None
-    best_dist = None
-    for text, cx in tokens:
-        m = re.search(r"[-+]?\d*\.?\d+", text.replace(",", "."))
-        if not m:
-            continue
-        dist = abs(cx - anchor_x)
-        if best is None or dist < best_dist:
-            best, best_dist = float(m.group()), dist
-    if best is None:
-        raise ValueError("no number found near anchor (tokens: %r)"
-                         % [t for t, _ in tokens])
-    return best
-
-
 def parse_number(text):
     """Extract first float from OCR text. Raises ValueError if none found."""
     m = re.search(r"[-+]?\d*\.?\d+", text.replace(",", "."))
@@ -260,18 +219,11 @@ def parse_number(text):
 # ---------------------------------------------------------------------------
 
 def _uia_window():
-    from pywinauto import Desktop
+    from pywinauto import Application
 
-    # Desktop backend resolves the window directly by title - unlike
-    # Application().connect() + top_window(), which fails with
-    # "No windows for that process could be found" when LabVIEW spans
-    # multiple processes or matches a background helper window.
-    win = Desktop(backend="uia").window(
-        title_re=".*%s.*" % re.escape(WINDOW_TITLE))
-    if not win.exists(timeout=3):
-        sys.exit("Window matching '%s' not found (UIA backend). Is the "
-                 "LabVIEW program open? Check WINDOW_TITLE." % WINDOW_TITLE)
-    return win
+    app = Application(backend="uia").connect(
+        title_re=".*%s.*" % re.escape(WINDOW_TITLE), timeout=5)
+    return app.top_window()
 
 
 def uia_select_tab(win):
@@ -454,10 +406,9 @@ def _to_screen(cfg, field):
 
 def coords_read_field(cfg, field):
     x, y = _to_screen(cfg, field)
-    w, h = (260, 36)  # wide region; nearest-token logic rejects strays
+    w, h = READ_BOX
     box = (x - w // 2, y - h // 2, x + w // 2, y + h // 2)
-    tokens = ocr_tokens(box, digits=True)
-    return number_near(tokens, x)
+    return parse_number(ocr_region(box, digits=True))
 
 
 def coords_write_field(cfg, field, value):
@@ -479,16 +430,13 @@ def coords_write_field(cfg, field, value):
 
 def coords_read_heater(cfg):
     x, y = _to_screen(cfg, "heater")
-    w, h = (300, 40)
+    w, h = (260, READ_BOX[1])  # wide enough for OCR of "medium"
     box = (x - w // 2, y - h // 2, x + w // 2, y + h // 2)
-    tokens = ocr_tokens(box)
-    hits = [(opt, cx) for opt in HEATER_OPTIONS for t, cx in tokens
-            if opt in t.lower()]
-    if hits:
-        hits.sort(key=lambda hc: abs(hc[1] - x))
-        return hits[0][0]
-    raise ValueError("no heater option in OCR text: %r"
-                     % " ".join(t for t, _ in tokens))
+    text = ocr_region(box).lower()
+    for opt in HEATER_OPTIONS:
+        if opt in text:
+            return opt
+    raise ValueError("no heater option in OCR text: %r" % text)
 
 
 def coords_set_heater(cfg, option):
@@ -585,7 +533,11 @@ def read_all(cfg):
 
 def cmd_inspect():
     """Try UIA. If named controls are found, save uia-mode config."""
-    win = _uia_window()
+    from pywinauto import Application
+
+    app = Application(backend="uia").connect(
+        title_re=".*%s.*" % re.escape(WINDOW_TITLE), timeout=5)
+    win = app.top_window()
 
     with open(INSPECT_PATH, "w", encoding="utf-8") as f:
         for ctl in win.descendants():
@@ -624,27 +576,7 @@ def _prompt_position(label):
     return pyautogui.position()
 
 
-def _calib_labels():
-    return {"target": "'Set Point' box (295.000 K)",
-            "ramp": "'Ramp Rate' box (K/min)",
-            "P": "'P' box",
-            "I": "'I' box",
-            "D": "'D' box",
-            "output": "'Heater Output' % box (Manual Heater Control)",
-            "temp": "'Temperature' display in the 'Temperature State' group "
-                    "(the actual temperature reading)"}
-
-
-CALIBRATABLE_KEYS = (list(_calib_labels()) +
-                     ["tab", "set_values_pid", "set_values_manual", "heater"])
-
-
-def cmd_calibrate(only=None):
-    """Full calibration, or recalibrate a single field: calibrate <name>."""
-    if only is not None:
-        _recalibrate_one(only.lower())
-        return
-
+def cmd_calibrate():
     cfg = load_config()
     print("Calibrating against window: %s" % WINDOW_TITLE)
     print("Open the 'Temperature Control' tab first. Keep the LabVIEW "
@@ -652,14 +584,21 @@ def cmd_calibrate(only=None):
           "clicking.\n")
 
     left, top, _, _ = find_window_rect()
-    labels = _calib_labels()
     tab = _prompt_position("'Temperature Control' tab header")
+    labels = {"target": "'Set Point' box (295.000 K)",
+              "ramp": "'Ramp Rate' box (K/min)",
+              "P": "'P' box",
+              "I": "'I' box",
+              "D": "'D' box",
+              "output": "'Heater Output' % box (Manual Heater Control)"}
     fields = {}
     for field in FIELD_NAMES:
         pos = _prompt_position(labels[field])
         fields[field] = [pos.x - left, pos.y - top]
 
-    temp_pos = _prompt_position(labels["temp"])
+    temp_pos = _prompt_position(
+        "'Temperature' display in the 'Temperature State' group "
+        "(the actual temperature reading)")
     fields["temp"] = [temp_pos.x - left, temp_pos.y - top]
 
     pid_apply = _prompt_position("'Set Values' button under 'PID Control'")
@@ -682,26 +621,6 @@ def cmd_calibrate(only=None):
     save_config(cfg)
     print("\nCalibration done. Verify with: python %s read"
           % os.path.basename(__file__))
-    print("Single field off? Recalibrate just it: python %s calibrate <name>"
-          % os.path.basename(__file__))
-    print("Names: %s" % ", ".join(CALIBRATABLE_KEYS))
-
-
-def _recalibrate_one(name):
-    cfg = require_config()
-    if name not in CALIBRATABLE_KEYS:
-        sys.exit("Unknown calibration name '%s'. Use one of: %s"
-                 % (name, ", ".join(CALIBRATABLE_KEYS)))
-    print("Recalibrating '%s' only." % name)
-    left, top, _, _ = find_window_rect()
-    pos = _prompt_position(_calib_labels().get(name, name))
-    if name == "tab":
-        cfg["tab"] = [pos.x - left, pos.y - top]
-    elif name in ("set_values_pid", "set_values_manual", "heater"):
-        cfg[name] = [pos.x - left, pos.y - top]
-    else:
-        cfg.setdefault("fields", {})[name] = [pos.x - left, pos.y - top]
-    save_config(cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -710,9 +629,7 @@ def _recalibrate_one(name):
 
 USAGE = ("Usage:\n"
          "  inspect    dump UIA controls, try uia mode\n"
-         "  calibrate [name]  record positions (or redo one: target, ramp,\n"
-         "             P, I, D, output, temp, tab, heater,\n"
-         "             set_values_pid, set_values_manual)\n"
+         "  calibrate  record field positions (coordinate mode)\n"
          "  read       read all values\n"
          "  set target|ramp|P|I|D|output <value> | set pid <P> <I> <D>\n"
          "  heater off|low|medium|high     (Heater Range ring)\n"
@@ -821,13 +738,6 @@ def cmd_selftest():
     assert FIELD_GROUP["target"] == "pid"
     assert FIELD_GROUP["output"] == "manual"
     assert GROUP_POSITION_KEY["pid"] == "set_values_pid"
-    assert number_near([("5", 10), ("295.000", 60)], 55) == 295.0
-    assert number_near([("295.000", 60)], 55) == 295.0
-    try:
-        number_near([("K", 50)], 50)
-        raise AssertionError("number_near should have failed")
-    except ValueError:
-        pass
     print("selftest OK")
 
 
@@ -846,7 +756,7 @@ def main():
     if cmd == "inspect":
         cmd_inspect()
     elif cmd == "calibrate":
-        cmd_calibrate(args[0] if args else None)
+        cmd_calibrate()
     elif cmd == "read":
         cmd_read()
     elif cmd == "set":
