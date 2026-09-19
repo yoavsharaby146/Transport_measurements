@@ -66,7 +66,7 @@ class Resistance_gate_sweep_measurement(ICEProcedure):
         # 3. Create Sweep Array
         # Using linspace to guarantee we hit the exact target voltage
 
-        start_volts = Gate.measure_voltage()
+        start_volts = Gate.measure__voltage()
         gate_ranges = self.generate_range(start_volts, self.target_voltage,self.step_size)
 
         log.info(f"Sweeping {self.smu} from {start_volts:.4f}V to {self.target_voltage:.4f}V")

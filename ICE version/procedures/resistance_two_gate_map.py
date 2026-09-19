@@ -106,7 +106,7 @@ class Resistance_two_gate_mapping_measurement(ICEProcedure):
             if self.scan_mode == 'Snake':
                 current_range = fast_range_forward if i % 2 == 0 else fast_range_backward
                 for fast_v in current_range:
-                    fast_gate.ramp_voltage(fast_v, 5, 0.001)
+                    fast_gate.ramp_voltage(fast_v, 2, 0.001)
                     time.sleep(self.short_delay)
                     data = self.getmeas(time_0)
                     self.emit('results', dict(zip(self.DATA_COLUMNS, data)))
@@ -119,7 +119,7 @@ class Resistance_two_gate_mapping_measurement(ICEProcedure):
             elif self.scan_mode == 'Forward/Backward':
                 log.info(f"Forward sweep at Slow={slow_v}V")
                 for fast_v in fast_range_forward:
-                    fast_gate.ramp_voltage(fast_v, 5, 0.001)
+                    fast_gate.ramp_voltage(fast_v, 2, 0.001)
                     time.sleep(self.short_delay)
                     data = self.getmeas(time_0)
                     self.emit('results', dict(zip(self.DATA_COLUMNS, data)))

@@ -16,7 +16,10 @@ Usage:
 
 from __future__ import annotations
 
+import io
+import json
 import os
+import re
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import Union
@@ -39,6 +42,98 @@ def write_block(f, measurement_type: str,
         dashes = '-' * (level + 1)
         formatted = _format_value(value)
         f.write(f'{dashes} "{label}", "[{formatted}]"\n')
+
+
+# ─────────────────────────────────────────────────────────────────
+#   Generated-file parser  (load a flat .txt sequence back in)
+# ─────────────────────────────────────────────────────────────────
+
+_LINE_RE = re.compile(r'^(?P<dashes>-+)\s+"(?P<label>[^"]+)",\s+"\[(?P<value>.*)\]"$')
+
+# Reverse of block_to_file_params(): file label -> block dict key.
+LABEL_TO_KEY = {
+    'RH': {
+        'Target field (T)':      'field_t',
+        'Sweep rate (T/min)':    'sweep_rate',
+        'Acquisition Delay (s)': 'acq_delay',
+        'Use Magnet':            'use_magnet',
+    },
+    'RV': {
+        'User defined SMU':      'smu',
+        'Target Voltage(V)':     'voltage_v',
+        'Step size(mV)':         'step_mv',
+        'Acquisition Delay (s)': 'acq_delay',
+        'Use Magnet':            'use_magnet',
+    },
+    'Rt': {
+        'Acquisition Length (s)': 'acq_s',
+        'Acquisition Delay (s)':  'acq_delay',
+        'Target Voltage(V)':      'voltage_v',
+        'Target field (T)':       'field_t',
+        'Use Magnet':             'use_magnet',
+    },
+}
+
+BLOCK_DEFAULTS = {
+    'RH': {'field_t': 0.0, 'sweep_rate': 0.1, 'acq_delay': 1.0,
+           'use_magnet': "'True'"},
+    'RV': {'smu': "'Gate_1'", 'voltage_v': 0.0, 'step_mv': 10.0,
+           'acq_delay': 1.0, 'use_magnet': "'False'"},
+    'Rt': {'acq_s': 30.0, 'acq_delay': 1.0, 'voltage_v': 0.0, 'field_t': 0.0,
+           'use_magnet': "'True'"},
+}
+
+
+def _parse_scalar(raw: str) -> Union[int, float, str]:
+    """Quoted values keep their raw "'...'" string form (matches the
+    block-dict convention); unquoted become int (if integral) or float."""
+    if len(raw) >= 2 and raw[0] == "'" and raw[-1] == "'":
+        return raw
+    try:
+        f = float(raw)
+    except ValueError:
+        raise ValueError(f'unrecognized value {raw!r}')
+    return int(f) if f.is_integer() else f
+
+
+def parse_sequence_file(path: str) -> list[dict]:
+    """
+    Parse a generated (flat, loops-unrolled) sequence file into block dicts.
+    Missing parameters (legacy files from the older generators) fall back
+    to defaults so every block is fully editable.
+    """
+    blocks: list[dict] = []
+    current: dict | None = None
+    with open(path) as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            m = _LINE_RE.match(line)
+            if not m:
+                raise ValueError(f'{path}:{lineno}: unrecognized line: {line!r}')
+            label = m.group('label')
+            raw = m.group('value')
+            if len(m.group('dashes')) == 1:
+                if label != 'Measurement Type':
+                    raise ValueError(f'{path}:{lineno}: expected "Measurement Type", '
+                                     f'got {label!r}')
+                mtype = raw.strip("'")
+                if mtype not in LABEL_TO_KEY:
+                    raise ValueError(f'{path}:{lineno}: unsupported measurement '
+                                     f'type {mtype!r}')
+                current = {'type': mtype, **BLOCK_DEFAULTS[mtype]}
+                blocks.append(current)
+            else:
+                if current is None:
+                    raise ValueError(f'{path}:{lineno}: parameter line before any '
+                                     f'"Measurement Type"')
+                key = LABEL_TO_KEY[current['type']].get(label)
+                if key is None:
+                    raise ValueError(f'{path}:{lineno}: unknown parameter {label!r} '
+                                     f'for {current["type"]} block')
+                current[key] = _parse_scalar(raw)
+    return blocks
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -619,7 +714,9 @@ class SequenceBuilder(tk.Tk):
                      "Use ↑↓ to reorder (same level)\n"
                      "Add while a loop is selected\n"
                      "  inserts inside that loop\n"
-                     "Open Loop dissolves a loop")
+                     "Open Loop dissolves a loop\n"
+                     "💾 Save Session keeps loops\n"
+                     "📂 Load .txt flat or .json tree")
         ttk.Label(side, text=help_text,
                   foreground='gray', font=('Arial', 8)).pack(anchor='w')
 
@@ -637,6 +734,10 @@ class SequenceBuilder(tk.Tk):
                    style='Accent.TButton').pack(side='right', padx=4)
         ttk.Button(bottom, text='Clear All',
                    command=self._clear_all).pack(side='right', padx=4)
+        ttk.Button(bottom, text='📂  Load…',
+                   command=self._load).pack(side='right', padx=4)
+        ttk.Button(bottom, text='💾  Save Session',
+                   command=self._save_session).pack(side='right', padx=4)
 
     # ── sequence list helpers (tree → flat rows) ────────────────
 
@@ -846,6 +947,64 @@ class SequenceBuilder(tk.Tk):
         if messagebox.askyesno('Clear all', 'Remove all nodes from the sequence?'):
             self.sequence.clear()
             self._refresh_list()
+
+    # ── load / save session ──────────────────────────────────────
+
+    def _load(self):
+        if self.sequence and not messagebox.askyesno(
+                'Load', 'Replace the current sequence?'):
+            return
+
+        path = filedialog.askopenfilename(
+            title='Load sequence or session',
+            filetypes=[('Session — full loops', '*.json'),
+                       ('Generated sequence — flat', '*.txt'),
+                       ('All files', '*.*')])
+        if not path:
+            return
+
+        try:
+            if path.lower().endswith('.json'):
+                with open(path) as f:
+                    nodes = json.load(f)
+                if (not isinstance(nodes, list)
+                        or not all(isinstance(n, dict) and 'type' in n
+                                   for n in nodes)):
+                    raise ValueError('not a valid session file '
+                                     '(expected a list of nodes)')
+            else:
+                nodes = parse_sequence_file(path)
+        except Exception as e:
+            messagebox.showerror('Load error', str(e))
+            return
+
+        if not nodes:
+            messagebox.showwarning('Empty', 'File contains no blocks.')
+            return
+
+        self.sequence = nodes
+        self._filename_var.set(path)
+        self._refresh_list()
+
+    def _save_session(self):
+        if not self.sequence:
+            messagebox.showwarning('Empty sequence',
+                                   'Nothing to save — add at least one block.')
+            return
+        path = filedialog.asksaveasfilename(
+            title='Save session (keeps loops)',
+            defaultextension='.json',
+            filetypes=[('Session — full loops', '*.json')],
+            initialfile='custom_sequence_session.json')
+        if not path:
+            return
+        try:
+            with open(path, 'w') as f:
+                json.dump(self.sequence, f, indent=2)
+        except Exception as e:
+            messagebox.showerror('Write error', str(e))
+            return
+        messagebox.showinfo('Done', f'Session saved to:\n{path}')
 
     # ── help window ──────────────────────────────────────────────
 
@@ -1122,6 +1281,40 @@ def _self_check():
             assert b['voltage_v'] in (0.0, 5.0)
         else:
             assert b['voltage_v'] in (-1.0, 1.0)
+
+    # Round-trip: blocks → write_block → parse_sequence_file → same values.
+    blocks = [
+        {'type': 'RH', 'field_t': 2.0, 'sweep_rate': 0.1, 'acq_delay': 1.0,
+         'use_magnet': "'True'"},
+        {'type': 'RV', 'smu': "'Gate_2'", 'voltage_v': -0.8, 'step_mv': 10.0,
+         'acq_delay': 1.2, 'use_magnet': "'False'"},
+        {'type': 'Rt', 'acq_s': 30.0, 'acq_delay': 2.5, 'voltage_v': 0.0,
+         'field_t': 1.5, 'use_magnet': "'True'"},
+    ]
+    import tempfile
+    with tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False) as tf:
+        for b in blocks:
+            write_block(tf, b['type'], block_to_file_params(b))
+        tmp_path = tf.name
+    try:
+        parsed = parse_sequence_file(tmp_path)
+        assert len(parsed) == 3, len(parsed)
+        for orig, back in zip(blocks, parsed):
+            assert back['type'] == orig['type']
+            for k, v in orig.items():
+                if k == 'type':
+                    continue
+                assert back[k] == v, (k, back[k], v)  # int/float equal by value
+    finally:
+        os.remove(tmp_path)
+
+    # Session round-trip: loop tree survives JSON dump/load intact.
+    tree = [outer]  # reuses gate-in-gate tree from above
+    dump = json.dumps(tree)
+    reloaded = json.loads(dump)
+    assert reloaded == tree
+    assert len(_expand_sequence(reloaded)) == 8
+
     print('self-check OK')
 
 
