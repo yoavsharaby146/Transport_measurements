@@ -7,6 +7,103 @@ import os
 from csv_utils import read_data_csv
 
 
+def split_by_activity(df, fast_col, slow_col, fast_threshold, slow_threshold,
+                      fast_min=None, fast_max=None):
+    """Split a two-axis measurement into fast Fwd/Bwd and slow Fwd/Bwd segments.
+
+    Pure function (no tkinter) so the logic is testable.
+
+    Fast axis: rows outside slow-sweep regions form contiguous chunks, and
+    each chunk is segmented with the exact direction-sign method used by the
+    Forward/Backward Organizer mode — identical turnaround/pause behavior.
+
+    Slow axis: maximal regions where the slow axis sweeps (and the fast axis
+    is quiet) become slow segments, classified by net slow-axis change.
+    Each slow region includes one preceding row — the last point of the
+    preceding fast sweep — so that boundary row appears in both the fast
+    and the slow output files (intentional duplication).
+
+    Returns dict: 'fast_fwd'/'fast_bwd'/'slow_fwd'/'slow_bwd' (lists of
+    DataFrames) and 'dropped' (unclassifiable row count).
+    """
+    n = len(df)
+    out = {"fast_fwd": [], "fast_bwd": [], "slow_fwd": [], "slow_bwd": [], "dropped": 0}
+    if n < 2:
+        out["dropped"] = n
+        return out
+
+    fast_vals = df[fast_col].to_numpy()
+    fdiff = np.diff(fast_vals)
+    sdiff = np.diff(df[slow_col].to_numpy())
+    fast_active = np.abs(fdiff) > fast_threshold
+    slow_sweeping = (np.abs(sdiff) > slow_threshold) & (~fast_active)
+
+    # optional fast-axis sweep limits: steps outside [min, max] are slow-side
+    if fast_min is not None or fast_max is not None:
+        lo = fast_min if fast_min is not None else -np.inf
+        hi = fast_max if fast_max is not None else np.inf
+        outside = ((fast_vals[:-1] < lo) | (fast_vals[:-1] > hi) |
+                   (fast_vals[1:] < lo) | (fast_vals[1:] > hi))
+        fast_active &= ~outside
+        slow_sweeping |= outside
+
+    nsteps = len(slow_sweeping)
+
+    # --- slow regions: only sustained slow sweeps are excised ---
+    #   A run counts as a real slow sweep only if its net slow-axis travel
+    #   exceeds 3× slow_threshold. Short jitter/approach runs stay in the
+    #   fast chunks, where the organizer's fill logic treats them as pauses
+    #   — keeping fast-axis behavior identical to the Fwd/Bwd Organizer.
+    min_net = 3.0 * slow_threshold
+    removed = np.zeros(n, dtype=bool)
+    edges = np.concatenate([[0], np.where(np.diff(slow_sweeping.astype(int)) != 0)[0] + 1,
+                            [nsteps]])
+    for i in range(len(edges) - 1):
+        s, e = int(edges[i]), int(edges[i + 1])       # step span [s, e)
+        if not slow_sweeping[s]:
+            continue
+        net = float(np.sum(sdiff[s:e]))
+        if abs(net) < min_net:
+            continue   # jitter/approach movement, not a real slow sweep
+        # rows s+2..e are slow-only. Row s+1 — the first row where the slow
+        # axis moved — is the first point of the slow sweep AND the last
+        # measured point of the fast sweep, so it stays in the fast chunk
+        # too (appears in both outputs).
+        removed[0 if s == 0 else s + 2: e + 1] = True
+        rows = df.slice(s + 1, e - s)
+        if net > 0:
+            out["slow_fwd"].append(rows)
+        elif net < 0:
+            out["slow_bwd"].append(rows)
+        else:
+            out["dropped"] += len(rows)
+
+    # --- fast chunks: contiguous rows outside slow regions ---
+    keep = (~removed).astype(int)
+    pad = np.diff(np.concatenate([[0], keep, [0]]))
+    chunk_starts = np.where(pad == 1)[0]
+    chunk_ends = np.where(pad == -1)[0]
+    for a, b in zip(chunk_starts, chunk_ends):
+        chunk = df.slice(int(a), int(b) - int(a))
+        segments = ScanOrganizer._detect_direction_segments(chunk, fast_col,
+                                                            fast_threshold)
+        for k, (segment, direction) in enumerate(segments):
+            if direction == 'forward':
+                out["fast_fwd"].append(segment)
+            elif direction == 'backward':
+                out["fast_bwd"].append(segment)
+            else:
+                # trailing quiet rows: keep with the preceding sweep chunk
+                if k > 0 and segments[k - 1][1] in ('forward', 'backward'):
+                    prev_dir = segments[k - 1][1]
+                    seg_list = out["fast_fwd" if prev_dir == 'forward' else "fast_bwd"]
+                    seg_list[-1] = pl.concat([seg_list[-1], segment])
+                else:
+                    out["dropped"] += len(segment)
+
+    return out
+
+
 class ScanOrganizer:
     def __init__(self):
         self.root = tk.Tk()
@@ -25,7 +122,7 @@ class ScanOrganizer:
         self.mode_combo = ttk.Combobox(self.root, textvariable=self.mode_var, state="readonly", width=40)
         self.mode_combo['values'] = (
             "Smart Split (Fast & Slow Axis - Auto Detect)",
-            "Gate Map - Direction Split (Fwd/Bwd)",
+            "Forward/Backward Organizer (Direction Split)",
             "Hysteresis - Auto Detect (0 -> SP1 -> SP2 -> 0)",
             "Standard Loop - Auto Detect (0 -> Max -> 0)",
             "Snake - Auto Detect (Alternating)"
@@ -56,7 +153,7 @@ class ScanOrganizer:
             # Route to correct logic
             if "Smart Split" in mode:
                 self.process_smart_axis_split(df, file_path)
-            elif "Gate Map" in mode:
+            elif "Forward/Backward" in mode:
                 self.process_gate_map(df, file_path)
             elif "Hysteresis" in mode:
                 self.process_hysteresis(df, file_path)
@@ -177,9 +274,10 @@ class ScanOrganizer:
         return sweeps
 
     # =========================================================
-    # MODE: Gate Map - Direction Split (Fwd/Bwd)
+    # MODE: Forward/Backward Organizer (Direction Split)
     # =========================================================
-    def _detect_direction_segments(self, df, axis_col, threshold,
+    @staticmethod
+    def _detect_direction_segments(df, axis_col, threshold,
                                    slow_col=None, slow_threshold=0.0,
                                    fast_min=None, fast_max=None):
         """Detect sweep segments based on direction (sign) of change.
@@ -315,9 +413,9 @@ class ScanOrganizer:
         return segments
 
     def process_gate_map(self, df, file_path):
-        """Split gate map data into forward and backward sweeps using
+        """Split single-axis data into forward and backward sweeps using
         direction (sign) detection instead of magnitude thresholding."""
-        axis_col = self._ask_axis_column(df, title_prefix="Gate Map Axis")
+        axis_col = self._ask_axis_column(df, title_prefix="Sweep Axis")
         if axis_col is None:
             return
 
@@ -356,10 +454,10 @@ class ScanOrganizer:
 
         fwd_rows = sum(len(s) for s in fwd)
         bwd_rows = sum(len(s) for s in bwd)
-        print(f"Gate Map Split: {len(df)} total rows → {fwd_rows} fwd, {bwd_rows} bwd "
+        print(f"Forward/Backward Split: {len(df)} total rows → {fwd_rows} fwd, {bwd_rows} bwd "
               f"({len(df) - fwd_rows - bwd_rows} flat discarded)")
 
-        self.save_simple(file_path, fwd, bwd, f"GateMap_{axis_col}")
+        self.save_simple(file_path, fwd, bwd, f"FwdBwd_{axis_col}")
 
     # =========================================================
     # MODE: Smart Split (Fast & Slow Axis - Auto Detect)
@@ -412,18 +510,23 @@ class ScanOrganizer:
           - {fast_col}_Fwd / {fast_col}_Bwd : fast axis sweeping (gate forward/backward)
           - {slow_col}_Fwd / {slow_col}_Bwd : slow axis sweeping (e.g. magnet up/down)
 
-        Uses direction-sign-based detection to correctly handle repeated boundary
-        values at sweep turnarounds (no data loss).
-
-        The slow axis is monitored so that regions where the slow axis is *actively
-        sweeping* between fast sweeps are kept as 'flat' segments (w.r.t. the fast
-        axis) and then split into Slow Fwd/Bwd by the slow axis direction.
+        Uses activity-based segmentation (split_by_activity): each step is
+        classified by which axis is moving; pauses attach to the preceding
+        region so turnaround rows stay with the sweep that produced them,
+        and fast regions split internally into Fwd/Bwd direction runs.
+        Handles both fast fwd/bwd sweeps and slow-axis sweeps between them.
         """
         # --- Fast Axis Threshold ---
-        fast_range = df[fast_col].max() - df[fast_col].min()
+        #   Same auto rule as the Forward/Backward Organizer: half the median
+        #   absolute non-zero diff — separates real sweep steps from noise.
         fast_data_min = float(df[fast_col].min())
         fast_data_max = float(df[fast_col].max())
-        default_fast_thresh = fast_range * 0.01
+        fast_abs_diffs = np.abs(np.diff(df[fast_col].to_numpy()))
+        fast_nonzero = fast_abs_diffs[fast_abs_diffs > 0]
+        if len(fast_nonzero) > 0:
+            default_fast_thresh = float(np.median(fast_nonzero)) * 0.5
+        else:
+            default_fast_thresh = (fast_data_max - fast_data_min) * 0.01
 
         fast_threshold = simpledialog.askfloat(
             "Fast Axis Threshold",
@@ -479,41 +582,22 @@ class ScanOrganizer:
         if fast_min is not None or fast_max is not None:
             print(f"Smart Split: fast axis limits = [{fast_min:.6g}, {fast_max:.6g}]")
 
-        # --- Segment Detection using direction-sign method ---
-        segments = self._detect_direction_segments(
-            df, fast_col, fast_threshold,
-            slow_col=slow_col, slow_threshold=slow_threshold,
-            fast_min=fast_min, fast_max=fast_max)
+        # --- Segment Detection using activity-based split ---
+        result = split_by_activity(df, fast_col, slow_col, fast_threshold,
+                                   slow_threshold, fast_min=fast_min, fast_max=fast_max)
 
-        fast_fwd_segments = []
-        fast_bwd_segments = []
-        slow_fwd_segments = []
-        slow_bwd_segments = []
-
-        for segment, direction in segments:
-            if direction == 'forward':
-                fast_fwd_segments.append(segment)
-            elif direction == 'backward':
-                fast_bwd_segments.append(segment)
-            elif direction == 'flat':
-                # Slow axis is active here → classify by its direction (up/down)
-                slow_vals = segment[slow_col].to_numpy()
-                slow_diffs = np.diff(slow_vals)
-                # Net direction via sum of diffs (robust to noise)
-                net = float(np.sum(slow_diffs))
-                if net > 0:
-                    slow_fwd_segments.append(segment)
-                elif net < 0:
-                    slow_bwd_segments.append(segment)
-                else:
-                    # Genuinely constant (not expected, but skip just in case)
-                    print(f"  Skipping {len(segment)} flat rows "
-                          f"({slow_col} not changing)")
+        counts = {k: (len(result[k]), sum(len(s) for s in result[k]))
+                  for k in ("fast_fwd", "fast_bwd", "slow_fwd", "slow_bwd")}
+        print(f"Smart Split: fast fwd {counts['fast_fwd'][0]} segs / {counts['fast_fwd'][1]} rows, "
+              f"fast bwd {counts['fast_bwd'][0]} segs / {counts['fast_bwd'][1]} rows, "
+              f"slow fwd {counts['slow_fwd'][0]} segs / {counts['slow_fwd'][1]} rows, "
+              f"slow bwd {counts['slow_bwd'][0]} segs / {counts['slow_bwd'][1]} rows, "
+              f"dropped {result['dropped']} rows")
 
         # --- Save Files ---
         self.save_files_smart(file_path, fast_col, slow_col,
-                              fast_fwd_segments, fast_bwd_segments,
-                              slow_fwd_segments, slow_bwd_segments)
+                              result["fast_fwd"], result["fast_bwd"],
+                              result["slow_fwd"], result["slow_bwd"])
 
     def save_files_smart(self, original_path, fast_col, slow_col,
                          fast_fwd, fast_bwd, slow_fwd, slow_bwd):
@@ -684,6 +768,71 @@ class ScanOrganizer:
         self.root.quit()
 
 
+def _self_test():
+    """Synthetic two-axis map: fwd+bwd fast sweeps at 2 slow setpoints, slow
+    ramp up between them, slow ramp down at the end, pauses at every
+    turnaround. Verifies fast axis matches the Forward/Backward Organizer
+    behavior, slow sweeps get their own segments, and the boundary row is
+    intentionally duplicated between fast and slow outputs."""
+    vals = []
+    for sp in (0.0, 1.0):
+        vals += [(f, sp) for f in np.arange(0.0, 3.0 + 1e-9, 0.1)]    # fwd sweep
+        if sp == 0.0:
+            # peak pause with slow-axis jitter: steps exceed slow_threshold
+            # but net travel ~0 — must NOT be excised as a slow region
+            vals += [(3.0, 0.0), (3.0, 0.08), (3.0, 0.0)]
+        else:
+            vals += [(3.0, sp)] * 2                                   # peak pause
+        vals += [(f, sp) for f in np.arange(2.9, -1e-9, -0.1)]        # bwd sweep
+        vals += [(0.0, sp)] * 2                                       # valley pause
+        if sp == 0.0:
+            vals += [(0.0, s) for s in np.arange(0.1, 1.0 + 1e-9, 0.1)]  # slow up
+    vals += [(0.0, s) for s in np.arange(0.9, -1e-9, -0.1)]           # slow down
+    df = pl.DataFrame({"time(s)": np.arange(len(vals), dtype=float),
+                       "gate(V)": [v[0] for v in vals],
+                       "field(T)": [v[1] for v in vals]})
+
+    res = split_by_activity(df, "gate(V)", "field(T)", 0.05, 0.05)
+
+    # fast axis, organizer convention: fwd ends at its peak row; the pause
+    # (incl. the jitter rows) back-fills into the upcoming bwd sweep
+    assert [len(s) for s in res["fast_fwd"]] == [31, 31], [len(s) for s in res["fast_fwd"]]
+    assert [len(s) for s in res["fast_bwd"]] == [36, 35], [len(s) for s in res["fast_bwd"]]
+    assert all(s["gate(V)"].max() == 3.0 for s in res["fast_fwd"])
+    assert all(abs(float(s["gate(V)"].min())) < 1e-9 for s in res["fast_bwd"])
+
+    # slow axis: one up ramp, one down ramp, each opening at the first row
+    # where the slow axis moved — that row is also the last row of the
+    # preceding fast bwd sweep (duplication). The jitter rows (gate = 3.0)
+    # must not appear in any slow segment.
+    assert [len(s) for s in res["slow_fwd"]] == [10], [len(s) for s in res["slow_fwd"]]
+    assert [len(s) for s in res["slow_bwd"]] == [10], [len(s) for s in res["slow_bwd"]]
+    assert all(float(s["gate(V)"].max()) == 0.0
+               for s in res["slow_fwd"] + res["slow_bwd"])
+    assert float(res["fast_bwd"][0]["time(s)"][-1]) == float(res["slow_fwd"][0]["time(s)"][0])
+    assert float(res["fast_bwd"][1]["time(s)"][-1]) == float(res["slow_bwd"][0]["time(s)"][0])
+    assert res["dropped"] == 0, res["dropped"]
+
+    # no slow-axis movement (pure gate map): no slow segments at all
+    vals2 = []
+    vals2 += [(f, 0.0) for f in np.arange(0.0, 3.0 + 1e-9, 0.1)]
+    vals2 += [(3.0, 0.0)] * 2
+    vals2 += [(f, 0.0) for f in np.arange(2.9, -1e-9, -0.1)]
+    vals2 += [(0.0, 0.0)] * 2
+    df2 = pl.DataFrame({"time(s)": np.arange(len(vals2), dtype=float),
+                        "gate(V)": [v[0] for v in vals2],
+                        "field(T)": [v[1] for v in vals2]})
+    res2 = split_by_activity(df2, "gate(V)", "field(T)", 0.05, 0.05)
+    assert res2["slow_fwd"] == [] and res2["slow_bwd"] == []
+    assert [len(s) for s in res2["fast_fwd"]] == [31]
+    assert [len(s) for s in res2["fast_bwd"]] == [34]
+    print("smart orginizer self-test OK")
+
+
 if __name__ == "__main__":
-    app = ScanOrganizer()
-    app.root.mainloop()
+    import sys
+    if "--test" in sys.argv:
+        _self_test()
+    else:
+        app = ScanOrganizer()
+        app.root.mainloop()

@@ -3,6 +3,10 @@
 A suite of GUI-based Python tools for merging, organizing, reversing, and computing across CSV measurement data.  
 Designed for transport-measurement workflows (e.g., gate maps, hysteresis loops, standard sweeps).
 
+All tools that read measurement CSVs automatically skip any metadata preamble before the
+column-title row (via the shared `csv_utils` helper, described below), so they operate only
+on the titled data columns — for files both with and without a preamble.
+
 ---
 
 ## Dependencies
@@ -15,6 +19,24 @@ Designed for transport-measurement workflows (e.g., gate maps, hysteresis loops,
 
 ---
 
+## Shared Helper: `csv_utils.py`
+
+All CSV-loading scripts use this module to handle measurement files that start
+with metadata lines (general settings, sweep config, …) before the column titles.
+
+- **`detect_header_row(filepath)`** — returns the line index of the column-title
+  row. Detection: first line (within the first 50) containing `time(s)`
+  (case-insensitive), the convention used by all measurement procedures. If no
+  such line exists, the file has no preamble and `0` is returned.
+- **`read_data_csv(filepath, **kwargs)`** — loads a CSV via polars, skipping any
+  preamble so callers see only titled data columns. Defaults
+  (`infer_schema_length=10000`, `truncate_ragged_lines=True`, `ignore_errors=True`)
+  can be overridden via kwargs.
+
+Run `python csv_utils.py` for a built-in self-check of the detection logic.
+
+---
+
 ## Scripts
 
 ### 1. `csv_merger.py` — CSV File Merger
@@ -23,7 +45,7 @@ Merges multiple CSV measurement files into a single sorted file.
 
 **Features:**
 - **File picker** — select two or more CSV files via a dialog
-- **Auto header detection** — skips metadata lines before the actual column header (looks for `Time(s)` / `Time (s)`)
+- **Auto header detection** — skips metadata lines before the column header using `csv_utils` (see above)
 - **Column validation** — warns if files have different columns; falls back to common columns automatically
 - **Sort-by-column** — after merging, a dialog lets you pick which column to sort by
 - **Metadata preservation** — pre-header lines from the first file are carried over to the output
@@ -47,8 +69,8 @@ Splits a single measurement CSV into organized Forward (Fwd) and Backward (Bwd) 
 
 **Features:**
 - **5 scan modes** (all with auto-detection):
-  - **Smart Split (Fast & Slow Axis)** — separates fast-axis sweeps from slow-axis hold segments; clusters slow-axis setpoints
-  - **Gate Map — Direction Split** — uses direction-sign detection to split forward and backward sweeps (handles repeated boundary values)
+  - **Smart Split (Fast & Slow Axis)** — fast-axis Fwd/Bwd split uses the exact direction-sign detection of the Forward/Backward Organizer mode (identical turnaround behavior). Slow-axis sweep regions (slow axis sweeping with real net travel, ≥ 3× the slow step threshold — short jitter/approach movements are ignored and stay with the fast data) are extracted separately into their own Fwd/Bwd files — created only when slow-axis sweeps exist. The boundary row (last fast-sweep point = first slow-sweep point) intentionally appears in both files
+  - **Forward/Backward Organizer — Direction Split** — single-axis split into forward and backward sweeps using direction-sign detection (handles repeated boundary values)
   - **Hysteresis — Auto Detect** — groups sweeps into hysteresis blocks (e.g., 0 → SP1 → SP2 → 0), splits by configurable sweep indices
   - **Standard Loop — Auto Detect** — groups sweeps into cycles (e.g., 0 → Max → 0), configurable sweeps-per-cycle and forward/backward split
   - **Snake — Auto Detect** — alternates detected sweeps into forward and backward groups
@@ -58,6 +80,11 @@ Splits a single measurement CSV into organized Forward (Fwd) and Backward (Bwd) 
 **Usage:**
 ```bash
 python "smart orginizer.py"
+```
+
+**Self-test** (synthetic two-axis map with turnarounds, pauses, and slow ramps):
+```bash
+python "smart orginizer.py" --test
 ```
 
 **Workflow:**
