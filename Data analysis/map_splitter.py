@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 
+from csv_utils import read_data_csv
+
 
 class MapSplitter:
     """Splits a map measurement CSV into individual files, one per slow-axis setpoint.
@@ -140,7 +142,7 @@ class MapSplitter:
 
         try:
             # 2. Load
-            df = pl.read_csv(file_path, infer_schema_length=10000)
+            df = read_data_csv(file_path)
             print(f"Loaded: {os.path.basename(file_path)} ({len(df)} rows, {len(df.columns)} columns)")
 
             # 3. Ask for slow axis column

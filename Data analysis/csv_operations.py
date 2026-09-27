@@ -20,6 +20,8 @@ import re
 import numpy as np
 import polars as pl
 
+from csv_utils import read_data_csv
+
 
 # ── palette ──────────────────────────────────────────────────────────────────
 FILE_COLORS = [
@@ -45,7 +47,7 @@ class CSVFile:
     def _load(self):
         # ponytail: whole-file load; for truly huge CSVs upgrade to
         # pl.read_csv(batched=True) and chunk the math per batch.
-        df = pl.read_csv(self.path)
+        df = read_data_csv(self.path)
         # every column as float64; non-numeric cells become NaN (old behavior)
         df = df.cast({c: pl.Float64 for c in df.columns}, strict=False)
         self.headers = df.columns

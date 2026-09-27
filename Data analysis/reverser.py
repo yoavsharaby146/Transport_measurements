@@ -5,6 +5,8 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 from itertools import permutations
 
+from csv_utils import read_data_csv
+
 
 class BlockReverser:
     """Reverses measurement blocks in CSV data files.
@@ -232,7 +234,7 @@ class BlockReverser:
 
         try:
             # 2. Load
-            df = pl.read_csv(file_path, infer_schema_length=10000)
+            df = read_data_csv(file_path)
             print(f"Loaded: {os.path.basename(file_path)} ({len(df)} rows)")
 
             # 3. Ask for sweep column

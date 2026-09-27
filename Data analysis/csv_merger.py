@@ -3,6 +3,8 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 import polars as pl
 
+from csv_utils import detect_header_row
+
 
 def pick_files():
     """Open a file dialog to select multiple CSV files."""
@@ -59,18 +61,6 @@ def pick_sort_column(columns):
 
     root.mainloop()
     return selected_column
-
-
-def detect_header_row(filepath, max_lines=20):
-    """Detect the row index where the actual header starts (looks for 'Time(s)' or similar)."""
-    with open(filepath, 'r', encoding='utf-8') as f:
-        for i, line in enumerate(f):
-            if i >= max_lines:
-                break
-            stripped = line.strip().lower()
-            if stripped.startswith("time(s)") or stripped.startswith("time (s)"):
-                return i
-    return 0
 
 
 def main():

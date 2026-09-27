@@ -4,6 +4,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 
+from csv_utils import read_data_csv
+
 
 class ScanOrganizer:
     def __init__(self):
@@ -49,7 +51,7 @@ class ScanOrganizer:
             return
 
         try:
-            df = pl.read_csv(file_path, infer_schema_length=10000)
+            df = read_data_csv(file_path)
 
             # Route to correct logic
             if "Smart Split" in mode:
