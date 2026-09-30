@@ -20,6 +20,8 @@ from pymeasure.display.plotter import Plotter
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QComboBox, QHBoxLayout, QLabel
 from PyQt5.QtCore import QTimer
 from pymeasure.experiment import Procedure, IntegerParameter, FloatParameter, Parameter, Metadata
+from Dilution_procedure_base import DilutionProcedure
+import instruments_config  # shared connections
 
 from Instruments.SR830_with_add_ons import SR830
 from Instruments.SR860_with_add_ons import SR860
@@ -28,10 +30,10 @@ from Instruments.keithley2604B import Keithley2604B
 from Instruments.dilution_connection import DilutionInstrument
 
 
-class Resistance_Aux_voltage_measurement(Procedure):
-    
-    Title = Parameter('Resistan/ce Aux measurement:', default='Aux')
-    Resistor = Parameter('Resistance/Gain:', default='insert resistor size/gain')
+class Resistance_Aux_voltage_measurement(DilutionProcedure):
+
+    Title = Parameter('Aux', default='Aux')
+    Resistor = Parameter('Resistance/Gain', default='insert resistor size/gain')
     Contacts = Parameter('Contacts ', default='insert contact numbers')
 
     acq_delay = FloatParameter('Acquisition  Delay (s)', default = 1)
@@ -39,113 +41,12 @@ class Resistance_Aux_voltage_measurement(Procedure):
     step_size = FloatParameter('Step size(mV)', default = 1)
     aux = IntegerParameter('Aux output 1-4:', default = 1)
 
+    _MID_COLUMNS = ['Auxiliary_Voltage(V)']
 
-
-
-    DATA_COLUMNS =  [
-        'time(s)',
-        'Mixing_chanber(K)','Magnet Temperature(K)',
-        
-##        'SMUa(V)', 'SMUa_Leakage(A)', 'SMUb(V)', 'SMUb_Leakage(A)',
-        
-        'Gate_1_voltage(V)', 'Gate_1_Leakage(A)',
-##        'Gate_2_voltage(V)', 'Gate_2_Leakage(A)',
-        'Auxiliary_Voltage(V)',
-        'Lockin_Voltage_SRS860_1_X(V)', 'Lockin_Voltage_SRS860_1_Y(V)',
-##        'Lockin_Voltage_SRS860_2_X(V)', 'Lockin_Voltage_SRS860_2_Y(V)',
-        
-        'Lockin_Voltage_SRS830_1_X(V)', 'Lockin_Voltage_SRS830_1_Y(V)',
-        'Lockin_Voltage_SRS830_2_X(V)', 'Lockin_Voltage_SRS830_2_Y(V)',
-        #'Lockin_Voltage_SRS830_3_X(V)', 'Lockin_Voltage_SRS830_3_Y(V)',
-##        'Lockin_Voltage_SRS830_4_X(V)', 'Lockin_Voltage_SRS830_4_Y(V)',
-        
-        'B_x (T)', 'B_y (T)', 'B_z (T)'
-        ]
-
-    def startup(self):
-        print("Connecting to instruments")
-        print("Using the SR860_1 instrument as the AUX out source")
-        self.SRS860_1 = SR860("USB0::0xB506::0x2000::007030::INSTR")
-        print('SRS860_1 using: USB0::0xB506::0x2000::007030::INSTR')
-        
-        self.SRS830_1 = SR830("GPIB::17")
-        print('SRS830_1 using: GPIB::17')
-         
-        self.SRS830_2 = SR830("GPIB::18")
-        print('SRS830_2 using: GPIB::18')
-        
-        #self.SRS830_3 = SR830("GPIB::9")
-        self.Gate_1 = Keithley2450("USB0::0x05E6::0x2450::04416746::INSTR")
-        
-        print("Connecting to Dilution computer ip - 132.66.132.173, port - 33576")
-        self.Dilution = DilutionInstrument(ip = '132.66.132.173', port = 33576)
-        
-        self.Dilution.connect()
-        
-        print("Connected to devices")
     def getmeas(self, t0, aux):
-        
-        temperature = self.Dilution.get_temperature(thermometer_num = 8)
-        
-        vals = [time.time() - t0]
-        vals += [temperature]
+        mid = [getattr(self.SRS860_1, 'dac%d' % aux)]
+        return self._read_standard(t0, mid)
 
-        magnet_temperature = self.Dilution.get_temperature(thermometer_num = 13)
-        vals += [magnet_temperature]
-        
-        vals += [self.Gate_1.measure__voltage(), self.Gate_1.measure__current()]
-        
-        # get the attribute dac from the SR860 instrument which is the AUX_OUT_{aux number}
-        
-        vals += [getattr(self.SRS860_1,f'dac{aux}')]
-        for attempt in range(10):
-            try:
-                x,y = self.SRS860_1.snap("X", "Y")
-                if not math.isnan(x) and not math.isnan(y):
-                    vals += [x,y]
-                    break
-            except :
-                pass
-            time.sleep(0.01)
-        else:
-            sys.exit("Attempted Snap 10 times in SRS860_1 and failed, Aborting measuremnt")
-            
-        
-        
-        for attempt in range(10):
-            try:
-                x,y = self.SRS830_1.snap("X", "Y")
-                if not math.isnan(x) and not math.isnan(y):
-                    vals += [x,y]
-                    break
-            except :
-                pass
-            time.sleep(0.01)
-        else:
-            sys.exit("Attempted Snap 10 times in SRS830_1 and failed, Aborting measuremnt ")
-            
-        
-        for attempt in range(10):
-            try:
-                x,y = self.SRS830_2.snap("X", "Y")
-                if not math.isnan(x) and not math.isnan(y):
-                    vals += [x,y]
-                    break
-            except :
-                pass
-            time.sleep(0.1)
-        else:
-            sys.exit("Attempted Snap 10 times in SRS830_2 and failed, Aborting measuremnt")
-            
-        
-##      vals += list(self.SRS830_3.snap("X", "Y"))
-
-# ----- Read magnetic fields -----
-        bx , by, bz = self.Dilution.read_magnet()
-        vals += [bx, by, bz]
-        
-        return vals
-    
     def execute(self):
         
         print(f"starting aux voltage sweep to {self.target_AUX_voltage} V")
@@ -178,9 +79,6 @@ class Resistance_Aux_voltage_measurement(Procedure):
         aux_end = getattr(self.SRS860_1,f'dac{self.aux}')
         print(f'AUX voltage reached {aux_end} V')
 
-    def shutdown(self):
-        self.Dilution.close()
-        print("Finished measuring")
 
 
 

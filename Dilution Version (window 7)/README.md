@@ -47,15 +47,35 @@ Key capabilities:
 
 ## Quick Start
 
+### Option A — GUI sequencer (recommended)
+
 1. Ensure all instruments are connected and powered on, and the dilution refrigerator is reachable over the network.
-2. Open `Main.py` and set the `folder_name` variable to your desired data output directory.
-3. **Uncomment** the procedure block(s) you want to run and configure the parameters.
-4. Run the script:
+2. Run the sequencer:
+   ```bash
+   python Sequence_GUI.py
+   ```
+3. Click **Instruments...** — enable each device (lock-ins, gates, dilution) and set its address. **Save & Connect** writes `instruments.json` and connects. Data columns, `startup()` and `getmeas()` adjust automatically to whatever is actually connected — a disabled or failed device simply has no columns and is never read. Connections are shared for the whole session (no reconnect per step).
+4. Build your sequence:
+   - Pick a step type (**Rt / RV / R_AUX / RH / Wait**), fill in the parameters shown (they mirror each procedure's `main()` signature), click **Add to sequence**.
+   - Add a **Loop** step, then use **Add into selected loop** to nest steps inside it. Loop values accept `0.5, -0.5, 0` or `linspace(0.5,-0.5,11)`.
+   - Any parameter field or the **Subfolder** may contain `{V}` — replaced by the current loop value each iteration (e.g. `target_voltage = {V}`, `Subfolder = AUX_hyst {V}V` gives one data subfolder per voltage, like the old `Main.py` loop).
+   - Reorder with **Up/Down**, fix mistakes with edit + **Apply edit to selected**, remove with **Delete**.
+4. Set the **Save dir** (base directory), click **Run sequence**. Each measurement opens its own live plot window; the next step starts when that window closes. **Stop after current step** halts the sequence between steps.
+5. **Save sequence (JSON)** / **Load sequence (JSON)** store the whole plan for reuse.
+
+Sanity check without instruments: `python Sequence_GUI.py --self-check`.
+
+### Option B — script (legacy)
+
+1. Open `Main.py` and set the `folder_name` variable to your desired data output directory.
+2. **Uncomment** the procedure block(s) you want to run and configure the parameters.
+3. Run the script:
    ```bash
    python Main.py
    ```
    Or double-click `Run main.bat`.
-5. A live plotting window will appear for each procedure as it runs.
+4. A live plotting window will appear for each procedure as it runs.
+
 
 ---
 
@@ -63,6 +83,7 @@ Key capabilities:
 
 ```
 Dilution Version/
+├── Sequence_GUI.py                 # GUI sequencer — build & run step sequences (loops supported)
 ├── Main.py                         # Master script — compose & run measurement sequences
 ├── Run main.bat                    # Batch launcher (simply runs Main.py)
 ├── README.txt                      # Original documentation

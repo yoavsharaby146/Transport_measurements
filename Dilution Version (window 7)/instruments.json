@@ -1,0 +1,27 @@
+{
+  "use_dilution": true,
+  "dilution_ip": "132.66.132.173",
+  "dilution_port": 33576,
+
+  "use_srs860_1": true,
+  "srs860_1_visa": "USB0::0xB506::0x2000::007030::INSTR",
+  "use_srs860_2": false,
+  "srs860_2_visa": "",
+
+  "use_srs830_1": true,
+  "srs830_1_visa": "GPIB::17",
+  "use_srs830_2": true,
+  "srs830_2_visa": "GPIB::18",
+  "use_srs830_3": false,
+  "srs830_3_visa": "GPIB::9",
+
+  "use_gate_1": true,
+  "gate_1_visa": "USB0::0x05E6::0x2450::04416746::INSTR",
+  "use_gate_2": false,
+  "gate_2_visa": "",
+
+  "use_dual_gate": false,
+  "dual_gate_visa": "",
+
+  "use_magnet": true
+}
