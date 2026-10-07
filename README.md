@@ -15,6 +15,7 @@ Developed by **Yoav Sharaby**.
   - [Dynacool Version](#dynacool-version)
   - [Dilution Version](#dilution-version)
   - [Attocube Version](#attocube-version)
+  - [Generic Version](#generic-version)
 - [Shared Components](#shared-components)
   - [Instruments](#instruments)
   - [Instrument control](#instrument-control)
@@ -52,6 +53,7 @@ Transport_measurements/
 ├── Dynacool Version/       # GUI suite for the Quantum Design Dynacool PPMS
 ├── Dilution Version/       # Script suite for a dilution refrigerator (3D vector magnet)
 ├── Attocube Version/       # Script suite for the Attocube attoDRY cryostat (rotation)
+├── Generic Version/        # GUI suite using only Keithley SMUs + lock-ins (no cryostat/magnet)
 ├── Instruments/            # Shared instrument drivers (VISA / serial / TCP-IP)
 ├── Instrument control/     # Standalone GUI controllers for individual instruments
 ├── Plotter/                # Interactive plotting application (CSV / Excel)
@@ -118,6 +120,19 @@ A **script-based suite** for the **Attocube attoDRY** cryostat. Adds angular-pos
 - **Entry point:** `python Main.py` (or `Run main.bat`)
 
 → `Main.py` documents the full procedure API and example sequences (gate hysteresis, field sweeps at multiple gates, rotation scans, temperature sweeps).
+
+---
+
+### Generic Version
+
+A **PyMeasure-based GUI suite** using **only Keithley SMUs and lock-in amplifiers** — no cryostat, no magnet, no temperature logging. Runs on any workstation with the instruments connected.
+
+- **Instruments:** Keithley 2450 (×2), Keithley 2604B (dual SMU), SRS SR860 (×2), SRS SR830 (×3), Zurich MFLI (×3)
+- **Procedures:** 4 (Rt, gate sweep, two-gate sweep, two-gate 2D map)
+- **Configuration:** pre-launch dialog writes `instrument_overrides.json`
+- **Entry point:** `python "Transport measurements.py"`
+
+→ See [`Generic Version/README.md`](Generic%20Version/README.md)
 
 ---
 
