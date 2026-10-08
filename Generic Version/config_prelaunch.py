@@ -49,6 +49,18 @@ class InstrumentConfig:
     dual_gate_visa: str = ""
     dual_gate_visa_library: str = 'C:\\Windows\\System32\\visa64.dll'
 
+    use_yoko_gs200_1: bool = False
+    yoko_gs200_1_visa: str = ""
+
+    use_yoko_gs200_2: bool = False
+    yoko_gs200_2_visa: str = ""
+
+    use_yoko7651_1: bool = False
+    yoko7651_1_visa: str = ""
+
+    use_yoko7651_2: bool = False
+    yoko7651_2_visa: str = ""
+
     use_srs860_1: bool = False
     srs860_1_visa: str = ""
 
@@ -102,10 +114,12 @@ class ConfigDialog(QtWidgets.QDialog):
         # Widgets
         self.tabs = QtWidgets.QTabWidget(self)
         self._keithley_tab = self._build_keithley_tab()
+        self._yokogawa_tab = self._build_yokogawa_tab()
         self._lockins_tab = self._build_lockins_tab()
         self._mfli_tab = self._build_mfli_tab()
 
         self.tabs.addTab(self._keithley_tab, "Keithley SMUs")
+        self.tabs.addTab(self._yokogawa_tab, "Yokogawa Sources")
         self.tabs.addTab(self._lockins_tab, "Lock-ins")
         self.tabs.addTab(self._mfli_tab, "Zurich MFLI")
 
@@ -171,6 +185,16 @@ class ConfigDialog(QtWidgets.QDialog):
         self.chk_dual.setChecked(self._cfg.use_dual_gate)
         self.cmb_dual.setEditText(self._cfg.dual_gate_visa)
 
+        # Yokogawa sources
+        self.chk_yoko_gs200_1.setChecked(self._cfg.use_yoko_gs200_1)
+        self.cmb_yoko_gs200_1.setEditText(self._cfg.yoko_gs200_1_visa)
+        self.chk_yoko_gs200_2.setChecked(self._cfg.use_yoko_gs200_2)
+        self.cmb_yoko_gs200_2.setEditText(self._cfg.yoko_gs200_2_visa)
+        self.chk_yoko7651_1.setChecked(self._cfg.use_yoko7651_1)
+        self.cmb_yoko7651_1.setEditText(self._cfg.yoko7651_1_visa)
+        self.chk_yoko7651_2.setChecked(self._cfg.use_yoko7651_2)
+        self.cmb_yoko7651_2.setEditText(self._cfg.yoko7651_2_visa)
+
         # Lock-ins
         self.chk_srs860_1.setChecked(self._cfg.use_srs860_1)
         self.cmb_srs860_1.setEditText(self._cfg.srs860_1_visa)
@@ -218,6 +242,26 @@ class ConfigDialog(QtWidgets.QDialog):
         grid.addWidget(self.chk_gate1, 0, 0); grid.addWidget(self.cmb_gate1, 0, 1)
         grid.addWidget(self.chk_gate2, 1, 0); grid.addWidget(self.cmb_gate2, 1, 1)
         grid.addWidget(self.chk_dual, 2, 0); grid.addWidget(self.cmb_dual, 2, 1)
+        grid.setColumnStretch(1, 1)
+        return w
+
+    def _build_yokogawa_tab(self) -> QtWidgets.QWidget:
+        w = QtWidgets.QWidget(self)
+        grid = QtWidgets.QGridLayout(w)
+
+        self.chk_yoko_gs200_1 = QtWidgets.QCheckBox("Use YokoGS200_1 (Yokogawa GS200)")
+        self.cmb_yoko_gs200_1 = QtWidgets.QComboBox(); self.cmb_yoko_gs200_1.setEditable(True)
+        self.chk_yoko_gs200_2 = QtWidgets.QCheckBox("Use YokoGS200_2 (Yokogawa GS200)")
+        self.cmb_yoko_gs200_2 = QtWidgets.QComboBox(); self.cmb_yoko_gs200_2.setEditable(True)
+        self.chk_yoko7651_1 = QtWidgets.QCheckBox("Use Yoko7651_1 (Yokogawa 7651)")
+        self.cmb_yoko7651_1 = QtWidgets.QComboBox(); self.cmb_yoko7651_1.setEditable(True)
+        self.chk_yoko7651_2 = QtWidgets.QCheckBox("Use Yoko7651_2 (Yokogawa 7651)")
+        self.cmb_yoko7651_2 = QtWidgets.QComboBox(); self.cmb_yoko7651_2.setEditable(True)
+
+        grid.addWidget(self.chk_yoko_gs200_1, 0, 0); grid.addWidget(self.cmb_yoko_gs200_1, 0, 1)
+        grid.addWidget(self.chk_yoko_gs200_2, 1, 0); grid.addWidget(self.cmb_yoko_gs200_2, 1, 1)
+        grid.addWidget(self.chk_yoko7651_1, 2, 0); grid.addWidget(self.cmb_yoko7651_1, 2, 1)
+        grid.addWidget(self.chk_yoko7651_2, 3, 0); grid.addWidget(self.cmb_yoko7651_2, 3, 1)
         grid.setColumnStretch(1, 1)
         return w
 
@@ -372,8 +416,10 @@ class ConfigDialog(QtWidgets.QDialog):
     # ---------- Fillers ----------
     def _fill_visa_comboboxes(self, resources: List[str]):
         for cmb in (self.cmb_gate1, self.cmb_gate2, self.cmb_dual,
-                     self.cmb_srs860_1, self.cmb_srs860_2,
-                       self.cmb_srs830_1, self.cmb_srs830_2, self.cmb_srs830_3):
+                    self.cmb_yoko_gs200_1, self.cmb_yoko_gs200_2,
+                    self.cmb_yoko7651_1, self.cmb_yoko7651_2,
+                    self.cmb_srs860_1, self.cmb_srs860_2,
+                      self.cmb_srs830_1, self.cmb_srs830_2, self.cmb_srs830_3):
             cmb.clear(); cmb.addItems(resources); cmb.setEditable(True)
 
 
@@ -388,6 +434,18 @@ class ConfigDialog(QtWidgets.QDialog):
 
             use_dual_gate=self.chk_dual.isChecked(),
             dual_gate_visa=self.cmb_dual.currentText().strip(),
+
+            use_yoko_gs200_1=self.chk_yoko_gs200_1.isChecked(),
+            yoko_gs200_1_visa=self.cmb_yoko_gs200_1.currentText().strip(),
+
+            use_yoko_gs200_2=self.chk_yoko_gs200_2.isChecked(),
+            yoko_gs200_2_visa=self.cmb_yoko_gs200_2.currentText().strip(),
+
+            use_yoko7651_1=self.chk_yoko7651_1.isChecked(),
+            yoko7651_1_visa=self.cmb_yoko7651_1.currentText().strip(),
+
+            use_yoko7651_2=self.chk_yoko7651_2.isChecked(),
+            yoko7651_2_visa=self.cmb_yoko7651_2.currentText().strip(),
 
             use_srs860_1=self.chk_srs860_1.isChecked(),
             srs860_1_visa=self.cmb_srs860_1.currentText().strip(),

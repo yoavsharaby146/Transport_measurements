@@ -400,6 +400,7 @@ class Launcher(QtWidgets.QMainWindow):
             import configuration as cfg
             instrument_list = [
                 cfg.Gate_1, cfg.Gate_2, cfg.Dual_gate,
+                cfg.YokoGS200_1, cfg.YokoGS200_2, cfg.Yoko7651_1, cfg.Yoko7651_2,
                 cfg.MFLI_1, cfg.MFLI_2, cfg.MFLI_3,
                 cfg.SRS860_1, cfg.SRS860_2,
                 cfg.SRS830_1, cfg.SRS830_2, cfg.SRS830_3

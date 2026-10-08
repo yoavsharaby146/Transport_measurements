@@ -27,6 +27,10 @@ class Resistance_time_measurement(GenericProcedure):
     use_dual_gate = BooleanParameter('Use dual gate', group_by='devices', default=False)
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+    use_yoko_gs200_1 = BooleanParameter('Use Yoko GS200_1', group_by='devices', default=False)
+    use_yoko_gs200_2 = BooleanParameter('Use Yoko GS200_2', group_by='devices', default=False)
+    use_yoko7651_1 = BooleanParameter('Use Yoko7651_1', group_by='devices', default=False)
+    use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
 
     def startup(self):
         self._capture_metadata()
@@ -67,6 +71,8 @@ proc_resistance_time = {
                 'use_srs860_1','use_srs860_2',
                 'use_srs830_1','use_srs830_2','use_srs830_3',
                 'use_dual_gate','use_keithley_1','use_keithley_2',
+                'use_yoko_gs200_1','use_yoko_gs200_2',
+                'use_yoko7651_1','use_yoko7651_2',
                 'acq_delay', 'acq_length',
         ],
         displays=[

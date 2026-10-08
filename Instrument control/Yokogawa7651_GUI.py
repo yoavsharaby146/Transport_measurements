@@ -13,15 +13,15 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 instruments_path = os.path.join(current_dir, '..')
 sys.path.append(instruments_path)
 
-from Instruments.yokogawags200_with_add_ons import YokogawaGS200
+from Instruments.yokogawa7651_with_add_ons import Yokogawa7651
 
-# GS200 fixed source ranges (no auto-range command on the instrument)
+# 7651 fixed source ranges (no auto-range command on the instrument)
 V_RANGES = [10e-3, 100e-3, 1, 10, 30]
-I_RANGES = [1e-3, 10e-3, 100e-3, 200e-3]
+I_RANGES = [1e-3, 10e-3, 100e-3]
 
 
 class DeviceTab:
-    """Encapsulates all controls and state for a single Yokogawa GS200 device"""
+    """Encapsulates all controls and state for a single Yokogawa 7651 device"""
 
     def __init__(self, parent_notebook, device_name, main_app):
         self.main_app = main_app
@@ -129,10 +129,10 @@ class DeviceTab:
         self.lbl_unit_level = ttk.Label(frame, text="V")
         self.lbl_unit_level.grid(row=2, column=2, sticky="w")
 
-        # Row 3: Limit (protection on the conjugate value)
-        ttk.Label(frame, text="Limit (Protection):").grid(row=3, column=0, padx=5, pady=5, sticky="e")
+        # Row 3: Limit (compliance on the conjugate value)
+        ttk.Label(frame, text="Limit (Compliance):").grid(row=3, column=0, padx=5, pady=5, sticky="e")
         self.ent_limit = ttk.Entry(frame, width=17)
-        self.ent_limit.insert(0, "0.1")
+        self.ent_limit.insert(0, "10e-3")
         self.ent_limit.grid(row=3, column=1, padx=5, sticky="w")
         self.lbl_unit_limit = ttk.Label(frame, text="A")
         self.lbl_unit_limit.grid(row=3, column=2, sticky="w")
@@ -168,14 +168,14 @@ class DeviceTab:
         self.ent_ramp_time.insert(0, "0.1")
         self.ent_ramp_time.grid(row=0, column=5, padx=5)
 
-        # Ramp engine selector: software loop (abortable) vs built-in program
+        # Ramp engine selector: software loop vs built-in program sweep (manual 6.3 (8)-(11))
         self.ramp_engine_var = tk.StringVar(value="software")
         engine_frame = ttk.Frame(frame)
         engine_frame.grid(row=1, column=0, columnspan=4, pady=(10, 0), sticky="w")
-        ttk.Radiobutton(engine_frame, text="Software (abortable, plots level vs time)",
+        ttk.Radiobutton(engine_frame, text="Software (step ramp, plots level vs time)",
                         variable=self.ramp_engine_var, value="software",
                         command=self._update_ramp_buttons).pack(side="left", padx=5)
-        ttk.Radiobutton(engine_frame, text="Built-in program (smooth, NOT abortable)",
+        ttk.Radiobutton(engine_frame, text="Built-in program sweep (smooth)",
                         variable=self.ramp_engine_var, value="builtin",
                         command=self._update_ramp_buttons).pack(side="left", padx=5)
 
@@ -186,7 +186,7 @@ class DeviceTab:
         self.btn_stop_ramp.grid(row=2, column=3, pady=10)
 
     def _build_system_control(self, parent):
-        # GS200 has no front/rear terminals or 2/4-wire selection.
+        # 7651 has no front/rear terminals or 2/4-wire selection.
         # System tab holds a safety shutdown instead.
         frame = ttk.LabelFrame(parent, text="Safety")
         frame.pack(fill="x", padx=10, pady=5)
@@ -200,7 +200,7 @@ class DeviceTab:
         frame = ttk.Frame(self.frame)
         frame.pack(fill="x", padx=10, pady=5)
 
-        # Main Source Level Label (GS200 is source-only: no measurement readback)
+        # Main Source Level Label (7651 is source-only: no measurement readback)
         self.lbl_measure_title = ttk.Label(frame, text="Source Level:", font=("Arial", 12))
         self.lbl_measure_title.pack(side="left", padx=5)
 
@@ -279,12 +279,17 @@ class DeviceTab:
             self.cb_out_range['values'] = ["Auto"] + [str(r) for r in I_RANGES]
 
     def _update_ramp_buttons(self):
-        """Abort is only possible in software ramp mode"""
-        if self.ramp_engine_var.get() == "builtin" and not self.monitor_active:
-            self.btn_stop_ramp.config(state="disabled")
+        pass
+
+    def _set_level(self, level):
+        """Set the output level via the mode-appropriate property"""
+        if self.source_mode_var.get() == "voltage":
+            self.inst.source_voltage = level
+        else:
+            self.inst.source_current = level
 
     def _pick_auto_range(self, level, mode):
-        """Smallest fixed range that fits |level| (GS200 has no auto-range command)"""
+        """Smallest fixed range that fits |level| (7651 has no auto-range command)"""
         ranges = V_RANGES if mode == "voltage" else I_RANGES
         for r in ranges:
             if abs(level) <= r:
@@ -300,12 +305,11 @@ class DeviceTab:
         self.log_message(f"Connecting to {addr}...")
         try:
             with self.lock:
-                self.inst = YokogawaGS200(addr)
+                self.inst = Yokogawa7651(addr)
+                # 7651 uses a legacy (non-SCPI) protocol: no termination overrides,
+                # matching the working Attocube procedures in this repo.
                 if hasattr(self.inst, 'adapter'):
                     self.inst.adapter.connection.timeout = 10000
-                    self.inst.adapter.connection.read_termination = '\n'
-                    self.inst.adapter.connection.write_termination = '\n'
-                    self.inst.adapter.connection.clear()
 
             for btn in [self.btn_reset, self.btn_apply, self.btn_output_toggle,
                         self.btn_start_ramp, self.btn_safety_zero, self.btn_measure_now]:
@@ -325,8 +329,8 @@ class DeviceTab:
         if self.inst:
             try:
                 with self.lock:
-                    self.inst.source_level = 0
-                    self.inst.source_enabled = False
+                    self._set_level(0)
+                    self.inst.disable_source()
                     self.inst.adapter.connection.close()
             except Exception:
                 pass
@@ -345,11 +349,11 @@ class DeviceTab:
             return
         with self.lock:
             try:
-                self.inst.reset()
-                self.inst.source_mode = "voltage"
+                self.inst.write("RC;E")  # setting initialization (manual 6.3 (6))
+                self.inst.write("H0;E")  # no header in output data
                 self.log_message("Instrument Hard Reset.")
             except Exception as e:
-                self.log_message(f"Reset Error: {e}")
+                self.log_message(f"Re-Init Error: {e}")
 
     def toggle_output(self):
         if not self.inst:
@@ -358,10 +362,10 @@ class DeviceTab:
             time.sleep(0.1)
             try:
                 if self.inst.source_enabled:
-                    self.inst.source_enabled = False
+                    self.inst.disable_source()
                     self.log_message("Output -> OFF")
                 else:
-                    self.inst.source_enabled = True
+                    self.inst.enable_source()
                     self.log_message("Output -> ON")
             except Exception as e:
                 self.log_message(f"Toggle Error: {e}")
@@ -377,8 +381,8 @@ class DeviceTab:
             return
         with self.lock:
             try:
-                self.inst.source_level = 0
-                self.inst.source_enabled = False
+                self._set_level(0)
+                self.inst.disable_source()
                 self.log_message("SAFETY ZERO: Level 0, Output OFF.")
             except Exception as e:
                 self.log_message(f"Safety Zero Error: {e}")
@@ -398,14 +402,20 @@ class DeviceTab:
                 src_range = float(self.out_range_var.get())
 
             with self.lock:
-                # Order matters: mode and range first (level is validated against range)
-                self.inst.source_mode = mode
-                self.inst.source_range = src_range
+                auto = (self.out_range_var.get() == "Auto")
                 if mode == "voltage":
-                    self.inst.current_limit = limit
+                    # Order matters: mode, range and compliance first, then level
+                    self.inst.apply_voltage(max_voltage=src_range, compliance_current=limit)
+                    if auto:
+                        self.inst.set_level_auto_range(val)  # SA command
+                    else:
+                        self.inst.source_voltage = val
                 else:
-                    self.inst.voltage_limit = limit
-                self.inst.source_level = val
+                    self.inst.apply_current(max_current=src_range, compliance_voltage=limit)
+                    if auto:
+                        self.inst.set_level_auto_range(val)  # SA command
+                    else:
+                        self.inst.source_current = val
 
             self.log_message(f"Applied: {mode.upper()} Src={val}, Range={src_range}, Lim={limit}")
             self.update_status_indicators()
@@ -421,7 +431,10 @@ class DeviceTab:
         try:
             with self.lock:
                 mode = self.inst.source_mode
-                level = self.inst.source_level
+                if mode == "voltage":
+                    level = float(self.inst.source_voltage)
+                else:
+                    level = float(self.inst.source_current)
             unit = "V" if mode == "voltage" else "A"
             self.lbl_measure_val.config(text=f"{level:.4e} {unit}")
             self.log_message(f"Source Level: {level:.4e} {unit}")
@@ -466,8 +479,7 @@ class DeviceTab:
         self.log_message(f"Starting Ramp ({engine}) -> {target}...")
         self.stop_event.clear()
         self.btn_start_ramp.config(state="disabled")
-        self.btn_stop_ramp.config(state="normal" if engine == "software" else "disabled")
-
+        self.btn_stop_ramp.config(state="normal")
         self.data_x = []
         self.data_y = []
         self.monitor_active = (engine == "software")
@@ -480,6 +492,13 @@ class DeviceTab:
 
     def stop_ramp(self):
         self.stop_event.set()
+        # Built-in program sweep: halt it immediately with RU0 (manual 6.3 (8))
+        if self.inst and self.ramp_engine_var.get() == "builtin":
+            try:
+                with self.lock:
+                    self.inst.halt_program()
+            except Exception:
+                pass
         self.log_message("Ramp Abort Requested.")
 
     def _ramp_callback(self, elapsed, level):
@@ -507,16 +526,20 @@ class DeviceTab:
     def _run_ramp_thread(self, target, step, time_step, engine):
         try:
             with self.lock:
-                self.inst.source_enabled = True
+                self.inst.enable_source()
 
             if engine == "software":
                 # Abortable step ramp with live level-vs-time plot
                 self.inst.ramping_with_monitor(target, step, time_step, callback=self._ramp_callback)
                 self.log_message("Ramp Completed.")
             else:
-                # Built-in program ramp: smooth, runs on the instrument, NOT abortable
+                # Built-in program sweep: smooth linear ramp on the instrument,
+                # haltable via RU0 from the ABORT button
                 with self.lock:
-                    current = self.inst.source_level
+                    if self.inst.source_mode == "voltage":
+                        current = float(self.inst.source_voltage)
+                    else:
+                        current = float(self.inst.source_current)
                     n_steps = int(abs(target - current) / abs(step)) if step != 0 else 1
                     total_time = max(n_steps * time_step, 0.1)
                     self.inst.trigger_ramp_to_level(target, total_time)
@@ -536,12 +559,12 @@ class DeviceTab:
         plt.close(self.fig)
 
 
-class GS200ControllerApp:
+class Y7651ControllerApp:
     """Main application that manages multiple device tabs"""
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Yokogawa GS200 Master Controller - Multi-Device")
+        self.root.title("Yokogawa 7651 Master Controller - Multi-Device")
         self.root.geometry("1300x950")
 
         self.device_tabs = []
@@ -647,6 +670,6 @@ class GS200ControllerApp:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = GS200ControllerApp(root)
+    app = Y7651ControllerApp(root)
     root.mainloop()
 

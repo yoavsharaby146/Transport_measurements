@@ -18,6 +18,8 @@ from Instruments.SR830_with_add_ons import SR830
 from Instruments.SR860_with_add_ons import SR860
 from Instruments.keithley2450_with_add_ons import Keithley2450
 from Instruments.keithley2604B import Keithley2604B
+from Instruments.yokogawags200_with_add_ons import YokogawaGS200
+from Instruments.yokogawa7651_with_add_ons import Yokogawa7651
 from Instruments.MFLI import MFLIController
 
 
@@ -72,6 +74,36 @@ Dual_gate = _maybe(
     enabled=overrides.get("use_dual_gate", False),
     addr=overrides.get("dual_gate_visa", ""),
     name="Dual_gate"
+)
+
+# Yokogawa GS200 sources
+YokoGS200_1 = _maybe(
+    YokogawaGS200,
+    enabled=overrides.get("use_yoko_gs200_1", False),
+    addr=overrides.get("yoko_gs200_1_visa", ""),
+    name="YokoGS200_1"
+)
+
+YokoGS200_2 = _maybe(
+    YokogawaGS200,
+    enabled=overrides.get("use_yoko_gs200_2", False),
+    addr=overrides.get("yoko_gs200_2_visa", ""),
+    name="YokoGS200_2"
+)
+
+# Yokogawa 7651 sources
+Yoko7651_1 = _maybe(
+    Yokogawa7651,
+    enabled=overrides.get("use_yoko7651_1", False),
+    addr=overrides.get("yoko7651_1_visa", ""),
+    name="Yoko7651_1"
+)
+
+Yoko7651_2 = _maybe(
+    Yokogawa7651,
+    enabled=overrides.get("use_yoko7651_2", False),
+    addr=overrides.get("yoko7651_2_visa", ""),
+    name="Yoko7651_2"
 )
 
 # SRS lock-ins
