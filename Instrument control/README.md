@@ -13,6 +13,7 @@ All scripts communicate through the instrument drivers located in [`../Instrumen
 | `Keithley2450_GUI.py` | Keithley 2450 SourceMeter | GUI (Tk) | Multi-device controller with manual source/measure, ramping, and live I-V plotting |
 | `Keithley2604B_GUI.py` | Keithley 2604B Dual-Channel SMU | GUI (Tk) | Dual-SMU controller (Channel A & B) with source/measure, ramping, and live plotting |
 | `IV_VI_Sweeper.py` | Keithley 2450 (×2) | GUI (Tk) | Hysteresis IV/VI sweep tool with independent gate voltage control and CSV export |
+| `KeithleyAllInOne_GUI.py` | All Keithleys (2000 / 2182 / 2450 / 6221 / 2600-series) | GUI (Tk) | One window for every Keithley: scans VISA, auto-detects model via ``*IDN?`` and opens a model-appropriate panel per instrument |
 
 ---
 
@@ -103,6 +104,30 @@ python "Instrument control/IV_VI_Sweeper.py"
 
 ---
 
+### `KeithleyAllInOne_GUI.py` — Keithley All-In-One Controller
+
+One window for **every Keithley on the bench**. Press *Scan for Keithleys* and the program
+queries `*IDN?` on every VISA resource, then opens a model-appropriate tab for each
+connected Keithley (non-Keithley instruments are skipped):
+
+| Model | Panel |
+|-------|-------|
+| 2000 | Multimeter readout: mode (V / I / R 2W/4W / freq / period / temperature / diode / continuity), NPLC, auto-range, single or auto-refresh measurement |
+| 2182 / 2182A | Nanovoltmeter: channel 1/2, voltage or temperature function, NPLC, thermocouple type, single or auto-refresh readout, internal temperature |
+| 2450 | SourceMeter: manual source V/I with compliance and ranges, output toggle, front/rear terminals, 2/4-wire sensing, single-point measure, abortable ramp with live I-V plot |
+| 6221 | AC/DC current source: DC level, compliance, range/auto-range, output toggle, abortable software ramp, waveform generator (function / frequency / amplitude / offset / duty cycle, ARM / START / ABORT) |
+| 2600 series (2604B…) | Dual-channel TSP SMU: SMU A and SMU B sub-tabs, each with source V/I config, output toggle, measure, abortable ramp with live plot |
+
+Each tab has its own per-device VISA lock, timestamped log, status polling and safe cleanup
+(output off / ramp abort) on disconnect or window close.
+
+**Run:**
+```bash
+python "Instrument control/KeithleyAllInOne_GUI.py"
+```
+
+> Note: `Instruments/buffer.py` is a small shim re-exporting pymeasure's `KeithleyBuffer`,
+> required by the 2000/2182/6221 drivers (which use `from .buffer import KeithleyBuffer`).
 ## Subfolder: `IV tries/`
 
 Early/experimental versions of the IV/VI sweeper scripts:
