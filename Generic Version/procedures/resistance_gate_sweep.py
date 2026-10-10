@@ -15,7 +15,7 @@ class Resistance_gate_sweep_measurement(GenericProcedure):
     acq_delay = FloatParameter('Acquisition  Delay (s)', default=1)
     target_voltage = FloatParameter('Target Voltage(V)', default=0)
     step_size = FloatParameter('Step size(mV)', default=1)
-    smu = ListParameter('User defined SMU',choices=['Gate_1','Gate_2','smua','smub'], default='Gate_1')
+    smu = ListParameter('User defined SMU',choices=['Gate_1','Gate_2','smua','smub','YokoGS200_1','YokoGS200_2','Yoko7651_1','Yoko7651_2'], default='Gate_1')
 
     # --- Hardware Selection ---
     devices = BooleanParameter('Devices in use', default=False)

@@ -61,4 +61,5 @@ Generic Version/
 
 - **Data output:** `~/Desktop/Generic Measurements/` (change `save_dir` in `Transport measurements.py` and `procedures/base.py`).
 - **Dynamic columns:** only instruments connected in the pre-launch dialog produce CSV columns; connected-but-unticked instruments in a procedure's **Devices** group give NaN.
+- **Yokogawas as sweep SMUs:** `YokoGS200_1/2` and `Yoko7651_1/2` appear in every SMU dropdown (gate sweep, two-gate sweep/map). They are source-only — no leakage-current readback (`measure__current()` returns NaN) — and are configured to a fixed 10 V range with the instrument's own current limit when the output turns on. Set a larger range on the front panel if a sweep needs >10 V.
 - No temperature or magnetic-field columns in this version.

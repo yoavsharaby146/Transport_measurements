@@ -236,6 +236,89 @@ def filter_inputs_by_connection(inputs, cfg):
     return [i for i in inputs if i not in skip]
 
 
+# ---------------- Yokogawa SMU adapter ----------------
+
+class YokoVoltageSourceAdapter:
+    """Wraps a YokogawaGS200 or Yokogawa7651 with the Keithley-SMU interface
+    used by the sweep procedures (is_output_on / configure_voltage_source /
+    output_on / ramp_voltage / voltage_ramping / measure__*).
+
+    Yokogawas are source-only in this setup: measure__voltage() returns the
+    programmed level (not a real measurement) and measure__current() is NaN.
+    Ramps are blocking software ramps (same timing semantics as the Keithleys).
+
+    ponytail: fixed 10 V source range at configure time — set a different
+    range on the instrument front panel if a sweep needs >10 V.
+    """
+
+    def __init__(self, inst):
+        self._inst = inst
+        self._is_gs200 = hasattr(inst, 'source_level')
+
+    def is_output_on(self):
+        return bool(self._inst.source_enabled)
+
+    def output_on(self):
+        if hasattr(self._inst, 'enable_source'):   # 7651
+            self._inst.enable_source()
+        else:                                      # GS200
+            self._inst.source_enabled = True
+
+    def output_off(self):
+        if hasattr(self._inst, 'disable_source'):  # 7651
+            self._inst.disable_source()
+        else:                                      # GS200
+            self._inst.source_enabled = False
+
+    def configure_voltage_source(self, **kwargs):
+        """Put the instrument in voltage mode. Keithley-specific kwargs
+        (nplc/current/auto_range/compliance/voltage/current_limit) are
+        ignored — the Yokogawa uses its own limits."""
+        if self._is_gs200:
+            self._inst.source_mode = 'voltage'
+            self._inst.source_range = 10
+            self._inst.current_limit = 1e-3
+        else:
+            self._inst.apply_voltage(10, 10e-3)
+
+    def _set_level(self, v):
+        if self._is_gs200:
+            self._inst.source_level = float(v)
+        else:
+            self._inst.source_voltage = float(v)
+
+    def measure__voltage(self):
+        """Programmed level — Yokogawas have no measure readback here."""
+        if self._is_gs200:
+            return float(self._inst.source_level)
+        return float(self._inst.source_voltage)
+
+    def measure__current(self):
+        return math.nan  # source-only: no current readback
+
+    def ramp_voltage(self, target, steps=30, pause=20e-3):
+        """Keithley semantics: go to target in `steps` discrete jumps."""
+        current = self.measure__voltage()
+        n = max(int(steps), 1)
+        for v in np.linspace(current, target, n + 1)[1:]:
+            self._set_level(v)
+            time.sleep(pause)
+
+    def voltage_ramping(self, target, step_size=1, pause=20e-3, callback=None):
+        """Keithley semantics: step_size in mV."""
+        current = self.measure__voltage()
+        step = max(abs(step_size), 1e-6) / 1000.0
+        step = step if target >= current else -step
+        n = int(abs(target - current) / abs(step)) if step else 0
+        for v in np.linspace(current, target, n + 1)[1:]:
+            self._set_level(v)
+            time.sleep(pause)
+            if callback is not None:
+                if callback(0.0, float(v)):
+                    log.info("Ramp aborted by callback at level %g", v)
+                    break
+
+
 # ---------------- GenericProcedure base class ----------------
 
 class GenericProcedure(Procedure):
@@ -381,6 +464,13 @@ class GenericProcedure(Procedure):
         if name == 'Gate_2': return Gate_2
         if name == 'smua': return Dual_gate.smua
         if name == 'smub': return Dual_gate.smub
+        yokos = {'YokoGS200_1': YokoGS200_1, 'YokoGS200_2': YokoGS200_2,
+                 'Yoko7651_1': Yoko7651_1, 'Yoko7651_2': Yoko7651_2}
+        if name in yokos:
+            if not _is_connected(yokos[name]):
+                raise ValueError(f"{name} selected as SMU but is not connected "
+                                 f"(check the pre-launch dialog)")
+            return YokoVoltageSourceAdapter(yokos[name])
         log.error("SMU selection not supported")
         raise ValueError(f"Unknown SMU: {name}")
 
