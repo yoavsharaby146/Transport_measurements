@@ -20,6 +20,8 @@ class Resistance_two_gate_scan_sweep_measurement(GenericProcedure):
     use_MFLI_3 = BooleanParameter('use_MFLI_3', group_by='devices', default=False)
     use_srs860_1 = BooleanParameter('Use srs860_1', group_by='devices', default=False)
     use_srs860_2 = BooleanParameter('Use srs860_2', group_by='devices', default=False)
+    use_srs860_3 = BooleanParameter('Use srs860_3', group_by='devices', default=False)
+    use_srs860_4 = BooleanParameter('Use srs860_4', group_by='devices', default=False)
     use_srs830_1 = BooleanParameter('Use srs830_1', group_by='devices', default=False)
     use_srs830_2 = BooleanParameter('Use srs830_2', group_by='devices', default=False)
     use_srs830_3 = BooleanParameter('Use srs830_3', group_by='devices', default=False)
@@ -110,6 +112,7 @@ proc_resistance_two_gate_sweep = {
             'devices',
             'use_MFLI_1', 'use_MFLI_2', 'use_MFLI_3',
             'use_srs860_1', 'use_srs860_2',
+            'use_srs860_3', 'use_srs860_4',
             'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
             'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
             'use_yoko_gs200_1', 'use_yoko_gs200_2',

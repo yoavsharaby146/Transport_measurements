@@ -121,6 +121,20 @@ SRS860_2 = _maybe(
     name="SRS860_2"
 )
 
+SRS860_3 = _maybe(
+    SR860,
+    enabled=overrides.get("use_srs860_3", False),
+    addr=overrides.get("srs860_3_visa", ""),
+    name="SRS860_3"
+)
+
+SRS860_4 = _maybe(
+    SR860,
+    enabled=overrides.get("use_srs860_4", False),
+    addr=overrides.get("srs860_4_visa", ""),
+    name="SRS860_4"
+)
+
 SRS830_1 = _maybe(
     SR830,
     enabled=overrides.get("use_srs830_1", False),

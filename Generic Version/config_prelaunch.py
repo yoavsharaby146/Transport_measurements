@@ -67,6 +67,12 @@ class InstrumentConfig:
     use_srs860_2: bool = False
     srs860_2_visa: str = ""
 
+    use_srs860_3: bool = False
+    srs860_3_visa: str = ""
+
+    use_srs860_4: bool = False
+    srs860_4_visa: str = ""
+
     use_srs830_1: bool = False
     srs830_1_visa: str = ""
 
@@ -200,6 +206,10 @@ class ConfigDialog(QtWidgets.QDialog):
         self.cmb_srs860_1.setEditText(self._cfg.srs860_1_visa)
         self.chk_srs860_2.setChecked(self._cfg.use_srs860_2)
         self.cmb_srs860_2.setEditText(self._cfg.srs860_2_visa)
+        self.chk_srs860_3.setChecked(self._cfg.use_srs860_3)
+        self.cmb_srs860_3.setEditText(self._cfg.srs860_3_visa)
+        self.chk_srs860_4.setChecked(self._cfg.use_srs860_4)
+        self.cmb_srs860_4.setEditText(self._cfg.srs860_4_visa)
 
         self.chk_srs830_1.setChecked(self._cfg.use_srs830_1)
         self.cmb_srs830_1.setEditText(self._cfg.srs830_1_visa)
@@ -318,6 +328,10 @@ class ConfigDialog(QtWidgets.QDialog):
         self.cmb_srs860_1 = QtWidgets.QComboBox(); self.cmb_srs860_1.setEditable(True)
         self.chk_srs860_2 = QtWidgets.QCheckBox("Use SRS860_2")
         self.cmb_srs860_2 = QtWidgets.QComboBox(); self.cmb_srs860_2.setEditable(True)
+        self.chk_srs860_3 = QtWidgets.QCheckBox("Use SRS860_3")
+        self.cmb_srs860_3 = QtWidgets.QComboBox(); self.cmb_srs860_3.setEditable(True)
+        self.chk_srs860_4 = QtWidgets.QCheckBox("Use SRS860_4")
+        self.cmb_srs860_4 = QtWidgets.QComboBox(); self.cmb_srs860_4.setEditable(True)
         self.chk_srs830_1 = QtWidgets.QCheckBox("Use SRS830_1")
         self.cmb_srs830_1 = QtWidgets.QComboBox(); self.cmb_srs830_1.setEditable(True)
         self.chk_srs830_2 = QtWidgets.QCheckBox("Use SRS830_2")
@@ -325,11 +339,13 @@ class ConfigDialog(QtWidgets.QDialog):
         self.chk_srs830_3 = QtWidgets.QCheckBox("Use SRS830_3")
         self.cmb_srs830_3 = QtWidgets.QComboBox(); self.cmb_srs830_3.setEditable(True)
 
-        grid.addWidget(self.chk_srs860_1, 0, 0); grid.addWidget(self.cmb_srs860_1, 0, 1)
-        grid.addWidget(self.chk_srs860_2, 1, 0); grid.addWidget(self.cmb_srs860_2, 1, 1)
-        grid.addWidget(self.chk_srs830_1, 2, 0); grid.addWidget(self.cmb_srs830_1, 2, 1)
-        grid.addWidget(self.chk_srs830_2, 3, 0); grid.addWidget(self.cmb_srs830_2, 3, 1)
-        grid.addWidget(self.chk_srs830_3, 4, 0); grid.addWidget(self.cmb_srs830_3, 4, 1)
+        grid.addWidget(self.chk_srs830_1, 0, 0); grid.addWidget(self.cmb_srs830_1, 0, 1)
+        grid.addWidget(self.chk_srs830_2, 1, 0); grid.addWidget(self.cmb_srs830_2, 1, 1)
+        grid.addWidget(self.chk_srs830_3, 2, 0); grid.addWidget(self.cmb_srs830_3, 2, 1)
+        grid.addWidget(self.chk_srs860_1, 3, 0); grid.addWidget(self.cmb_srs860_1, 3, 1)
+        grid.addWidget(self.chk_srs860_2, 4, 0); grid.addWidget(self.cmb_srs860_2, 4, 1)
+        grid.addWidget(self.chk_srs860_3, 5, 0); grid.addWidget(self.cmb_srs860_3, 5, 1)
+        grid.addWidget(self.chk_srs860_4, 6, 0); grid.addWidget(self.cmb_srs860_4, 6, 1)
         grid.setColumnStretch(1, 1)
         return w
 
@@ -419,6 +435,7 @@ class ConfigDialog(QtWidgets.QDialog):
                     self.cmb_yoko_gs200_1, self.cmb_yoko_gs200_2,
                     self.cmb_yoko7651_1, self.cmb_yoko7651_2,
                     self.cmb_srs860_1, self.cmb_srs860_2,
+                    self.cmb_srs860_3, self.cmb_srs860_4,
                       self.cmb_srs830_1, self.cmb_srs830_2, self.cmb_srs830_3):
             cmb.clear(); cmb.addItems(resources); cmb.setEditable(True)
 
@@ -452,6 +469,12 @@ class ConfigDialog(QtWidgets.QDialog):
 
             use_srs860_2=self.chk_srs860_2.isChecked(),
             srs860_2_visa=self.cmb_srs860_2.currentText().strip(),
+
+            use_srs860_3=self.chk_srs860_3.isChecked(),
+            srs860_3_visa=self.cmb_srs860_3.currentText().strip(),
+
+            use_srs860_4=self.chk_srs860_4.isChecked(),
+            srs860_4_visa=self.cmb_srs860_4.currentText().strip(),
 
             use_srs830_1=self.chk_srs830_1.isChecked(),
             srs830_1_visa=self.cmb_srs830_1.currentText().strip(),

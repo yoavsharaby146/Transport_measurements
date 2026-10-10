@@ -33,7 +33,7 @@ python "Transport measurements.py"
 | Keithley 2604B (dual SMU) | `Dual_gate` (`smua`, `smub`) | VISA (USB/GPIB) |
 | Yokogawa GS200 (×2) | `YokoGS200_1`, `YokoGS200_2` | VISA (USB/GPIB) |
 | Yokogawa 7651 (×2) | `Yoko7651_1`, `Yoko7651_2` | VISA (USB/GPIB) |
-| SRS SR860 (×2) | `SRS860_1`, `SRS860_2` | VISA (USB) |
+| SRS SR860 (×4) | `SRS860_1`–`SRS860_4` | VISA (USB) |
 | SRS SR830 (×3) | `SRS830_1`–`SRS830_3` | VISA (GPIB) |
 | Zurich MFLI (×3) | `MFLI_1`–`MFLI_3` | TCP/IP (`zhinst`) |
 

@@ -46,6 +46,8 @@ MFLI_2            = getattr(_cfg, "MFLI_2", 0)
 MFLI_3            = getattr(_cfg, "MFLI_3", 0)
 SRS860_1          = getattr(_cfg, "SRS860_1", 0)
 SRS860_2          = getattr(_cfg, "SRS860_2", 0)
+SRS860_3          = getattr(_cfg, "SRS860_3", 0)
+SRS860_4          = getattr(_cfg, "SRS860_4", 0)
 SRS830_1          = getattr(_cfg, "SRS830_1", 0)
 SRS830_2          = getattr(_cfg, "SRS830_2", 0)
 SRS830_3          = getattr(_cfg, "SRS830_3", 0)
@@ -72,25 +74,29 @@ BASE_DATA_COLUMNS = [
 ]
 
 LOCKIN_VOLTAGE_COLUMNS = [
-    'Lockin_Voltage_SRS860_1_X(V)', 'Lockin_Voltage_SRS860_1_Y(V)',
-    'Lockin_Voltage_SRS860_2_X(V)', 'Lockin_Voltage_SRS860_2_Y(V)',
-    'MFLI_Lockin_1_Voltage_X(V)', 'MFLI_Lockin_1_Voltage_Y(V)',
-    'MFLI_Lockin_2_Voltage_X(V)', 'MFLI_Lockin_2_Voltage_Y(V)',
-    'MFLI_Lockin_3_Voltage_X(V)', 'MFLI_Lockin_3_Voltage_Y(V)',
     'Lockin_Voltage_SRS830_1_X(V)', 'Lockin_Voltage_SRS830_1_Y(V)',
     'Lockin_Voltage_SRS830_2_X(V)', 'Lockin_Voltage_SRS830_2_Y(V)',
     'Lockin_Voltage_SRS830_3_X(V)', 'Lockin_Voltage_SRS830_3_Y(V)',
+    'Lockin_Voltage_SRS860_1_X(V)', 'Lockin_Voltage_SRS860_1_Y(V)',
+    'Lockin_Voltage_SRS860_2_X(V)', 'Lockin_Voltage_SRS860_2_Y(V)',
+    'Lockin_Voltage_SRS860_3_X(V)', 'Lockin_Voltage_SRS860_3_Y(V)',
+    'Lockin_Voltage_SRS860_4_X(V)', 'Lockin_Voltage_SRS860_4_Y(V)',
+    'MFLI_Lockin_1_Voltage_X(V)', 'MFLI_Lockin_1_Voltage_Y(V)',
+    'MFLI_Lockin_2_Voltage_X(V)', 'MFLI_Lockin_2_Voltage_Y(V)',
+    'MFLI_Lockin_3_Voltage_X(V)', 'MFLI_Lockin_3_Voltage_Y(V)',
 ]
 
 LOCKIN_CURRENT_COLUMNS = [
-    'Lockin_Current_SRS860_1_X(A)', 'Lockin_Current_SRS860_1_Y(A)',
-    'Lockin_Current_SRS860_2_X(A)', 'Lockin_Current_SRS860_2_Y(A)',
-    'MFLI_Lockin_1_Current_X(A)', 'MFLI_Lockin_1_Current_Y(A)',
-    'MFLI_Lockin_2_Current_X(A)', 'MFLI_Lockin_2_Current_Y(A)',
-    'MFLI_Lockin_3_Current_X(A)', 'MFLI_Lockin_3_Current_Y(A)',
     'Lockin_Current_SRS830_1_X(A)', 'Lockin_Current_SRS830_1_Y(A)',
     'Lockin_Current_SRS830_2_X(A)', 'Lockin_Current_SRS830_2_Y(A)',
     'Lockin_Current_SRS830_3_X(A)', 'Lockin_Current_SRS830_3_Y(A)',
+    'Lockin_Current_SRS860_1_X(A)', 'Lockin_Current_SRS860_1_Y(A)',
+    'Lockin_Current_SRS860_2_X(A)', 'Lockin_Current_SRS860_2_Y(A)',
+    'Lockin_Current_SRS860_3_X(A)', 'Lockin_Current_SRS860_3_Y(A)',
+    'Lockin_Current_SRS860_4_X(A)', 'Lockin_Current_SRS860_4_Y(A)',
+    'MFLI_Lockin_1_Current_X(A)', 'MFLI_Lockin_1_Current_Y(A)',
+    'MFLI_Lockin_2_Current_X(A)', 'MFLI_Lockin_2_Current_Y(A)',
+    'MFLI_Lockin_3_Current_X(A)', 'MFLI_Lockin_3_Current_Y(A)',
 ]
 
 MAGNET_COLUMNS = []  # Generic Version: no magnet
@@ -131,14 +137,16 @@ def _build_lockin_columns(kind='voltage'):
 
     # Reading order must match _read_lockin_values()
     _lockin_specs = [
-        (SRS860_1, 'SRS860_1', None),
-        (SRS860_2, 'SRS860_2', None),
-        (MFLI_1,   None,       1),
-        (MFLI_2,   None,       2),
-        (MFLI_3,   None,       3),
         (SRS830_1, 'SRS830_1', None),
         (SRS830_2, 'SRS830_2', None),
         (SRS830_3, 'SRS830_3', None),
+        (SRS860_1, 'SRS860_1', None),
+        (SRS860_2, 'SRS860_2', None),
+        (SRS860_3, 'SRS860_3', None),
+        (SRS860_4, 'SRS860_4', None),
+        (MFLI_1,   None,       1),
+        (MFLI_2,   None,       2),
+        (MFLI_3,   None,       3),
     ]
     for inst, srs_name, mfli_num in _lockin_specs:
         if not _is_connected(inst):
@@ -224,6 +232,8 @@ _INPUT_CONNECTION_MAP = {
     'use_MFLI_3':     lambda c: _is_connected(getattr(c, 'MFLI_3', 0)),
     'use_srs860_1':   lambda c: _is_connected(getattr(c, 'SRS860_1', 0)),
     'use_srs860_2':   lambda c: _is_connected(getattr(c, 'SRS860_2', 0)),
+    'use_srs860_3':   lambda c: _is_connected(getattr(c, 'SRS860_3', 0)),
+    'use_srs860_4':   lambda c: _is_connected(getattr(c, 'SRS860_4', 0)),
     'use_srs830_1':   lambda c: _is_connected(getattr(c, 'SRS830_1', 0)),
     'use_srs830_2':   lambda c: _is_connected(getattr(c, 'SRS830_2', 0)),
     'use_srs830_3':   lambda c: _is_connected(getattr(c, 'SRS830_3', 0)),
@@ -346,6 +356,10 @@ class GenericProcedure(Procedure):
     srs860_1_frequency   = Metadata("SRS860_1 frequency (Hz)", default=math.nan)
     srs860_2_sine_voltage = Metadata("SRS860_2 sine voltage", default=math.nan)
     srs860_2_frequency   = Metadata("SRS860_2 frequency (Hz)", default=math.nan)
+    srs860_3_sine_voltage = Metadata("SRS860_3 sine voltage", default=math.nan)
+    srs860_3_frequency   = Metadata("SRS860_3 frequency (Hz)", default=math.nan)
+    srs860_4_sine_voltage = Metadata("SRS860_4 sine voltage", default=math.nan)
+    srs860_4_frequency   = Metadata("SRS860_4 frequency (Hz)", default=math.nan)
     srs830_1_sine_voltage = Metadata("SRS830_1 sine voltage", default=math.nan)
     srs830_1_frequency   = Metadata("SRS830_1 frequency (Hz)", default=math.nan)
     srs830_2_sine_voltage = Metadata("SRS830_2 sine voltage", default=math.nan)
@@ -369,6 +383,12 @@ class GenericProcedure(Procedure):
         if self.use_srs860_2 and _is_connected(SRS860_2):
             self.srs860_2_sine_voltage = SRS860_2.sine_voltage
             self.srs860_2_frequency = SRS860_2.frequency
+        if self.use_srs860_3 and _is_connected(SRS860_3):
+            self.srs860_3_sine_voltage = SRS860_3.sine_voltage
+            self.srs860_3_frequency = SRS860_3.frequency
+        if self.use_srs860_4 and _is_connected(SRS860_4):
+            self.srs860_4_sine_voltage = SRS860_4.sine_voltage
+            self.srs860_4_frequency = SRS860_4.frequency
         if self.use_MFLI_1 and _is_connected(MFLI_1):
             self.MFLI_1_sine_voltage = MFLI_1.sine_amplitude
             self.MFLI_1_frequency = MFLI_1.frequency
@@ -417,23 +437,27 @@ class GenericProcedure(Procedure):
     def _read_lockin_values(self):
         """Read connected lock-ins. NaN for connected-but-disabled, skip disconnected."""
         vals = []
-        # Order must match _build_lockin_columns()
-        if _is_connected(SRS860_1):
-            vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
-        if _is_connected(SRS860_2):
-            vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
-        if _is_connected(MFLI_1):
-            vals += list(MFLI_1.read_demod()) if self.use_MFLI_1 else [math.nan] * 2
-        if _is_connected(MFLI_2):
-            vals += list(MFLI_2.read_demod()) if self.use_MFLI_2 else [math.nan] * 2
-        if _is_connected(MFLI_3):
-            vals += list(MFLI_3.read_demod()) if self.use_MFLI_3 else [math.nan] * 2
+        # Order must match _build_lockin_columns(): SRS830 group, SRS860 group, MFLI
         if _is_connected(SRS830_1):
             vals += list(SRS830_1.snap("X", "Y")) if self.use_srs830_1 else [math.nan] * 2
         if _is_connected(SRS830_2):
             vals += list(SRS830_2.snap("X", "Y")) if self.use_srs830_2 else [math.nan] * 2
         if _is_connected(SRS830_3):
             vals += list(SRS830_3.snap("X", "Y")) if self.use_srs830_3 else [math.nan] * 2
+        if _is_connected(SRS860_1):
+            vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
+        if _is_connected(SRS860_2):
+            vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
+        if _is_connected(SRS860_3):
+            vals += list(SRS860_3.snap("X", "Y")) if self.use_srs860_3 else [math.nan] * 2
+        if _is_connected(SRS860_4):
+            vals += list(SRS860_4.snap("X", "Y")) if self.use_srs860_4 else [math.nan] * 2
+        if _is_connected(MFLI_1):
+            vals += list(MFLI_1.read_demod()) if self.use_MFLI_1 else [math.nan] * 2
+        if _is_connected(MFLI_2):
+            vals += list(MFLI_2.read_demod()) if self.use_MFLI_2 else [math.nan] * 2
+        if _is_connected(MFLI_3):
+            vals += list(MFLI_3.read_demod()) if self.use_MFLI_3 else [math.nan] * 2
         return vals
 
     def _read_magnet(self):
@@ -515,12 +539,14 @@ def _proc_matches(proc_dict, selected_names):
 
 def _rebind_instruments_from_configuration():
     """Refresh module-level instrument globals after configuration reload."""
-    global MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2, YokoGS200_1, YokoGS200_2, Yoko7651_1, Yoko7651_2
+    global MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS860_3, SRS860_4, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2, YokoGS200_1, YokoGS200_2, Yoko7651_1, Yoko7651_2
     MFLI_1 = _cfg.MFLI_1
     MFLI_2 = _cfg.MFLI_2
     MFLI_3 = _cfg.MFLI_3
     SRS860_1 = _cfg.SRS860_1
     SRS860_2 = _cfg.SRS860_2
+    SRS860_3 = getattr(_cfg, "SRS860_3", 0)
+    SRS860_4 = getattr(_cfg, "SRS860_4", 0)
     SRS830_1 = _cfg.SRS830_1
     SRS830_2 = _cfg.SRS830_2
     SRS830_3 = _cfg.SRS830_3
@@ -534,7 +560,7 @@ def _rebind_instruments_from_configuration():
 
     # Update instrument refs in all procedure submodules that imported via from .base import *
     _inst_names = ['MFLI_1', 'MFLI_2', 'MFLI_3',
-                   'SRS860_1', 'SRS860_2', 'SRS830_1', 'SRS830_2', 'SRS830_3',
+                   'SRS860_1', 'SRS860_2', 'SRS860_3', 'SRS860_4', 'SRS830_1', 'SRS830_2', 'SRS830_3',
                    'Dual_gate', 'Gate_1', 'Gate_2',
                    'YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2']
     for mod in sys.modules.values():
