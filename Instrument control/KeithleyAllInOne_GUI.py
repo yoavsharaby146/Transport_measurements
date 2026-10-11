@@ -1,4 +1,4 @@
-﻿"""
+"""
 Keithley All-In-One Controller
 ==============================
 
@@ -59,7 +59,11 @@ def classify_keithley(idn):
     digits = re.sub(r'\D', '', model)
     if digits in ('2600', '2601', '2602', '2603', '2604', '2605', '2606'):
         return '2600'
-    if digits in ('2000', '2182', '2450', '6221'):
+    if digits in ('2450', '2460', '2461', '2470'):
+        # Same touchscreen SourceMeter SCPI family - the 2450 driver covers them.
+        # 2460/2461/2470 extend to higher V/I; range combos are editable, type values in.
+        return '2450'
+    if digits in ('2000', '2182', '6221'):
         return digits
     return 'unknown'
 
@@ -1234,6 +1238,21 @@ class KeithleyAllInOneApp(tk.Tk):
         self.btn_close_tab = ttk.Button(toolbar, text='Close Current Tab',
                                         command=self.close_current_tab)
         self.btn_close_tab.pack(side='left', padx=5)
+
+        # --- Manual connection (for instruments auto-detection misses) ---
+        ttk.Separator(toolbar, orient='vertical').pack(side='left', fill='y', padx=10)
+        ttk.Label(toolbar, text='Manual:').pack(side='left', padx=5)
+        self.addr_combo = ttk.Combobox(toolbar, width=32)
+        self.addr_combo.pack(side='left', padx=5)
+        ttk.Label(toolbar, text='Model:').pack(side='left', padx=5)
+        self.model_var = tk.StringVar(value='2450')
+        ttk.Combobox(toolbar, textvariable=self.model_var,
+                     values=list(DISPLAY_NAME.keys()), state='readonly',
+                     width=6).pack(side='left', padx=5)
+        self.btn_manual = ttk.Button(toolbar, text='Connect Manually',
+                                     command=self.manual_connect)
+        self.btn_manual.pack(side='left', padx=5)
+
         self.lbl_status = ttk.Label(toolbar, text='', font=('Arial', 10))
         self.lbl_status.pack(side='right', padx=10)
 
@@ -1258,9 +1277,11 @@ class KeithleyAllInOneApp(tk.Tk):
     def _scan_thread(self):
         self._log_main('Scanning VISA resources...')
         found = []
+        scanned = []
         try:
             rm = pyvisa.ResourceManager()
             for addr in rm.list_resources():
+                scanned.append(addr)
                 try:
                     res = rm.open_resource(addr, open_timeout=1500)
                     res.timeout = 1500
@@ -1282,7 +1303,8 @@ class KeithleyAllInOneApp(tk.Tk):
         for addr, key in found:
             self.after(0, self.create_tab, addr, key)
         if not found:
-            self._log_main('No Keithley instruments found.')
+            self._log_main('No Keithley instruments found. Use Manual connect if needed.')
+        self.after(0, self._update_addr_combo, scanned)
         self.after(0, lambda: self.btn_scan.config(state='normal'))
 
     def _log_main(self, msg):
@@ -1320,6 +1342,21 @@ class KeithleyAllInOneApp(tk.Tk):
         panel.log_message(f'Connected: {DISPLAY_NAME[key]} at {addr}')
         self._log_main(f'Opened {DISPLAY_NAME[key]} at {addr}')
         self.lbl_status.config(text=f'Instruments: {len(self.open_addresses)}')
+
+    def manual_connect(self):
+        # Connect to a user-specified address and model, bypassing auto-detection.
+        addr = self.addr_combo.get().strip()
+        if not addr:
+            messagebox.showerror('Error', 'Enter or select a VISA address first.')
+            return
+        self.create_tab(addr, self.model_var.get())
+
+    def _update_addr_combo(self, resources):
+        # Fill the manual-address combobox with everything the scan saw.
+        current = self.addr_combo.get()
+        self.addr_combo['values'] = list(resources)
+        if not current and resources:
+            self.addr_combo.current(0)
 
     def close_current_tab(self):
         if not self.notebook.tabs():
