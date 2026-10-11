@@ -261,7 +261,7 @@ class Yokogawa7651(SCPIUnknownMixin, Instrument):
             self.write("MI;E")          # single-run mode
             self.write("RU2;E")         # run the program
 
-    def ramping_with_monitor(self, target, step, time_step, callback=None):
+    def ramping_with_monitor(self, target, step, time_step, callback=None, mode=None, start_level=None):
         """
         Software ramp of the output level from its current value to "target" in
         increments of "step", waiting "time_step" seconds between steps.
@@ -271,13 +271,20 @@ class Yokogawa7651(SCPIUnknownMixin, Instrument):
         :param float time_step: time to wait between steps (seconds)
         :param callback: optional function callback(elapsed_time, level) called after
             every step; if it returns True the ramp aborts at the current level.
+        :param str mode: optional source mode ('voltage'/'current'); read from the
+            instrument if omitted.
+        :param float start_level: optional starting level; read from the instrument
+            if omitted. Pass this to avoid relying on OD/OS readback parsing.
         :return: None
         """
-        mode = self.source_mode
-        if mode == 'voltage':
-            current = float(self.source_voltage)
-        else:
-            current = float(self.source_current)
+        if mode is None:
+            mode = self.source_mode
+        if start_level is None:
+            if mode == 'voltage':
+                start_level = float(self.source_voltage)
+            else:
+                start_level = float(self.source_current)
+        current = start_level
         step = abs(step) if target >= current else -abs(step)
         n_steps = int(abs(target - current) / abs(step)) if step != 0 else 0
         levels = np.linspace(current, target, n_steps + 1)

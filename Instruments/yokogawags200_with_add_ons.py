@@ -150,7 +150,7 @@ class YokogawaGS200(SCPIUnknownMixin, Instrument):
             )
             self.write(ramp_program)
 
-    def ramping_with_monitor(self, target, step, time_step, callback=None):
+    def ramping_with_monitor(self, target, step, time_step, callback=None, start_level=None):
         """
         Software ramp of the output level from its current value to "target" in
         increments of "step", waiting "time_step" seconds between steps.
@@ -160,9 +160,13 @@ class YokogawaGS200(SCPIUnknownMixin, Instrument):
         :param float time_step: time to wait between steps (seconds)
         :param callback: optional function callback(elapsed_time, level) called after
             every step; if it returns True the ramp aborts at the current level.
+        :param float start_level: optional starting level; read from the instrument
+            if omitted. Pass this to avoid relying on the SOURce:LEVel? readback.
         :return: None
         """
-        current = self.source_level
+        if start_level is None:
+            start_level = self.source_level
+        current = start_level
         step = abs(step) if target >= current else -abs(step)
         n_steps = int(abs(target - current) / abs(step)) if step != 0 else 0
         levels = np.linspace(current, target, n_steps + 1)

@@ -30,6 +30,7 @@ class DeviceTab:
         self.stop_event = threading.Event()
         self.monitor_active = False
         self.lock = threading.Lock()
+        self.last_applied_level = 0.0  # fallback if instrument readback fails
 
         # Data for graph (time, level)
         self.data_x = []
@@ -418,6 +419,7 @@ class DeviceTab:
                         self.inst.source_current = val
 
             self.log_message(f"Applied: {mode.upper()} Src={val}, Range={src_range}, Lim={limit}")
+            self.last_applied_level = val
             self.update_status_indicators()
 
         except ValueError:
@@ -445,7 +447,8 @@ class DeviceTab:
         pass  # Status is updated by poller
 
     def _poll_instrument_status(self):
-        if self.inst:
+        # Skip polling while a ramp holds the communication lock
+        if self.inst and not self.monitor_active:
             if self.lock.acquire(blocking=False):
                 try:
                     is_on = self.inst.source_enabled
@@ -525,28 +528,45 @@ class DeviceTab:
 
     def _run_ramp_thread(self, target, step, time_step, engine):
         try:
-            with self.lock:
-                self.inst.enable_source()
+            mode = self.source_mode_var.get()
+
+            # Start level: try instrument readback, fall back to last applied level
+            # (OD readback parsing can fail mid-communication; ramp must still work)
+            start = self.last_applied_level
+            try:
+                with self.lock:
+                    if mode == "voltage":
+                        start = float(self.inst.source_voltage)
+                    else:
+                        start = float(self.inst.source_current)
+            except Exception as e:
+                self.log_message(f"Start-level readback failed "
+                                 f"({type(e).__name__}: {e}); using {start}")
 
             if engine == "software":
-                # Abortable step ramp with live level-vs-time plot
-                self.inst.ramping_with_monitor(target, step, time_step, callback=self._ramp_callback)
+                # Whole ramp under lock: prevents the poller / other buttons from
+                # interleaving VISA commands with the S writes (corrupts the
+                # legacy 7651 command stream). Callback does not touch the bus.
+                with self.lock:
+                    self.inst.enable_source()
+                    self.inst.ramping_with_monitor(target, step, time_step,
+                                                   callback=self._ramp_callback,
+                                                   mode=mode, start_level=start)
                 self.log_message("Ramp Completed.")
             else:
                 # Built-in program sweep: smooth linear ramp on the instrument,
                 # haltable via RU0 from the ABORT button
                 with self.lock:
-                    if self.inst.source_mode == "voltage":
-                        current = float(self.inst.source_voltage)
-                    else:
-                        current = float(self.inst.source_current)
-                    n_steps = int(abs(target - current) / abs(step)) if step != 0 else 1
+                    self.inst.enable_source()
+                    n_steps = int(abs(target - start) / abs(step)) if step != 0 else 1
                     total_time = max(n_steps * time_step, 0.1)
                     self.inst.trigger_ramp_to_level(target, total_time)
                 self.log_message(f"Built-in ramp started ({total_time:.2f}s).")
 
+            self.last_applied_level = target
+
         except Exception as e:
-            self.log_message(f"Ramp Error: {e}")
+            self.log_message(f"Ramp Error: {type(e).__name__}: {e}")
         finally:
             self.monitor_active = False
             self.frame.after(1, lambda: self.btn_stop_ramp.config(state="disabled"))
