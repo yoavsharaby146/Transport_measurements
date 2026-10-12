@@ -434,30 +434,56 @@ class GenericProcedure(Procedure):
             vals += [Yoko7651_2.source_voltage] if self.use_yoko7651_2 else [math.nan]
         return vals
 
+    # --- Lock-in read with retry (transient VISA timeouts) ---
+
+    def _read_lockin_with_retry(self, reader, name, attempts=5, delay=0.5):
+        """Call reader() retrying transient communication errors (e.g. VISA
+        VI_ERROR_TMO on SR860/SR830 USB reads). Returns list of values on
+        success, NaN pair if the instrument stays unreadable so a long
+        measurement is not killed by one hiccup."""
+        for i in range(attempts):
+            try:
+                return list(reader())
+            except Exception as e:
+                log.warning("%s read failed (attempt %d/%d): %s", name, i + 1, attempts, e)
+                time.sleep(delay)
+        log.error("%s unreadable after %d attempts - recording NaN", name, attempts)
+        return [math.nan] * 2
+
     def _read_lockin_values(self):
         """Read connected lock-ins. NaN for connected-but-disabled, skip disconnected."""
         vals = []
         # Order must match _build_lockin_columns(): SRS830 group, SRS860 group, MFLI
         if _is_connected(SRS830_1):
-            vals += list(SRS830_1.snap("X", "Y")) if self.use_srs830_1 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: SRS830_1.snap("X", "Y"), "SRS830_1") \
+                if self.use_srs830_1 else [math.nan] * 2
         if _is_connected(SRS830_2):
-            vals += list(SRS830_2.snap("X", "Y")) if self.use_srs830_2 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: SRS830_2.snap("X", "Y"), "SRS830_2") \
+                if self.use_srs830_2 else [math.nan] * 2
         if _is_connected(SRS830_3):
-            vals += list(SRS830_3.snap("X", "Y")) if self.use_srs830_3 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: SRS830_3.snap("X", "Y"), "SRS830_3") \
+                if self.use_srs830_3 else [math.nan] * 2
         if _is_connected(SRS860_1):
-            vals += list(SRS860_1.snap("X", "Y")) if self.use_srs860_1 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: SRS860_1.snap("X", "Y"), "SRS860_1") \
+                if self.use_srs860_1 else [math.nan] * 2
         if _is_connected(SRS860_2):
-            vals += list(SRS860_2.snap("X", "Y")) if self.use_srs860_2 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: SRS860_2.snap("X", "Y"), "SRS860_2") \
+                if self.use_srs860_2 else [math.nan] * 2
         if _is_connected(SRS860_3):
-            vals += list(SRS860_3.snap("X", "Y")) if self.use_srs860_3 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: SRS860_3.snap("X", "Y"), "SRS860_3") \
+                if self.use_srs860_3 else [math.nan] * 2
         if _is_connected(SRS860_4):
-            vals += list(SRS860_4.snap("X", "Y")) if self.use_srs860_4 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: SRS860_4.snap("X", "Y"), "SRS860_4") \
+                if self.use_srs860_4 else [math.nan] * 2
         if _is_connected(MFLI_1):
-            vals += list(MFLI_1.read_demod()) if self.use_MFLI_1 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: MFLI_1.read_demod(), "MFLI_1") \
+                if self.use_MFLI_1 else [math.nan] * 2
         if _is_connected(MFLI_2):
-            vals += list(MFLI_2.read_demod()) if self.use_MFLI_2 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: MFLI_2.read_demod(), "MFLI_2") \
+                if self.use_MFLI_2 else [math.nan] * 2
         if _is_connected(MFLI_3):
-            vals += list(MFLI_3.read_demod()) if self.use_MFLI_3 else [math.nan] * 2
+            vals += self._read_lockin_with_retry(lambda: MFLI_3.read_demod(), "MFLI_3") \
+                if self.use_MFLI_3 else [math.nan] * 2
         return vals
 
     def _read_magnet(self):
