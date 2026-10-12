@@ -14,6 +14,7 @@ All scripts communicate through the instrument drivers located in [`../Instrumen
 | `Keithley2604B_GUI.py` | Keithley 2604B Dual-Channel SMU | GUI (Tk) | Dual-SMU controller (Channel A & B) with source/measure, ramping, and live plotting |
 | `IV_VI_Sweeper.py` | Keithley 2450 (×2) | GUI (Tk) | Hysteresis IV/VI sweep tool with independent gate voltage control and CSV export |
 | `KeithleyAllInOne_GUI.py` | All Keithleys (2000 / 2182 / 2450 / 6221 / 2600-series) | GUI (Tk) | One window for every Keithley: scans VISA, auto-detects model via ``*IDN?`` and opens a model-appropriate panel per instrument |
+| `InstrumentAllInOne_GUI.py` | Full bench: Keithleys + SR830/SR860 + Yokogawa GS200/7651 + MFLI | GUI (Tk) | Unified controller: VISA `*IDN?` auto-detection + LabOne connection, one tab per instrument |
 
 ---
 
@@ -128,6 +129,27 @@ python "Instrument control/KeithleyAllInOne_GUI.py"
 
 > Note: `Instruments/buffer.py` is a small shim re-exporting pymeasure's `KeithleyBuffer`,
 > required by the 2000/2182/6221 drivers (which use `from .buffer import KeithleyBuffer`).
+### `InstrumentAllInOne_GUI.py` — Instrument All-In-One Controller (full bench)
+
+Supersedes `KeithleyAllInOne_GUI.py` (kept for reference). One window for the whole bench:
+
+- **Scan VISA Instruments** — queries `*IDN?` on every VISA resource, auto-detects and opens
+  a model-appropriate tab per instrument:
+  - Keithley 2000 / 2182 / 2450-family (incl. 2460/2461/2470) / 6221 / 2600-series (2604B...)
+  - SRS SR830 / SR860 lock-ins (source, input, gain, aux I/O, snap measurements, auto phase)
+  - Yokogawa GS200 (source V/I, ramp engines, safety zero)
+- **Scan LabOne (MFLI)** — connects a Zurich Instruments MFLI through the LabOne data server
+  (`zhinst`, not VISA): frequency / amplitude / DC offset / time constant, output toggle,
+  X/Y/R readout. Requires `pip install zhinst` and a running LabOne data server.
+- **Manual connect** — address combobox (all scanned resources, typeable) + model dropdown;
+  covers instruments that fail `*IDN?` and the Yokogawa 7651 (legacy protocol, never
+  auto-detected).
+
+Run:
+```bash
+python "Instrument control/InstrumentAllInOne_GUI.py"
+```
+
 ## Subfolder: `IV tries/`
 
 Early/experimental versions of the IV/VI sweeper scripts:
