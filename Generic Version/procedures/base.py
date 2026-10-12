@@ -381,6 +381,8 @@ class GenericProcedure(Procedure):
     MFLI_2_frequency     = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
     MFLI_3_sine_voltage  = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency     = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
+    k6221_frequency      = Metadata("K6221 frequency (Hz)", default=math.nan)
+    k6221_amplitude_RMS  = Metadata("K6221 amplitude RMS (A)", default=math.nan)
 
     # --- Centralized metadata capture ---
 
@@ -416,6 +418,9 @@ class GenericProcedure(Procedure):
         if self.use_srs830_3 and _is_connected(SRS830_3):
             self.srs830_3_sine_voltage = SRS830_3.sine_voltage
             self.srs830_3_frequency = SRS830_3.frequency
+        if self.use_k6221 and _is_connected(K6221):
+            self.k6221_frequency = K6221.waveform_frequency
+            self.k6221_amplitude_RMS = K6221.waveform_amplitude / RMS_TO_PEAK
 
     # --- Centralized instrument readers ---
 

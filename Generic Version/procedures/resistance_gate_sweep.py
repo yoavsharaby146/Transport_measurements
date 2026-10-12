@@ -37,6 +37,9 @@ class Resistance_gate_sweep_measurement(GenericProcedure):
     use_yoko7651_1 = BooleanParameter('Use Yoko7651_1', group_by='devices', default=False)
     use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
 
+    use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
+    use_k6221 = BooleanParameter('Use k6221 (record amplitude column)', group_by='devices', default=False)
+
     def startup(self):
         self._capture_metadata()
 
@@ -112,6 +115,7 @@ proc_resistance_gate = {
             'use_dual_gate', 'use_keithley_1','use_keithley_2',
             'use_yoko_gs200_1','use_yoko_gs200_2',
             'use_yoko7651_1','use_yoko7651_2',
+            'use_k6221',
             'smu', 'target_voltage', 'step_size',
             'acq_delay',
         ],

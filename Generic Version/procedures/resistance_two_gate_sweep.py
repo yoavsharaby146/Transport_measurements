@@ -33,6 +33,9 @@ class Resistance_two_gate_scan_sweep_measurement(GenericProcedure):
     use_yoko7651_1 = BooleanParameter('Use Yoko7651_1', group_by='devices', default=False)
     use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
 
+    use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
+    use_k6221 = BooleanParameter('Use k6221 (record amplitude column)', group_by='devices', default=False)
+
     # --- Sweep Configuration ---
     sweeping = BooleanParameter('Sweeping Configuration', default=True)
 
@@ -117,6 +120,7 @@ proc_resistance_two_gate_sweep = {
             'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
             'use_yoko_gs200_1', 'use_yoko_gs200_2',
             'use_yoko7651_1', 'use_yoko7651_2',
+            'use_k6221',
             'sweeping',
             'smu_1', "smu_1_sp1", "smu_1_sp2",
             'smu_2', "smu_2_sp1", "smu_2_sp2",
