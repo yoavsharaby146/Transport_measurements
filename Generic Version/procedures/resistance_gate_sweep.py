@@ -87,9 +87,9 @@ class Resistance_gate_sweep_measurement(GenericProcedure):
             if self.should_stop():
                 log.warning("Caught the stop flag in the procedure")
                 break
-        if self.target_voltage == 0:
-            log.info(f"Target reached 0V. Turning {self.smu} OFF.")
-            Gate.output_off()
+        #if self.target_voltage == 0:
+        #    log.info(f"Target reached 0V. Turning {self.smu} OFF.")
+        #    Gate.output_off()
 
     def shutdown(self):
         #log.info("Keithley still on")

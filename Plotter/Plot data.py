@@ -81,6 +81,9 @@ class InteractivePlotter:
         self.datasets = {}
         self.current_dataset_key = None
         self.styles = {}
+        # Per-file divide overrides: {filename: {"x": str, "y": str}}
+        # Blank entries fall back to the global Divide X / Divide Y.
+        self.file_divs = {}
         self.merge_cols_var = tk.BooleanVar(value=False)
         self.use_ref_x_var = tk.BooleanVar(value=False)
 
@@ -1090,6 +1093,46 @@ class InteractivePlotter:
         ttk.Entry(bf, textvariable=self.v_x_breaks[0][1], width=10).pack(side='left', padx=2)
 
         # ============================================
+        # TAB 3: Per-File Divide (Line/Scatter comparison)
+        # ============================================
+        tab_fdiv = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_fdiv, text="Per-File Divide")
+
+        ttk.Label(tab_fdiv, text="Per-Series Divide (only what is on display)",
+                  font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_fdiv, text="Rows show only the files + Y axes currently selected in the main panel "
+                                 "for the active plot type. Override the global Divide X / Divide Y per series — "
+                                 "compare files measured with different scale factors on one axis.\n"
+                                 "Blank = use the global values from the 'Ranges & Transform' tab.\n"
+                                 "Supports numbers or formulas (x*1e-9, x/1e10, np.sqrt(x)...).\n"
+                                 "Applies to Line, Scatter, Dual Y-Axis (left Y), XXY and XYXY (bottom-left).",
+                  font=('Arial', 8, 'italic'), foreground='gray', wraplength=400,
+                  justify='left').pack(anchor='w', pady=(0, 5))
+
+        def _up_div(key, axis, var):
+            self.file_divs[key] = self.file_divs.get(key, {})
+            self.file_divs[key][axis] = var.get()
+
+        display_pairs = self._display_series_pairs()
+        if not display_pairs:
+            ttk.Label(tab_fdiv, text="(No files / Y axes selected in the main panel)",
+                      foreground='gray').pack(pady=10)
+        for fk, yc in display_pairs:
+            ff = ttk.Frame(tab_fdiv)
+            ff.pack(fill='x', pady=2)
+            ttk.Label(ff, text=f"{fk}  [{yc}]", width=32, anchor='w').pack(side='left')
+            fd = self.file_divs.get((fk, yc), {})
+            xv = tk.StringVar(value=fd.get("x", ""))
+            yv = tk.StringVar(value=fd.get("y", ""))
+            ttk.Label(ff, text="X Div:").pack(side='left', padx=(8, 2))
+            ttk.Entry(ff, textvariable=xv, width=10).pack(side='left', padx=2)
+            ttk.Label(ff, text="Y Div:").pack(side='left', padx=(8, 2))
+            ttk.Entry(ff, textvariable=yv, width=10).pack(side='left', padx=2)
+            key = (fk, yc)
+            xv.trace("w", lambda n, i, m, k=key, v=xv: _up_div(k, "x", v))
+            yv.trace("w", lambda n, i, m, k=key, v=yv: _up_div(k, "y", v))
+
+        # ============================================
         # Button frame at bottom (pinned — provided by helper)
         # ============================================
         btn_width = 12
@@ -1573,12 +1616,12 @@ class InteractivePlotter:
         """Load a CSV file with header detection and footer skipping.
 
         Performance: never materialises the whole file as Python strings.
-        Only the first 50 lines and the last 64 KB are decoded for
+        Only the first 100 lines and the last 64 KB are decoded for
         header/footer detection; the full pass is a C-speed newline count.
         """
         with open(filepath, 'rb') as f:
             head = []
-            for _ in range(50):
+            for _ in range(100):
                 raw = f.readline()
                 if not raw:
                     break
@@ -1831,6 +1874,9 @@ class InteractivePlotter:
         keys = [self.dataset_listbox.get(i) for i in sel]
         for k in keys:
             if k in self.datasets: del self.datasets[k]
+            self.file_divs.pop(k, None)
+            for key in [key for key in self.file_divs if isinstance(key, tuple) and key[0] == k]:
+                del self.file_divs[key]
         # Data changed — any cached color-map interpolation is stale
         self._cmap_cache_key = None
         self._cmap_cache_zi = None
@@ -1964,6 +2010,49 @@ class InteractivePlotter:
         idxs = self.dataset_listbox.curselection()
         keys = [self.dataset_listbox.get(i) for i in idxs]
         return [(k, self.datasets[k]) for k in keys]
+
+    def _display_series_pairs(self):
+        """(file_key, y_col) pairs currently shown for the active plot type.
+
+        Mirrors the series selection logic of update_plot / Style Config, so
+        dialogs can offer per-series settings for exactly what is on display.
+        """
+        sel_ds = self.get_selected_datasets()
+        ptype = self.plot_type.get()
+        pairs = []
+        if ptype == "Dual Y-Axis":
+            y1, y2 = self.y1_combo.get(), self.y2_combo.get()
+            for fk, _ in sel_ds:
+                if y1: pairs.append((fk, y1))
+                if y2: pairs.append((fk, y2))
+        elif ptype == "XXY (Dual X)":
+            y_col = self.xxy_y_combo.get()
+            for fk in self._get_selected_files(self.xxy_x1_files) + self._get_selected_files(self.xxy_x2_files):
+                if y_col and fk in self.datasets:
+                    pairs.append((fk, y_col))
+        elif ptype == "XYXY (Dual X+Y)":
+            y1_col = self.xyxy_y1_col.get()
+            y2_col = self.xyxy_y2_col.get()
+            for fk in self._get_selected_files(self.xyxy_x1y1_files):
+                if y1_col and fk in self.datasets:
+                    pairs.append((fk, y1_col))
+            for fk in self._get_selected_files(self.xyxy_x2y2_files):
+                if y2_col and fk in self.datasets:
+                    pairs.append((fk, y2_col))
+        else:
+            y_idxs = self.y_listbox.curselection()
+            y_cols = [self.y_listbox.get(i) for i in y_idxs]
+            for fk, _ in sel_ds:
+                for yc in y_cols:
+                    pairs.append((fk, yc))
+        # De-duplicate, keep display order
+        seen = set()
+        uniq = []
+        for p in pairs:
+            if p not in seen:
+                seen.add(p)
+                uniq.append(p)
+        return uniq
 
     def open_style_dialog(self):
         sel_ds = self.get_selected_datasets()
@@ -2753,6 +2842,16 @@ class InteractivePlotter:
                     else:
                         curr_yf_s = yf_s if ax_idx == 0 else y2f_s
 
+                    # Per-series divide override (compare files with different scale
+                    # factors): keyed by (file, y-column); plain filename keys (older
+                    # sessions) act as a file-level fallback. Blank = global divisor.
+                    # Applies to the left/shared Y axis only; Y2 keeps Divide Y2.
+                    _fdiv = self.file_divs.get((fk, yc)) or self.file_divs.get(fk) or {}
+                    curr_xf_s = (_fdiv.get("x") or "").strip() or xf_s
+                    _fydiv = (_fdiv.get("y") or "").strip()
+                    if _fydiv and (ptype == "XXY (Dual X)" or ax_idx == 0):
+                        curr_yf_s = _fydiv
+
                     x2f_s = self.v_x2_div.get()
 
                     if X_master is not None:
@@ -2760,7 +2859,7 @@ class InteractivePlotter:
                         Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s)[:len(X_plot)]
                     elif ptype == "XXY (Dual X)" and ax_idx == 0:
                         x1c = self.xxy_x1_col.get()
-                        X_plot = self._axis_transform(df[x1c].to_numpy(), xf_s) if x1c and x1c in df.columns else self._axis_transform(df[xcol].to_numpy(), xf_s) if xcol in df.columns else None
+                        X_plot = self._axis_transform(df[x1c].to_numpy(), curr_xf_s) if x1c and x1c in df.columns else self._axis_transform(df[xcol].to_numpy(), curr_xf_s) if xcol in df.columns else None
                         Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s) if yc in df.columns else None
                         if X_plot is None or Y_plot is None: continue
                     elif ptype == "XXY (Dual X)" and ax_idx == 1:
@@ -2772,7 +2871,7 @@ class InteractivePlotter:
                         if Y_plot is None: continue
                     elif ptype == "XYXY (Dual X+Y)" and ax_idx == 0:
                         x1c = self.xyxy_x1_col.get()
-                        X_plot = self._axis_transform(df[x1c].to_numpy(), xf_s) if x1c and x1c in df.columns else self._axis_transform(df[xcol].to_numpy(), xf_s) if xcol in df.columns else None
+                        X_plot = self._axis_transform(df[x1c].to_numpy(), curr_xf_s) if x1c and x1c in df.columns else self._axis_transform(df[xcol].to_numpy(), curr_xf_s) if xcol in df.columns else None
                         Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s) if yc in df.columns else None
                         if X_plot is None or Y_plot is None: continue
                     elif ptype == "XYXY (Dual X+Y)" and ax_idx == 1:
@@ -2783,7 +2882,7 @@ class InteractivePlotter:
                         Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s) if yc in df.columns else None
                         if Y_plot is None: continue
                     elif xcol in df.columns:
-                        X_plot = self._axis_transform(df[xcol].to_numpy(), xf_s)
+                        X_plot = self._axis_transform(df[xcol].to_numpy(), curr_xf_s)
                         Y_plot = self._axis_transform(df[yc].to_numpy(), curr_yf_s)
                     else:
                         continue
@@ -3751,6 +3850,14 @@ class InteractivePlotter:
                 "y2_div": self.v_y2_div.get(),
                 "z_div": self.v_z_div.get(),
                 "x2_div": self.v_x2_div.get(),
+            }
+
+            # === PER-SERIES DIVIDE (Line/Scatter comparison) ===
+            # Tuple keys (file, ycol) serialize as "file|||ycol" (same scheme as styles);
+            # plain-string keys (legacy file-level entries) are stored as-is.
+            session_data["per_file_divs"] = {
+                (f"{k[0]}|||{k[1]}" if isinstance(k, tuple) else k): dict(v)
+                for k, v in self.file_divs.items()
             }
             
             # === AXIS RANGES ===
@@ -5889,6 +5996,16 @@ class InteractivePlotter:
                 self.v_y2_div.set(data_transformation.get("y2_div", "1"))
                 self.v_z_div.set(data_transformation.get("z_div", "1"))
                 self.v_x2_div.set(data_transformation.get("x2_div", "1"))
+            
+            # === RESTORE PER-SERIES DIVIDE ===
+            self.file_divs = {}
+            for k, divs in session_data.get("per_file_divs", {}).items():
+                entry = {"x": divs.get("x", ""), "y": divs.get("y", "")}
+                if "|||" in k:
+                    f_, c_ = k.split("|||", 1)
+                    self.file_divs[(f_, c_)] = entry
+                else:
+                    self.file_divs[k] = entry  # legacy file-level entry
             
             # === RESTORE AXIS RANGES ===
             axis_ranges = session_data.get("axis_ranges", {})
