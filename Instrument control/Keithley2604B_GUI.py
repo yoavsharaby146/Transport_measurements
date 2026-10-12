@@ -8,6 +8,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import time
 import numpy as np
 
+# Make the repo-root Instruments/ package importable from any cwd.
+# insert(0) keeps it ahead of any stale 'Instruments' folder next to this script.
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
 # Import your 2604B driver
 from Instruments.keithley2604B import Keithley2604B
 

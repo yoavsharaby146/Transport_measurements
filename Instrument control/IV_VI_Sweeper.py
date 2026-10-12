@@ -13,6 +13,11 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
+# Make the repo-root Instruments/ package importable from any cwd.
+# insert(0) keeps it ahead of any stale 'Instruments' folder next to this script.
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
 # Import Keithley driver
 try:
     from Instruments.keithley2450_with_add_ons import Keithley2450

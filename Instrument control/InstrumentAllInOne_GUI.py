@@ -49,7 +49,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 instruments_path = os.path.join(current_dir, '..')
-sys.path.append(instruments_path)
+sys.path.insert(0, instruments_path)  # front of path: beats stale local Instruments/
 
 from Instruments.keithley2000_with_add_ons import Keithley2000
 from Instruments.keithley2182_with_add_ons import Keithley2182

@@ -10,7 +10,7 @@ import pyvisa
 # --- IMPORT SETUP ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 instruments_path = os.path.join(current_dir, '..')
-sys.path.append(instruments_path)
+sys.path.insert(0, instruments_path)  # front of path: beats stale local Instruments/
 
 from Instruments.SR830_with_add_ons import SR830
 
