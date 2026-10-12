@@ -18,6 +18,7 @@ from Instruments.SR830_with_add_ons import SR830
 from Instruments.SR860_with_add_ons import SR860
 from Instruments.keithley2450_with_add_ons import Keithley2450
 from Instruments.keithley2604B import Keithley2604B
+from Instruments.keithley6221_with_add_ons import Keithley6221
 from Instruments.yokogawags200_with_add_ons import YokogawaGS200
 from Instruments.yokogawa7651_with_add_ons import Yokogawa7651
 from Instruments.MFLI import MFLIController
@@ -104,6 +105,14 @@ Yoko7651_2 = _maybe(
     enabled=overrides.get("use_yoko7651_2", False),
     addr=overrides.get("yoko7651_2_visa", ""),
     name="Yoko7651_2"
+)
+
+# Keithley 6221 AC/DC current source
+K6221 = _maybe(
+    Keithley6221,
+    enabled=overrides.get("use_k6221", False),
+    addr=overrides.get("k6221_visa", ""),
+    name="K6221"
 )
 
 # SRS lock-ins

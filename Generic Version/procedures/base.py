@@ -58,6 +58,11 @@ YokoGS200_1       = getattr(_cfg, "YokoGS200_1", 0)
 YokoGS200_2       = getattr(_cfg, "YokoGS200_2", 0)
 Yoko7651_1        = getattr(_cfg, "Yoko7651_1", 0)
 Yoko7651_2        = getattr(_cfg, "Yoko7651_2", 0)
+K6221             = getattr(_cfg, "K6221", 0)
+
+# RMS -> (peak) amplitude conversion for the Keithley 6221 waveform.
+# The instrument's :SOUR:WAVE:AMPL is a PEAK value; the user works in RMS.
+RMS_TO_PEAK = 1.4142
 
 import os
 save_dir = os.path.join(os.path.expanduser("~"), "Desktop", "Generic Measurements")
@@ -71,6 +76,7 @@ BASE_DATA_COLUMNS = [
     'Gate_1_voltage(V)', 'Gate_1_Leakage(A)', 'Gate_2_voltage(V)', 'Gate_2_Leakage(A)',
     'YokoGS200_1_voltage(V)', 'YokoGS200_2_voltage(V)',
     'Yoko7651_1_voltage(V)', 'Yoko7651_2_voltage(V)',
+    'K6221_AC_amplitude_RMS(A)',
 ]
 
 LOCKIN_VOLTAGE_COLUMNS = [
@@ -122,6 +128,8 @@ def _build_smu_columns():
         cols += ['Yoko7651_1_voltage(V)']
     if _is_connected(Yoko7651_2):
         cols += ['Yoko7651_2_voltage(V)']
+    if _is_connected(K6221):
+        cols += ['K6221_AC_amplitude_RMS(A)']
     return cols
 
 
@@ -227,6 +235,7 @@ _INPUT_CONNECTION_MAP = {
     'use_yoko_gs200_2': lambda c: _is_connected(getattr(c, 'YokoGS200_2', 0)),
     'use_yoko7651_1':   lambda c: _is_connected(getattr(c, 'Yoko7651_1', 0)),
     'use_yoko7651_2':   lambda c: _is_connected(getattr(c, 'Yoko7651_2', 0)),
+    'use_k6221':        lambda c: _is_connected(getattr(c, 'K6221', 0)),
     'use_MFLI_1':     lambda c: _is_connected(getattr(c, 'MFLI_1', 0)),
     'use_MFLI_2':     lambda c: _is_connected(getattr(c, 'MFLI_2', 0)),
     'use_MFLI_3':     lambda c: _is_connected(getattr(c, 'MFLI_3', 0)),
@@ -432,6 +441,9 @@ class GenericProcedure(Procedure):
             vals += [Yoko7651_1.source_voltage] if self.use_yoko7651_1 else [math.nan]
         if _is_connected(Yoko7651_2):
             vals += [Yoko7651_2.source_voltage] if self.use_yoko7651_2 else [math.nan]
+        if _is_connected(K6221):
+            # read back peak amplitude, convert to RMS for the CSV
+            vals += [K6221.waveform_amplitude / RMS_TO_PEAK] if self.use_k6221 else [math.nan]
         return vals
 
     # --- Lock-in read with retry (transient VISA timeouts) ---
@@ -565,7 +577,7 @@ def _proc_matches(proc_dict, selected_names):
 
 def _rebind_instruments_from_configuration():
     """Refresh module-level instrument globals after configuration reload."""
-    global MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS860_3, SRS860_4, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2, YokoGS200_1, YokoGS200_2, Yoko7651_1, Yoko7651_2
+    global MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS860_3, SRS860_4, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2, YokoGS200_1, YokoGS200_2, Yoko7651_1, Yoko7651_2, K6221
     MFLI_1 = _cfg.MFLI_1
     MFLI_2 = _cfg.MFLI_2
     MFLI_3 = _cfg.MFLI_3
@@ -583,12 +595,13 @@ def _rebind_instruments_from_configuration():
     YokoGS200_2 = getattr(_cfg, "YokoGS200_2", 0)
     Yoko7651_1 = getattr(_cfg, "Yoko7651_1", 0)
     Yoko7651_2 = getattr(_cfg, "Yoko7651_2", 0)
+    K6221 = getattr(_cfg, "K6221", 0)
 
     # Update instrument refs in all procedure submodules that imported via from .base import *
     _inst_names = ['MFLI_1', 'MFLI_2', 'MFLI_3',
                    'SRS860_1', 'SRS860_2', 'SRS860_3', 'SRS860_4', 'SRS830_1', 'SRS830_2', 'SRS830_3',
                    'Dual_gate', 'Gate_1', 'Gate_2',
-                   'YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2']
+                   'YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2', 'K6221']
     for mod in sys.modules.values():
         if mod is None or not hasattr(mod, '__file__') or not mod.__file__:
             continue

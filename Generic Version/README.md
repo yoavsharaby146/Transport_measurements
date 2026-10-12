@@ -24,6 +24,7 @@ python "Transport measurements.py"
 | Resistance gate sweep measurement | Sweep one gate voltage (K2450 or K2604B SMU) |
 | Resistance two gate sweep measurement | Sweep two gates simultaneously along a line (density/displacement scans) |
 | Resistance two gate mapping measurement | 2D gate × gate map, Snake or Forward/Backward scan modes |
+| AC current sweep measurement | Sweep K6221 AC current amplitude, RMS in / peak sent (×1.4142) |
 
 ## Supported Instruments
 
@@ -31,6 +32,7 @@ python "Transport measurements.py"
 |---|---|---|
 | Keithley 2450 (×2) | `Gate_1`, `Gate_2` | VISA (USB/GPIB) |
 | Keithley 2604B (dual SMU) | `Dual_gate` (`smua`, `smub`) | VISA (USB/GPIB) |
+| Keithley 6221 (AC current source) | `K6221` | VISA (GPIB) |
 | Yokogawa GS200 (×2) | `YokoGS200_1`, `YokoGS200_2` | VISA (USB/GPIB) |
 | Yokogawa 7651 (×2) | `Yoko7651_1`, `Yoko7651_2` | VISA (USB/GPIB) |
 | SRS SR860 (×4) | `SRS860_1`–`SRS860_4` | VISA (USB) |

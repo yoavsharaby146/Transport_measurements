@@ -49,6 +49,9 @@ class InstrumentConfig:
     dual_gate_visa: str = ""
     dual_gate_visa_library: str = 'C:\\Windows\\System32\\visa64.dll'
 
+    use_k6221: bool = False
+    k6221_visa: str = ""
+
     use_yoko_gs200_1: bool = False
     yoko_gs200_1_visa: str = ""
 
@@ -191,6 +194,9 @@ class ConfigDialog(QtWidgets.QDialog):
         self.chk_dual.setChecked(self._cfg.use_dual_gate)
         self.cmb_dual.setEditText(self._cfg.dual_gate_visa)
 
+        self.chk_k6221.setChecked(self._cfg.use_k6221)
+        self.cmb_k6221.setEditText(self._cfg.k6221_visa)
+
         # Yokogawa sources
         self.chk_yoko_gs200_1.setChecked(self._cfg.use_yoko_gs200_1)
         self.cmb_yoko_gs200_1.setEditText(self._cfg.yoko_gs200_1_visa)
@@ -248,10 +254,13 @@ class ConfigDialog(QtWidgets.QDialog):
         self.cmb_gate2 = QtWidgets.QComboBox(); self.cmb_gate2.setEditable(True)
         self.chk_dual = QtWidgets.QCheckBox("Use Dual_gate (Keithley 2604B)")
         self.cmb_dual = QtWidgets.QComboBox(); self.cmb_dual.setEditable(True)
+        self.chk_k6221 = QtWidgets.QCheckBox("Use K6221 (Keithley 6221 AC current source)")
+        self.cmb_k6221 = QtWidgets.QComboBox(); self.cmb_k6221.setEditable(True)
 
         grid.addWidget(self.chk_gate1, 0, 0); grid.addWidget(self.cmb_gate1, 0, 1)
         grid.addWidget(self.chk_gate2, 1, 0); grid.addWidget(self.cmb_gate2, 1, 1)
         grid.addWidget(self.chk_dual, 2, 0); grid.addWidget(self.cmb_dual, 2, 1)
+        grid.addWidget(self.chk_k6221, 3, 0); grid.addWidget(self.cmb_k6221, 3, 1)
         grid.setColumnStretch(1, 1)
         return w
 
@@ -431,7 +440,7 @@ class ConfigDialog(QtWidgets.QDialog):
 
     # ---------- Fillers ----------
     def _fill_visa_comboboxes(self, resources: List[str]):
-        for cmb in (self.cmb_gate1, self.cmb_gate2, self.cmb_dual,
+        for cmb in (self.cmb_gate1, self.cmb_gate2, self.cmb_dual, self.cmb_k6221,
                     self.cmb_yoko_gs200_1, self.cmb_yoko_gs200_2,
                     self.cmb_yoko7651_1, self.cmb_yoko7651_2,
                     self.cmb_srs860_1, self.cmb_srs860_2,
@@ -451,6 +460,9 @@ class ConfigDialog(QtWidgets.QDialog):
 
             use_dual_gate=self.chk_dual.isChecked(),
             dual_gate_visa=self.cmb_dual.currentText().strip(),
+
+            use_k6221=self.chk_k6221.isChecked(),
+            k6221_visa=self.cmb_k6221.currentText().strip(),
 
             use_yoko_gs200_1=self.chk_yoko_gs200_1.isChecked(),
             yoko_gs200_1_visa=self.cmb_yoko_gs200_1.currentText().strip(),

@@ -112,11 +112,13 @@ from procedures import (
     Resistance_gate_sweep_measurement,
     Resistance_two_gate_scan_sweep_measurement,
     Resistance_two_gate_mapping_measurement,
+    AC_current_sweep_measurement,
     # Registration dicts
     proc_resistance_time,
     proc_resistance_gate,
     proc_resistance_two_gate_sweep,
     proc_resistance_two_gate_map,
+    proc_ac_current_sweep,
     # Aggregates
     CATAGORIES,
     PROCEDURES,
@@ -401,6 +403,7 @@ class Launcher(QtWidgets.QMainWindow):
             instrument_list = [
                 cfg.Gate_1, cfg.Gate_2, cfg.Dual_gate,
                 cfg.YokoGS200_1, cfg.YokoGS200_2, cfg.Yoko7651_1, cfg.Yoko7651_2,
+                getattr(cfg, "K6221", 0),
                 cfg.MFLI_1, cfg.MFLI_2, cfg.MFLI_3,
                 cfg.SRS860_1, cfg.SRS860_2, cfg.SRS860_3, cfg.SRS860_4,
                 cfg.SRS830_1, cfg.SRS830_2, cfg.SRS830_3
