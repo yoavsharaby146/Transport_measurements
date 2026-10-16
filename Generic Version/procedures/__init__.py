@@ -23,6 +23,7 @@ from .resistance_gate_sweep import Resistance_gate_sweep_measurement, proc_resis
 from .resistance_two_gate_sweep import Resistance_two_gate_scan_sweep_measurement, proc_resistance_two_gate_sweep
 from .resistance_two_gate_map import Resistance_two_gate_mapping_measurement, proc_resistance_two_gate_map
 from .ac_current_sweep import AC_current_sweep_measurement, proc_ac_current_sweep
+from .resistance_aux_sweep import Resistance_aux_voltage_measurement, proc_resistance_aux
 
 # Category colors
 CATAGORIES = {
@@ -30,6 +31,7 @@ CATAGORIES = {
     "Gate Sweep": "#BEF9C7",
     "2D Mapping": "#EABEF9",
     "AC Current Sweep": "#BEF9EC",
+    "Aux Sweep": "#F9BEE1",
 }
 
 # Build the PROCEDURES dictionary
@@ -39,6 +41,7 @@ PROCEDURES.update(proc_resistance_gate)
 PROCEDURES.update(proc_resistance_two_gate_sweep)
 PROCEDURES.update(proc_resistance_two_gate_map)
 PROCEDURES.update(proc_ac_current_sweep)
+PROCEDURES.update(proc_resistance_aux)
 
 # Export all
 __all__ = [
@@ -57,12 +60,14 @@ __all__ = [
     'Resistance_two_gate_scan_sweep_measurement',
     'Resistance_two_gate_mapping_measurement',
     'AC_current_sweep_measurement',
+    'Resistance_aux_voltage_measurement',
     # Registration dicts
     'proc_resistance_time',
     'proc_resistance_gate',
     'proc_resistance_two_gate_sweep',
     'proc_resistance_two_gate_map',
     'proc_ac_current_sweep',
+    'proc_resistance_aux',
     # Aggregates
     'CATAGORIES',
     'PROCEDURES',

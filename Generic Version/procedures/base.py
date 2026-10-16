@@ -60,6 +60,11 @@ Yoko7651_1        = getattr(_cfg, "Yoko7651_1", 0)
 Yoko7651_2        = getattr(_cfg, "Yoko7651_2", 0)
 K6221             = getattr(_cfg, "K6221", 0)
 
+# Set True when connected lock-ins return SNAP values as (Y, X) — verified
+# on the generic-computer instruments by measurement. Flip to False for
+# units that answer SNAP? in the requested (X, Y) order per the manual.
+LOCKIN_SWAP_XY = True
+
 # RMS -> (peak) amplitude conversion for the Keithley 6221 waveform.
 # The instrument's :SOUR:WAVE:AMPL is a PEAK value; the user works in RMS.
 RMS_TO_PEAK = 1.4142
@@ -185,6 +190,11 @@ def _rebuild_procedure_columns(cls):
         _build_base_columns() + list(mid) +
         _build_lockin_columns(kind) + _build_magnet_columns()
     )
+    # Optional hook: let subclasses refresh dynamic Parameters (e.g. the
+    # R_aux procedure's aux_source choices) to connected instruments.
+    rebuild_params = getattr(cls, '_rebuild_parameters', None)
+    if callable(rebuild_params):
+        rebuild_params()
 
 
 def _rebuild_all_columns():
@@ -223,6 +233,44 @@ def _rebuild_all_columns():
         for name in _col_names:
             if name in mod.__dict__:
                 mod.__dict__[name] = globals()[name]
+
+
+# ---------------- Dynamic SMU dropdown builder ----------------
+
+def _connected_smus():
+    """Names of connected SMUs usable as sweep sources.
+
+    Mapping (mirrors configuration.py):
+        Gate_1 / Gate_2 — Keithley 2450 (also used for 2470) single SMUs
+        smua / smub     — the two channels of the Keithley 2604B (Dual_gate);
+                          offered only when the 2604B is connected
+        YokoGS200_x / Yoko7651_x — Yokogawa voltage sources (via adapter)
+    """
+    names = []
+    if _is_connected(Gate_1):
+        names.append('Gate_1')
+    if _is_connected(Gate_2):
+        names.append('Gate_2')
+    if _is_connected(Dual_gate):
+        names += ['smua', 'smub']
+    for yoko in ('YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2'):
+        if _is_connected(globals()[yoko]):
+            names.append(yoko)
+    return names
+
+
+def _make_smu_parameter(label='User defined SMU', default='Gate_1', **kwargs):
+    """ListParameter offering only connected SMUs.
+
+    Rebuilt after instruments are (re)bound via each procedure's
+    _rebuild_parameters() classmethod (called from
+    _rebuild_procedure_columns). Extra kwargs (group_by etc.) pass
+    through to ListParameter.
+    """
+    choices = _connected_smus() or ['(none connected)']
+    if default not in choices:
+        default = choices[0]
+    return ListParameter(label, choices=choices, default=default, **kwargs)
 
 
 # ---------------- Input filtering for GUI ----------------
@@ -460,7 +508,12 @@ class GenericProcedure(Procedure):
         measurement is not killed by one hiccup."""
         for i in range(attempts):
             try:
-                return list(reader())
+                vals = list(reader())
+                # Instruments observed answering SNAP? as (Y, X) — put the
+                # pair back in (X, Y) so values match the column names.
+                if LOCKIN_SWAP_XY and len(vals) >= 2:
+                    vals[0], vals[1] = vals[1], vals[0]
+                return vals
             except Exception as e:
                 log.warning("%s read failed (attempt %d/%d): %s", name, i + 1, attempts, e)
                 time.sleep(delay)
@@ -521,25 +574,33 @@ class GenericProcedure(Procedure):
             vals += mid_extras
         vals += self._read_lockin_values()
         vals += self._read_magnet()
+        if len(vals) != len(self.DATA_COLUMNS):
+            raise RuntimeError(
+                f"Column misalignment: {len(vals)} values but "
+                f"{len(self.DATA_COLUMNS)} columns. Your deployed files are "
+                f"out of sync - copy ALL files of the Generic Version folder "
+                f"from the repository (columns and readers must be the same "
+                f"revision).")
         return vals
 
     # --- Shared SMU helpers ---
 
     def smu_choice(self, name):
         """Return the SMU object based on name selection."""
-        if name == 'Gate_1': return Gate_1
-        if name == 'Gate_2': return Gate_2
-        if name == 'smua': return Dual_gate.smua
-        if name == 'smub': return Dual_gate.smub
-        yokos = {'YokoGS200_1': YokoGS200_1, 'YokoGS200_2': YokoGS200_2,
-                 'Yoko7651_1': Yoko7651_1, 'Yoko7651_2': Yoko7651_2}
+        yokos = ('YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2')
+        if name not in ('Gate_1', 'Gate_2', 'smua', 'smub') + yokos:
+            log.error("SMU selection not supported")
+            raise ValueError(f"Unknown SMU: {name}")
+        if name in ('smua', 'smub'):
+            inst = getattr(Dual_gate, name, 0) if _is_connected(Dual_gate) else 0
+        else:
+            inst = globals().get(name, 0)
+        if not _is_connected(inst):
+            raise ValueError(f"{name} selected as SMU but is not connected "
+                             f"(check the pre-launch dialog)")
         if name in yokos:
-            if not _is_connected(yokos[name]):
-                raise ValueError(f"{name} selected as SMU but is not connected "
-                                 f"(check the pre-launch dialog)")
-            return YokoVoltageSourceAdapter(yokos[name])
-        log.error("SMU selection not supported")
-        raise ValueError(f"Unknown SMU: {name}")
+            return YokoVoltageSourceAdapter(inst)
+        return inst
 
     def smu_output(self, Gate, name):
         """Enable SMU output with appropriate configuration."""

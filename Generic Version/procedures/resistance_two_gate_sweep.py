@@ -40,20 +40,24 @@ class Resistance_two_gate_scan_sweep_measurement(GenericProcedure):
     sweeping = BooleanParameter('Sweeping Configuration', default=True)
 
     # Gate 1 Settings
-    smu_1 = ListParameter('Top Gate SMU', default='Gate_1',
-                          choices=['Gate_1', 'Gate_2', 'smua', 'smub',
-                                   'YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2'],
-                          group_by='sweeping', group_condition=True)
+    smu_1 = base._make_smu_parameter('Top Gate SMU', default='Gate_1',
+                                     group_by='sweeping', group_condition=True)
     smu_1_sp1 = FloatParameter('Top Gate Start (V)', default=0.0, group_by='sweeping', group_condition=True)
     smu_1_sp2 = FloatParameter('Top Gate End (V)', default=0.0, group_by='sweeping', group_condition=True)
 
     # Gate 2 Settings
-    smu_2 = ListParameter('Bottom Gate SMU', default='Gate_2',
-                          choices=['Gate_1', 'Gate_2', 'smua', 'smub',
-                                   'YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2'],
-                          group_by='sweeping', group_condition=True)
+    smu_2 = base._make_smu_parameter('Bottom Gate SMU', default='Gate_2',
+                                     group_by='sweeping', group_condition=True)
     smu_2_sp1 = FloatParameter('Bottom Gate Start (V)', default=0.0, group_by='sweeping', group_condition=True)
     smu_2_sp2 = FloatParameter('Bottom Gate End (V)', default=0.0, group_by='sweeping', group_condition=True)
+
+    @classmethod
+    def _rebuild_parameters(cls):
+        """Refresh SMU dropdown choices to the connected instruments."""
+        cls.smu_1 = base._make_smu_parameter('Top Gate SMU', default='Gate_1',
+                                             group_by='sweeping', group_condition=True)
+        cls.smu_2 = base._make_smu_parameter('Bottom Gate SMU', default='Gate_2',
+                                             group_by='sweeping', group_condition=True)
 
     smu_points = IntegerParameter('Number of Points', default=50, group_by='sweeping', group_condition=True)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=0.1)
