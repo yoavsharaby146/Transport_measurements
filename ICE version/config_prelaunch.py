@@ -624,8 +624,13 @@ class ConfigDialog(QtWidgets.QDialog):
     #         QtWidgets.QMessageBox.critical(self, "Test MFLI",
     #                                        f"Failed to connect.\n{err}\nYou can still Save and run without MFLI.")
     #
-    def _scan_mfli_devices(self):
-        """Scan for all available MFLI devices and populate all device dropdowns."""
+    def _discover_mfli(self):
+        """Discover MFLI devices via LabOne. Returns [(device_id, host, port)].
+
+        Tries zhinst.toolkit Session against the configured/localhost data
+        server, falls back to zhinst.core ziDiscovery. No UI, no dialogs —
+        shared by _scan_mfli_devices and _auto_search.
+        """
         hosts = [
             self.edt_mfli_1_host.text().strip(),
             getattr(self, "edt_mfli_2_host", None) and self.edt_mfli_2_host.text().strip(),
@@ -676,6 +681,18 @@ class ConfigDialog(QtWidgets.QDialog):
             except Exception:
                 pass
 
+        # dedupe by device id, keep first sighting
+        seen, unique = set(), []
+        for did, host, port in found:
+            if did not in seen:
+                seen.add(did)
+                unique.append((did, host, port))
+        return unique
+
+    def _scan_mfli_devices(self):
+        """Scan for all available MFLI devices and populate all device dropdowns."""
+        found = self._discover_mfli()
+
         if not found:
             QtWidgets.QMessageBox.information(
                 self, "MFLI Finder",
@@ -696,10 +713,14 @@ class ConfigDialog(QtWidgets.QDialog):
 
     # ---------- Auto-search ----------
     def _auto_search(self) -> None:
-        """Scan VISA resources, query *IDN?, tick + fill matching slots.
+        """Scan VISA resources, query *IDN?, reassign family slots.
 
-        First detected unit of each family fills the first free slot of
-        that family. Yokogawa 7651 never answers *IDN? — set it manually.
+        Every run re-detects from scratch: for each instrument family with
+        at least one detection, its slots are cleared and refilled in
+        resource order — running twice never duplicates an instrument and
+        picks up address changes. Families with no detections are left
+        untouched (manual entries survive). Yokogawa 7651 never answers
+        *IDN? — set it manually.
         """
         if pyvisa is None:
             QtWidgets.QMessageBox.warning(self, "Auto-Search", "pyvisa not available.")
@@ -726,14 +747,35 @@ class ConfigDialog(QtWidgets.QDialog):
                       (self.chk_srs830_3, self.cmb_srs830_3)],
         }
 
-        found, unknown = [], []
-        for addr in resources:
+        def _query_idn(addr):
+            """*IDN? with a terminator retry — GS200 USB-TMC often needs
+            read_termination='\\n' to answer."""
             try:
                 res = rm.open_resource(addr, open_timeout=2000)
-                res.timeout = 2000
-                idn = res.query('*IDN?').strip()
-                res.close()
             except Exception:
+                return None
+            try:
+                res.timeout = 2500
+                try:
+                    return res.query('*IDN?').strip()
+                except Exception:
+                    try:
+                        res.read_termination = '\n'
+                        res.write_termination = '\n'
+                        return res.query('*IDN?').strip()
+                    except Exception:
+                        return None
+            finally:
+                try:
+                    res.close()
+                except Exception:
+                    pass
+
+        per_family, silent, unknown = {}, [], []
+        for addr in resources:
+            idn = _query_idn(addr)
+            if not idn:
+                silent.append(addr)
                 continue
             key = classify_prelaunch(idn)
             if key is None:
@@ -741,15 +783,59 @@ class ConfigDialog(QtWidgets.QDialog):
             if key == 'unknown':
                 unknown.append(f"{addr}: {idn}")
                 continue
-            # first free slot: unchecked or empty address
-            for chk, cmb in slots.get(key, []):
-                if not chk.isChecked() or not cmb.currentText().strip():
-                    cmb.setEditText(addr)
-                    chk.setChecked(True)
-                    found.append(f"{key.upper()} @ {addr}")
-                    break
+            per_family.setdefault(key, []).append((addr, idn))
 
-        msg = "Auto-Search results:\n\n" + ("\n".join(found) if found else "nothing new detected")
+        found = []
+        for key, key_slots in slots.items():
+            detections = per_family.get(key, [])
+            if not detections:
+                continue  # nothing found: leave manual settings alone
+            # full reassignment for this family (fixes duplicates + stale addresses)
+            for chk, cmb in key_slots:
+                chk.setChecked(False)
+                cmb.clearEditText()
+            for (chk, cmb), (addr, idn) in zip(key_slots, detections):
+                cmb.setEditText(addr)
+                chk.setChecked(True)
+                found.append(f"{key.upper()} @ {addr}\n    {idn}")
+            if len(detections) > len(key_slots):
+                extra = ", ".join(a for a, _ in detections[len(key_slots):])
+                found.append(f"WARNING: more {key.upper()} units than slots "
+                             f"(ignored: {extra})")
+
+        # --- MFLI (LabOne discovery, not VISA) ---
+        try:
+            mfli_devices = self._discover_mfli()
+        except Exception:
+            mfli_devices = []
+        if mfli_devices:
+            mfli_slots = []
+            for idx in (1, 2, 3):
+                chk = getattr(self, f"chk_mfli_{idx}", None)
+                edt = getattr(self, f"edt_mfli_{idx}_host", None)
+                spn = getattr(self, f"spn_mfli_{idx}_port", None)
+                cmb = getattr(self, f"cmb_mfli_{idx}_dev", None)
+                if None not in (chk, edt, spn, cmb):
+                    mfli_slots.append((chk, edt, spn, cmb))
+            # same full-reassignment semantics as the VISA families
+            for chk, edt, spn, cmb in mfli_slots:
+                chk.setChecked(False)
+            for (chk, edt, spn, cmb), (did, host, port) in zip(mfli_slots, mfli_devices):
+                if host:
+                    edt.setText(str(host))
+                if port:
+                    spn.setValue(int(port))
+                cmb.setCurrentText(str(did))  # combos are editable
+                chk.setChecked(True)
+                found.append(f"MFLI @ {host}:{port}\n    {did}")
+            if len(mfli_devices) > len(mfli_slots):
+                extra = ", ".join(d for d, _, _ in mfli_devices[len(mfli_slots):])
+                found.append(f"WARNING: more MFLI units than slots (ignored: {extra})")
+
+        msg = "Auto-Search results:\n\n" + ("\n".join(found) if found else "nothing detected")
+        if silent:
+            msg += ("\n\nNo *IDN? answer (set manually if connected):\n"
+                    + "\n".join(silent))
         if unknown:
             msg += "\n\nUnrecognized *IDN? (set manually):\n" + "\n".join(unknown)
         msg += "\n\nNote: Yokogawa 7651 never auto-detects — fill it manually."
