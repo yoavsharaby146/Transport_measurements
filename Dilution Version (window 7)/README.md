@@ -60,10 +60,13 @@ Key capabilities:
    - Add a **Loop** step, then use **Add into selected loop** to nest steps inside it. Loop values accept `0.5, -0.5, 0` or `linspace(0.5,-0.5,11)`.
    - Any parameter field or the **Subfolder** may contain `{V}` — replaced by the current loop value each iteration (e.g. `target_voltage = {V}`, `Subfolder = AUX_hyst {V}V` gives one data subfolder per voltage, like the old `Main.py` loop).
    - Reorder with **Up/Down**, fix mistakes with edit + **Apply edit to selected**, remove with **Delete**.
+   - Or click **Templates...** for one-click presets: *Gate hysteresis (RV +V/-V/0)*, *AUX hysteresis vs Gate (Loop)*, *AUX hysteresis at fixed point*, *RH field sweep*, *Rt timed tracking*. Pick a template, fill its parameters, **Create steps** inserts the ready-made step list into the tree (still fully editable afterwards).
 4. Set the **Save dir** (base directory), click **Run sequence**. Each measurement opens its own live plot window; the next step starts when that window closes. **Stop after current step** halts the sequence between steps.
 5. **Save sequence (JSON)** / **Load sequence (JSON)** store the whole plan for reuse.
 
 Sanity check without instruments: `python Sequence_GUI.py --self-check`.
+
+**Sequence generator window:** `python "Sequence generator interactive.py"` opens a standalone generator window (tkinter): add Rt / RV / R_AUX / RH / Wait / Loop steps with parameter dialogs, quick templates, reorder/delete, then **Save sequence (JSON)** — loadable by the sequencer's **Load sequence (JSON)**. Select a Loop step before adding a step to nest it inside. Add `--console` for the terminal-driven version; `--self-check` runs the logic check without a window.
 
 ### Option B — script (legacy)
 

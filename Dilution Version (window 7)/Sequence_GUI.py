@@ -84,6 +84,145 @@ COMMON_PARAMS = [
 ]
 STEP_TYPES = list(PROCEDURES) + ['Wait', 'Loop']
 
+# ---------------------------------------------------------------------------
+# Templates — presets that generate ready-made step lists for the tree.
+# Each entry: description, params [(name, type, default)], build(params) ->
+# list of top-level step dicts (plain data, JSON round-trippable).
+# ---------------------------------------------------------------------------
+def _fmt(v):
+    """Compact number formatting for titles/subfolders ('%g')."""
+    return '%g' % v
+
+
+def _rv(target, sub, p):
+    return {'type': 'RV', 'params': {
+        'title': 'RV', 'target_voltage': str(target),
+        'step_size': str(p['step_size']), 'acq_delay': str(p['acq_delay']),
+        'smu': p['smu'], 'Resistor': COMMON_PARAMS[0][2],
+        'Contacts': COMMON_PARAMS[1][2], 'Subfolder': sub}}
+
+
+def _aux(target, sub, p):
+    return {'type': 'R_AUX', 'params': {
+        'title': 'AUX sweep', 'target_AUX_voltage': str(target),
+        'step_size': str(p['step_size']), 'acq_delay': str(p['acq_delay']),
+        'aux': str(p['aux']), 'Resistor': COMMON_PARAMS[0][2],
+        'Contacts': COMMON_PARAMS[1][2], 'Subfolder': sub}}
+
+
+def _build_gate_hysteresis(p):
+    """RV to +V, then -V, then back to 0."""
+    v = p['target_voltage']
+    return [_rv(+v, 'hyst +%sV' % _fmt(v), p),
+            _rv(-v, 'hyst -%sV' % _fmt(v), p),
+            _rv(0, 'hyst 0V', p)]
+
+
+def _build_aux_vs_gate(p):
+    """Loop over gate values; at each, set gate then AUX hysteresis."""
+    import numpy as np
+    values = [round(float(v), 6)
+              for v in np.linspace(p['gate_start'], p['gate_stop'],
+                                   int(p['gate_steps']))]
+    children = [
+        _rv('{V}', 'gate {V}V',
+            dict(p, step_size=p.get('gate_step_size', 1000))),
+        _aux(p['aux_high'], 'gate {V}V', p),
+        _aux(p['aux_low'], 'gate {V}V', p),
+        _aux(p['aux_high'], 'gate {V}V', p),
+    ]
+    return [{'type': 'Loop', 'values': values, 'children': children}]
+
+
+def _build_aux_hysteresis(p):
+    """AUX hysteresis at a fixed operating point: +A, -A, back to +A."""
+    a = p['aux_high']
+    return [_aux(+a, 'AUX hyst +%sV' % _fmt(a), p),
+            _aux(-a, 'AUX hyst -%sV' % _fmt(a), p),
+            _aux(+a, 'AUX hyst +%sV' % _fmt(a), p)]
+
+
+def _build_rh_sweep(p):
+    return [{'type': 'RH', 'params': {
+        'title': 'RH', 'target_field': str(p['target_field']),
+        'step_size': str(p['step_size']), 'ramp_rate': str(p['ramp_rate']),
+        'axis': p['axis'], 'acq_delay': str(p['acq_delay']),
+        'Resistor': COMMON_PARAMS[0][2], 'Contacts': COMMON_PARAMS[1][2],
+        'Subfolder': 'RH %s %sT' % (p['axis'], _fmt(p['target_field']))}}]
+
+
+def _build_rt_tracking(p):
+    return [{'type': 'Rt', 'params': {
+        'title': p['title'], 'acq_delay': str(p['acq_delay']),
+        'acq_length': str(p['acq_length']),
+        'Resistor': COMMON_PARAMS[0][2], 'Contacts': COMMON_PARAMS[1][2],
+        'Subfolder': ''}}]
+
+
+TEMPLATES = {
+    'Gate hysteresis (RV +V / -V / 0)': {
+        'description': 'Three RV sweeps: gate to +V, to -V, back to 0\n'
+                       '(the classic Main.py gate-hysteresis block).',
+        'params': [
+            ('target_voltage', float, 4.0),
+            ('step_size', float, 5),
+            ('acq_delay', float, 1),
+            ('smu', str, 'Gate_1'),
+        ],
+        'build': _build_gate_hysteresis,
+    },
+    'AUX hysteresis vs Gate (Loop)': {
+        'description': 'Loop over gate values; at each gate step:\n'
+                       'set gate, then sweep AUX +A -> -A -> +A.\n'
+                       'One subfolder per gate value (gate {V}V).',
+        'params': [
+            ('gate_start', float, -1.0),
+            ('gate_stop', float, 1.0),
+            ('gate_steps', int, 51),
+            ('aux_high', float, 0.5),
+            ('aux_low', float, -0.5),
+            ('step_size', float, 1),
+            ('gate_step_size', float, 1000),
+            ('acq_delay', float, 1),
+            ('aux', int, 1),
+            ('smu', str, 'Gate_1'),
+        ],
+        'build': _build_aux_vs_gate,
+    },
+    'AUX hysteresis at fixed point': {
+        'description': 'Three R_AUX sweeps at the current operating point:\n'
+                       'AUX to +A, to -A, back to +A.',
+        'params': [
+            ('aux_high', float, 4.0),
+            ('step_size', float, 20),
+            ('acq_delay', float, 4),
+            ('aux', int, 1),
+        ],
+        'build': _build_aux_hysteresis,
+    },
+    'RH field sweep': {
+        'description': 'Single RH sweep of one magnet axis to a target field.',
+        'params': [
+            ('target_field', float, 0.5),
+            ('step_size', int, 5),
+            ('ramp_rate', float, 0.01),
+            ('axis', str, 'bz'),
+            ('acq_delay', float, 10),
+        ],
+        'build': _build_rh_sweep,
+    },
+    'Rt timed tracking': {
+        'description': 'Plain resistance-vs-time recording.',
+        'params': [
+            ('title', str, 'Timed tracking'),
+            ('acq_delay', float, 1),
+            ('acq_length', int, 3600),
+        ],
+        'build': _build_rt_tracking,
+    },
+}
+
+
 DEFAULT_SAVE_DIR = r'C:\Users\USER\Desktop\Data\YoavSharaby'
 
 # pymeasure status codes differ across versions (0.15: 0=Finished;
@@ -240,6 +379,64 @@ class WaitDialog(QDialog):
             self.label.setText('Waiting %d s...' % self.remaining)
 
 # ---------------------------------------------------------------------------
+# Template wizard — pick a preset, fill its parameters, get step list
+# ---------------------------------------------------------------------------
+class TemplateDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Sequence templates')
+        self.setMinimumWidth(380)
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel('Template:'))
+        self.combo = QComboBox()
+        self.combo.addItems(list(TEMPLATES))
+        layout.addWidget(self.combo)
+
+        self.desc = QLabel(TEMPLATES[self.combo.currentText()]['description'])
+        layout.addWidget(self.desc)
+
+        self.form = QFormLayout()
+        layout.addLayout(self.form)
+
+        btns = QHBoxLayout()
+        ok = QPushButton('Create steps')
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton('Cancel')
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        layout.addLayout(btns)
+
+        self.combo.currentTextChanged.connect(self.rebuild_form)
+        self.rebuild_form(self.combo.currentText())
+
+    def rebuild_form(self, name):
+        while self.form.count():
+            item = self.form.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._fields = {}
+        for pname, _typ, default in TEMPLATES[name]['params']:
+            edit = QLineEdit(str(default))
+            edit.setMinimumWidth(160)
+            self._fields[pname] = edit
+            self.form.addRow(pname + ':', edit)
+        self.desc.setText(TEMPLATES[name]['description'])
+
+    def build_steps(self):
+        """Converted params -> template build -> list of step dicts."""
+        name = self.combo.currentText()
+        params = {}
+        for pname, typ, _default in TEMPLATES[name]['params']:
+            raw = self._fields[pname].text()
+            params[pname] = convert(raw, typ, "template '%s'" % name) \
+                if typ is not str else raw
+        return TEMPLATES[name]['build'](params)
+
+
+# ---------------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------------
 class SequenceWindow(QMainWindow):
@@ -273,6 +470,10 @@ class SequenceWindow(QMainWindow):
         self.add_loop_btn = QPushButton('Add into selected loop')
         self.add_loop_btn.clicked.connect(lambda: self.add_step(into_loop=True))
         left.addWidget(self.add_loop_btn)
+
+        self.template_btn = QPushButton('Templates...')
+        self.template_btn.clicked.connect(self.open_templates)
+        left.addWidget(self.template_btn)
 
         self.apply_btn = QPushButton('Apply edit to selected')
         self.apply_btn.clicked.connect(self.apply_edit)
@@ -403,7 +604,10 @@ class SequenceWindow(QMainWindow):
     def make_item(self, step, parent=None):
         item = QTreeWidgetItem(parent or self.tree,
                                [step['type'], self.summary(step)])
-        item.setData(0, Qt.UserRole, step)
+        # store the dict as a plain attribute: Qt UserRole data converts
+        # dicts to QVariantMap (a COPY), so mutations via item.data() would
+        # silently detach from the model — children added to a Loop were lost
+        item._step = step
         if step['type'] == 'Loop':
             for child in step.get('children', []):
                 self.make_item(child, item)
@@ -422,7 +626,7 @@ class SequenceWindow(QMainWindow):
                     self, 'No loop selected',
                     'Select a Loop step (or one of its children) first.')
                 return
-            target.data(0, Qt.UserRole)['children'].append(step)
+            target._step['children'].append(step)
             self.make_item(step, target)
             target.setExpanded(True)
         else:
@@ -433,7 +637,7 @@ class SequenceWindow(QMainWindow):
         """Tree item of the Loop owning the current selection, or None."""
         item = self.tree.currentItem()
         while item is not None:
-            if item.data(0, Qt.UserRole)['type'] == 'Loop':
+            if item._step['type'] == 'Loop':
                 return item
             item = item.parent()
         return None
@@ -442,7 +646,7 @@ class SequenceWindow(QMainWindow):
         item = self.tree.currentItem()
         if item is None:
             return None
-        if item.data(0, Qt.UserRole)['type'] == 'Loop':
+        if item._step['type'] == 'Loop':
             return None  # loops are edited via their values field
         return item
 
@@ -450,7 +654,7 @@ class SequenceWindow(QMainWindow):
         item = self.tree.currentItem()
         if item is None:
             return
-        step = item.data(0, Qt.UserRole)
+        step = item._step
         self._editing_item = item
         if self.type_combo.currentText() != step['type']:
             self.type_combo.setCurrentText(step['type'])
@@ -468,13 +672,15 @@ class SequenceWindow(QMainWindow):
 
     def apply_edit(self):
         item = self._editing_item or self.selected_step_item()
+        if item is not None and item._step['type'] == 'Loop':
+            item = None  # loops are edited via their values field
         if item is None:
             # maybe a loop is selected directly — update its values
             loop_item = self.tree.currentItem()
             if loop_item is not None and \
-                    loop_item.data(0, Qt.UserRole)['type'] == 'Loop':
+                    loop_item._step['type'] == 'Loop':
                 try:
-                    loop_item.data(0, Qt.UserRole)['values'] = \
+                    loop_item._step['values'] = \
                         parse_values(self._fields['values'].text())
                 except ValueError as e:
                     QMessageBox.warning(self, 'Invalid input', str(e))
@@ -489,7 +695,7 @@ class SequenceWindow(QMainWindow):
         except ValueError as e:
             QMessageBox.warning(self, 'Invalid input', str(e))
             return
-        old = item.data(0, Qt.UserRole)
+        old = item._step
         if old['type'] == new_step['type']:
             old['params'] = new_step['params']
         else:
@@ -549,7 +755,7 @@ class SequenceWindow(QMainWindow):
         item = self.selected_step_item()
         if item is None:
             return
-        self._insert_after(item, copy.deepcopy(item.data(0, Qt.UserRole)))
+        self._insert_after(item, copy.deepcopy(item._step))
         self.refresh_summaries()
 
     def delete_step(self):
@@ -565,14 +771,14 @@ class SequenceWindow(QMainWindow):
 
     def refresh_summaries(self):
         def walk(item):
-            item.setText(1, self.summary(item.data(0, Qt.UserRole)))
+            item.setText(1, self.summary(item._step))
             for i in range(item.childCount()):
                 walk(item.child(i))
         for i in range(self.tree.topLevelItemCount()):
             walk(self.tree.topLevelItem(i))
 
     def tree_to_sequence(self):
-        return [self.tree.topLevelItem(i).data(0, Qt.UserRole)
+        return [self.tree.topLevelItem(i)._step
                 for i in range(self.tree.topLevelItemCount())]
 
     # ------------- dir / save / load -------------
@@ -581,6 +787,21 @@ class SequenceWindow(QMainWindow):
                                              self.dir_edit.text() or '')
         if d:
             self.dir_edit.setText(d)
+
+    def open_templates(self):
+        dlg = TemplateDialog(self)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        try:
+            steps = dlg.build_steps()
+        except ValueError as e:
+            QMessageBox.warning(self, 'Invalid input', str(e))
+            return
+        for step in steps:
+            self.make_item(step)
+        self.refresh_summaries()
+        self.status.setText('Template inserted: %d top-level step(s)'
+                            % len(steps))
 
     def save_json(self):
         path, _ = QFileDialog.getSaveFileName(self, 'Save sequence', '',
@@ -855,6 +1076,24 @@ def _self_check():
     # JSON round trip of a sequence
     rt = json.loads(json.dumps(seq))
     assert expand(rt, r'C:\data') == runs
+    # every template builds valid, expandable, JSON-round-trippable steps
+    for name, spec in TEMPLATES.items():
+        params = {n: d for n, _t, d in spec['params']}
+        steps = spec['build'](params)
+        assert steps == json.loads(json.dumps(steps)), name
+        truns = expand(steps, r'C:\data')
+        assert truns, name
+        print('template OK: %-36s (%d runs)'
+              % (name, len(truns)))
+    # AUX vs Gate loop reproduces the gate_aux_loop.json shape
+    aux_gate = TEMPLATES['AUX hysteresis vs Gate (Loop)']
+    steps = aux_gate['build']({n: d for n, _t, d in aux_gate['params']})
+    loop = steps[0]
+    assert len(loop['values']) == 51 and len(loop['children']) == 4
+    assert loop['children'][1]['params']['target_AUX_voltage'] == '0.5'
+    assert loop['children'][2]['params']['target_AUX_voltage'] == '-0.5'
+    assert loop['children'][0]['params']['step_size'] == '1000'
+    assert loop['children'][1]['params']['step_size'] == '1'
     print('self-check OK')
 
 
