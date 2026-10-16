@@ -58,8 +58,14 @@ class Differential_Resistance_Zurich_AUX_map(ICEProcedure):
                               group_by='mapping', group_condition=True)
 
     # --- Gate Parameters (Stepped - Outer Loop) ---
-    smu = ListParameter('Gate SMU', choices=['Gate_1', 'Gate_2', 'smua', 'smub'],
-                        group_by='mapping', group_condition=True, default='Gate_1')
+    smu = base._make_smu_parameter('Gate SMU', default='Gate_1',
+                                   group_by='mapping', group_condition=True)
+
+    @classmethod
+    def _rebuild_parameters(cls):
+        """Refresh SMU dropdown choices to the connected instruments."""
+        cls.smu = base._make_smu_parameter('Gate SMU', default='Gate_1',
+                                           group_by='mapping', group_condition=True)
     gate_start = FloatParameter('Gate start voltage (V)', group_by='mapping', group_condition=True, default=-1)
     gate_end = FloatParameter('Gate end voltage (V)', group_by='mapping', group_condition=True, default=1)
     gate_step = FloatParameter('Gate step size (mV)', group_by='mapping', group_condition=True, default=50)

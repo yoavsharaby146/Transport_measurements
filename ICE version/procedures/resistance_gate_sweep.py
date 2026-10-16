@@ -15,7 +15,12 @@ class Resistance_gate_sweep_measurement(ICEProcedure):
     acq_delay = FloatParameter('Acquisition  Delay (s)', default=1)
     target_voltage = FloatParameter('Target Voltage(V)', default=0)
     step_size = FloatParameter('Step size(mV)', default=1)
-    smu = ListParameter('User defined SMU',choices=['Gate_1','Gate_2','smua','smub'], default='Gate_1')
+    smu = base._make_smu_parameter('User defined SMU', default='Gate_1')
+
+    @classmethod
+    def _rebuild_parameters(cls):
+        """Refresh SMU dropdown choices to the connected instruments."""
+        cls.smu = base._make_smu_parameter('User defined SMU', default='Gate_1')
 
     # --- Hardware Selection ---
     devices = BooleanParameter('Devices in use', default=False)

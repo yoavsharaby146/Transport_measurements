@@ -30,6 +30,9 @@ from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
 from Instruments.keithley2450_with_add_ons import Keithley2450
 from Instruments.keithley2604B import Keithley2604B
 #from keithley2600 import Keithley2600
+from Instruments.keithley6221_with_add_ons import Keithley6221
+from Instruments.yokogawags200_with_add_ons import YokogawaGS200
+from Instruments.yokogawa7651_with_add_ons import Yokogawa7651
 from Instruments.MFLI import MFLIController
 
 
@@ -126,6 +129,43 @@ Dual_gate = _maybe(
     enabled=overrides.get("use_dual_gate", False),
     addr=overrides.get("dual_gate_visa", ""),
     name="Dual_gate"
+)
+
+# Keithley 6221 current source (AC waveform)
+K6221 = _maybe(
+    Keithley6221,
+    enabled=overrides.get("use_k6221", False),
+    addr=overrides.get("k6221_visa", ""),
+    name="K6221"
+)
+
+# Yokogawa voltage sources
+YokoGS200_1 = _maybe(
+    YokogawaGS200,
+    enabled=overrides.get("use_yoko_gs200_1", False),
+    addr=overrides.get("yoko_gs200_1_visa", ""),
+    name="YokoGS200_1"
+)
+
+YokoGS200_2 = _maybe(
+    YokogawaGS200,
+    enabled=overrides.get("use_yoko_gs200_2", False),
+    addr=overrides.get("yoko_gs200_2_visa", ""),
+    name="YokoGS200_2"
+)
+
+Yoko7651_1 = _maybe(
+    Yokogawa7651,
+    enabled=overrides.get("use_yoko7651_1", False),
+    addr=overrides.get("yoko7651_1_visa", ""),
+    name="Yoko7651_1"
+)
+
+Yoko7651_2 = _maybe(
+    Yokogawa7651,
+    enabled=overrides.get("use_yoko7651_2", False),
+    addr=overrides.get("yoko7651_2_visa", ""),
+    name="Yoko7651_2"
 )
 # Dual_gate = Keithley2600 only
 # Dual_gate = None

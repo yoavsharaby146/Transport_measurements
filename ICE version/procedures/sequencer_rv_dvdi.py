@@ -26,8 +26,14 @@ class RV_dV_dI_sequencer_measurement(ICEProcedure):
                               group_condition='dV_dI', default=2)
     Target_voltage = FloatParameter('Target Voltage(V)', group_by='Type', group_condition='RV', default=0)
     step_size = FloatParameter('Step size(mV)', group_by='Type', group_condition='RV', default=1)
-    smu = ListParameter('User defined SMU', choices=['Gate_1', 'Gate_2', 'smua', 'smub'],
-                        group_by='Type', group_condition='RV', default='Gate_1')
+    smu = base._make_smu_parameter('User defined SMU', default='Gate_1',
+                                   group_by='Type', group_condition='RV')
+
+    @classmethod
+    def _rebuild_parameters(cls):
+        """Refresh SMU dropdown choices to the connected instruments."""
+        cls.smu = base._make_smu_parameter('User defined SMU', default='Gate_1',
+                                           group_by='Type', group_condition='RV')
     devices = BooleanParameter('Devices in use', default=False)
     use_magnet = BooleanParameter('Use Magnet', group_by='devices', default=False)
     use_MFLI_1 = BooleanParameter('use_MFLI_1', group_by='devices', default=False)

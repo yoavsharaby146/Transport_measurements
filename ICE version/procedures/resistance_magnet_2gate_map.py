@@ -45,16 +45,22 @@ class Resistance_magnet_and_2gate_mapping_measurement(ICEProcedure):
     mag_delay = FloatParameter('Delay after Magnetic sweep (s)', default=60, group_by='mapping', group_condition=True)
 
     # Gate 1 Settings
-    smu_1 = ListParameter('Top Gate SMU', default='Gate_1',
-                          choices=['Gate_1', 'Gate_2', 'smua', 'smub'],
-                          group_by='mapping', group_condition=True)
+    smu_1 = base._make_smu_parameter('Top Gate SMU', default='Gate_1',
+                                     group_by='mapping', group_condition=True)
     smu_1_sp1 = FloatParameter('Top Gate Start (V)', default=0.0, group_by='mapping', group_condition=True)
     smu_1_sp2 = FloatParameter('Top Gate End (V)', default=0.0, group_by='mapping', group_condition=True)
 
     # Gate 2 Settings
-    smu_2 = ListParameter('Bottom Gate SMU', default='Gate_2',
-                          choices=['Gate_1', 'Gate_2', 'smua', 'smub'],
-                          group_by='mapping', group_condition=True)
+    smu_2 = base._make_smu_parameter('Bottom Gate SMU', default='Gate_2',
+                                     group_by='mapping', group_condition=True)
+
+    @classmethod
+    def _rebuild_parameters(cls):
+        """Refresh SMU dropdown choices to the connected instruments."""
+        cls.smu_1 = base._make_smu_parameter('Top Gate SMU', default='Gate_1',
+                                             group_by='mapping', group_condition=True)
+        cls.smu_2 = base._make_smu_parameter('Bottom Gate SMU', default='Gate_2',
+                                             group_by='mapping', group_condition=True)
     smu_2_sp1 = FloatParameter('Bottom Gate Start (V)', default=0.0, group_by='mapping', group_condition=True)
     smu_2_sp2 = FloatParameter('Bottom Gate End (V)', default=0.0, group_by='mapping', group_condition=True)
 

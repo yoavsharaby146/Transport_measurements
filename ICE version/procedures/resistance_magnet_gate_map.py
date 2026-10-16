@@ -37,8 +37,14 @@ class Resistance_magnet_and_gate_mapping_measurement(ICEProcedure):
                               choices=['Snake', 'Forward/Backward'],
                               group_by='mapping', group_condition=True)
 
-    smu = ListParameter('User defined SMU', default='Gate_1', choices=['smua', 'smub', 'Gate_1', 'Gate_2'],
-                        group_by='mapping', group_condition=True)
+    smu = base._make_smu_parameter('User defined SMU', default='Gate_1',
+                                   group_by='mapping', group_condition=True)
+
+    @classmethod
+    def _rebuild_parameters(cls):
+        """Refresh SMU dropdown choices to the connected instruments."""
+        cls.smu = base._make_smu_parameter('User defined SMU', default='Gate_1',
+                                           group_by='mapping', group_condition=True)
     gate_start = FloatParameter('Gate min voltage(V)', default=-1, group_by='mapping', group_condition=True)
     gate_end = FloatParameter('Gate max voltage(V)', default=1, group_by='mapping', group_condition=True)
     gate_step = FloatParameter('Gate Voltage step size (mV)', default=5, group_by='mapping', group_condition=True)

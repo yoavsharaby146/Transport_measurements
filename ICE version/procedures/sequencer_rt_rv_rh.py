@@ -16,7 +16,14 @@ class Rt_RV_RH_sequencer_measurement(ICEProcedure):
     sweep_rate = FloatParameter('Sweep rate (T/min)', group_by='Type', group_condition='RH', default=0.1)
     Target_voltage = FloatParameter('Target Voltage(V)', group_by='Type', group_condition='RV', default=0)
     step_size = FloatParameter('Step size(mV)', group_by='Type', group_condition='RV', default=1)
-    smu = ListParameter('User defined SMU', choices=['Gate_1', 'Gate_2', 'smua', 'smub'], group_by='Type', group_condition='RV', default='Gate_1')
+    smu = base._make_smu_parameter('User defined SMU', default='Gate_1',
+                                   group_by='Type', group_condition='RV')
+
+    @classmethod
+    def _rebuild_parameters(cls):
+        """Refresh SMU dropdown choices to the connected instruments."""
+        cls.smu = base._make_smu_parameter('User defined SMU', default='Gate_1',
+                                           group_by='Type', group_condition='RV')
     acq_length = IntegerParameter('Acquisition Length (s)', group_by='Type', group_condition='Rt', default=3600)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=1)
     devices = BooleanParameter("Device in use", default=False)

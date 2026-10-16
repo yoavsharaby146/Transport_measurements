@@ -35,15 +35,23 @@ class Resistance_two_gate_mapping_measurement(ICEProcedure):
                               choices=['Snake', 'Forward/Backward'],
                               group_by='mapping', group_condition=True)
 
-    slow_smu = ListParameter('Slow Axis SMU', default='Gate_1', group_by='mapping', group_condition=True,
-                             choices=['Gate_1', 'Gate_2', 'smua', 'smub'])
+    slow_smu = base._make_smu_parameter('Slow Axis SMU', default='Gate_1',
+                                        group_by='mapping', group_condition=True)
     slow_start = FloatParameter('Slow Start (V)', default=-1, group_by='mapping', group_condition=True)
     slow_end = FloatParameter('Slow End (V)', default=1, group_by='mapping', group_condition=True)
     slow_step = FloatParameter('Slow Step (mV)', default=10, group_by='mapping', group_condition=True)
     long_delay = FloatParameter('Slow Axis Delay (s)', default=1.0, group_by='mapping', group_condition=True)
 
-    fast_smu = ListParameter('Fast Axis SMU', default='Gate_2', group_by='mapping', group_condition=True,
-                             choices=['Gate_1', 'Gate_2', 'smua', 'smub'])
+    fast_smu = base._make_smu_parameter('Fast Axis SMU', default='Gate_2',
+                                        group_by='mapping', group_condition=True)
+
+    @classmethod
+    def _rebuild_parameters(cls):
+        """Refresh SMU dropdown choices to the connected instruments."""
+        cls.slow_smu = base._make_smu_parameter('Slow Axis SMU', default='Gate_1',
+                                                group_by='mapping', group_condition=True)
+        cls.fast_smu = base._make_smu_parameter('Fast Axis SMU', default='Gate_2',
+                                                group_by='mapping', group_condition=True)
     fast_start = FloatParameter('Fast Start (V)', default=-2, group_by='mapping', group_condition=True)
     fast_end = FloatParameter('Fast End (V)', default=2, group_by='mapping', group_condition=True)
     fast_step = FloatParameter('Fast Step (mV)', default=5, group_by='mapping', group_condition=True)

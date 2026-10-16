@@ -50,6 +50,15 @@ SRS830_3          = getattr(_cfg, "SRS830_3", 0)
 Dual_gate         = getattr(_cfg, "Dual_gate", 0)
 Gate_1            = getattr(_cfg, "Gate_1", 0)
 Gate_2            = getattr(_cfg, "Gate_2", 0)
+YokoGS200_1       = getattr(_cfg, "YokoGS200_1", 0)
+YokoGS200_2       = getattr(_cfg, "YokoGS200_2", 0)
+Yoko7651_1        = getattr(_cfg, "Yoko7651_1", 0)
+Yoko7651_2        = getattr(_cfg, "Yoko7651_2", 0)
+K6221             = getattr(_cfg, "K6221", 0)
+
+# RMS -> (peak) amplitude conversion for the Keithley 6221 waveform.
+# The instrument's :SOUR:WAVE:AMPL is a PEAK value; the user works in RMS.
+RMS_TO_PEAK = 1.4142
 
 save_dir = r"C:\Users\ICE\Desktop\ICE Measurements\Yoav"
 
@@ -99,6 +108,17 @@ def _build_smu_columns():
         cols += ['Gate_1_voltage(V)', 'Gate_1_Leakage(A)']
     if _is_connected(Gate_2):
         cols += ['Gate_2_voltage(V)', 'Gate_2_Leakage(A)']
+    # Yokogawas are source-only: single setpoint column each
+    if _is_connected(YokoGS200_1):
+        cols += ['YokoGS200_1_voltage(V)']
+    if _is_connected(YokoGS200_2):
+        cols += ['YokoGS200_2_voltage(V)']
+    if _is_connected(Yoko7651_1):
+        cols += ['Yoko7651_1_voltage(V)']
+    if _is_connected(Yoko7651_2):
+        cols += ['Yoko7651_2_voltage(V)']
+    if _is_connected(K6221):
+        cols += ['K6221_AC_amplitude_RMS(A)']
     return cols
 
 
@@ -154,6 +174,11 @@ def _rebuild_procedure_columns(cls):
         _build_base_columns() + list(mid) +
         _build_lockin_columns(kind) + _build_magnet_columns()
     )
+    # Optional hook: let subclasses refresh dynamic Parameters (e.g. the
+    # SMU / AUX-source dropdown choices) to connected instruments.
+    rebuild_params = getattr(cls, '_rebuild_parameters', None)
+    if callable(rebuild_params):
+        rebuild_params()
 
 
 def _rebuild_all_columns():
@@ -209,6 +234,11 @@ _INPUT_CONNECTION_MAP = {
     'use_srs830_1':   lambda c: _is_connected(getattr(c, 'SRS830_1', 0)),
     'use_srs830_2':   lambda c: _is_connected(getattr(c, 'SRS830_2', 0)),
     'use_srs830_3':   lambda c: _is_connected(getattr(c, 'SRS830_3', 0)),
+    'use_yoko_gs200_1': lambda c: _is_connected(getattr(c, 'YokoGS200_1', 0)),
+    'use_yoko_gs200_2': lambda c: _is_connected(getattr(c, 'YokoGS200_2', 0)),
+    'use_yoko7651_1':   lambda c: _is_connected(getattr(c, 'Yoko7651_1', 0)),
+    'use_yoko7651_2':   lambda c: _is_connected(getattr(c, 'Yoko7651_2', 0)),
+    'use_k6221':        lambda c: _is_connected(getattr(c, 'K6221', 0)),
 }
 
 
@@ -216,6 +246,127 @@ def filter_inputs_by_connection(inputs, cfg):
     """Return inputs list with disconnected-instrument toggles removed."""
     skip = {name for name, check in _INPUT_CONNECTION_MAP.items() if not check(cfg)}
     return [i for i in inputs if i not in skip]
+
+
+# ---------------- Dynamic SMU dropdown builder ----------------
+
+def _connected_smus():
+    """Names of connected SMUs usable as sweep sources.
+
+    Mapping (mirrors configuration.py):
+        Gate_1 / Gate_2 — Keithley 2450 single SMUs
+        smua / smub     — the two channels of the Keithley 2604B (Dual_gate);
+                          offered only when the 2604B is connected
+        YokoGS200_x / Yoko7651_x — Yokogawa voltage sources (via adapter)
+    """
+    names = []
+    if _is_connected(Gate_1):
+        names.append('Gate_1')
+    if _is_connected(Gate_2):
+        names.append('Gate_2')
+    if _is_connected(Dual_gate):
+        names += ['smua', 'smub']
+    for yoko in ('YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2'):
+        if _is_connected(globals()[yoko]):
+            names.append(yoko)
+    return names
+
+
+def _make_smu_parameter(label='User defined SMU', default='Gate_1', **kwargs):
+    """ListParameter offering only connected SMUs.
+
+    Rebuilt after instruments are (re)bound via each procedure's
+    _rebuild_parameters() classmethod (called from
+    _rebuild_procedure_columns). Extra kwargs (group_by etc.) pass
+    through to ListParameter.
+    """
+    choices = _connected_smus() or ['(none connected)']
+    if default not in choices:
+        default = choices[0]
+    return ListParameter(label, choices=choices, default=default, **kwargs)
+
+
+# ---------------- Yokogawa SMU adapter ----------------
+
+class YokoVoltageSourceAdapter:
+    """Wraps a YokogawaGS200 or Yokogawa7651 with the Keithley-SMU interface
+    used by the sweep procedures (is_output_on / configure_voltage_source /
+    output_on / ramp_voltage / voltage_ramping / measure__*).
+
+    Yokogawas are source-only in this setup: measure__voltage() returns the
+    programmed level (not a real measurement) and measure__current() is NaN.
+    Ramps are blocking software ramps (same timing semantics as the Keithleys).
+
+    ponytail: fixed 10 V source range at configure time — set a different
+    range on the instrument front panel if a sweep needs >10 V.
+    """
+
+    def __init__(self, inst):
+        self._inst = inst
+        self._is_gs200 = hasattr(inst, 'source_level')
+
+    def is_output_on(self):
+        return bool(self._inst.source_enabled)
+
+    def output_on(self):
+        if hasattr(self._inst, 'enable_source'):   # 7651
+            self._inst.enable_source()
+        else:                                      # GS200
+            self._inst.source_enabled = True
+
+    def output_off(self):
+        if hasattr(self._inst, 'disable_source'):  # 7651
+            self._inst.disable_source()
+        else:                                      # GS200
+            self._inst.source_enabled = False
+
+    def configure_voltage_source(self, **kwargs):
+        """Put the instrument in voltage mode. Keithley-specific kwargs
+        (nplc/current/auto_range/compliance/voltage/current_limit) are
+        ignored — the Yokogawa uses its own limits."""
+        if self._is_gs200:
+            self._inst.source_mode = 'voltage'
+            self._inst.source_range = 10
+            self._inst.current_limit = 1e-3
+        else:
+            self._inst.apply_voltage(10, 10e-3)
+
+    def _set_level(self, v):
+        if self._is_gs200:
+            self._inst.source_level = float(v)
+        else:
+            self._inst.source_voltage = float(v)
+
+    def measure__voltage(self):
+        """Programmed level — Yokogawas have no measure readback here."""
+        if self._is_gs200:
+            return float(self._inst.source_level)
+        return float(self._inst.source_voltage)
+
+    def measure__current(self):
+        return math.nan  # source-only: no current readback
+
+    def ramp_voltage(self, target, steps=30, pause=20e-3):
+        """Keithley semantics: go to target in `steps` discrete jumps."""
+        current = self.measure__voltage()
+        n = max(int(steps), 1)
+        for v in np.linspace(current, target, n + 1)[1:]:
+            self._set_level(v)
+            time.sleep(pause)
+
+    def voltage_ramping(self, target, step_size=1, pause=20e-3, callback=None):
+        """Keithley semantics: step_size in mV."""
+        current = self.measure__voltage()
+        step = max(abs(step_size), 1e-6) / 1000.0
+        step = step if target >= current else -step
+        n = int(abs(target - current) / abs(step)) if step else 0
+        for v in np.linspace(current, target, n + 1)[1:]:
+            self._set_level(v)
+            time.sleep(pause)
+            if callback is not None:
+                if callback(0.0, float(v)):
+                    log.info("Ramp aborted by callback at level %g", v)
+                    break
 
 
 # ---------------- ICEProcedure base class ----------------
@@ -257,6 +408,8 @@ class ICEProcedure(Procedure):
     MFLI_2_frequency     = Metadata("MFLI_2 frequency (Hz)", default=math.nan)
     MFLI_3_sine_voltage  = Metadata("MFLI_3 sine voltage", default=math.nan)
     MFLI_3_frequency     = Metadata("MFLI_3 frequency (Hz)", default=math.nan)
+    k6221_frequency      = Metadata("K6221 frequency (Hz)", default=math.nan)
+    k6221_amplitude_RMS  = Metadata("K6221 amplitude RMS (A)", default=math.nan)
 
     # --- Centralized metadata capture ---
 
@@ -286,6 +439,9 @@ class ICEProcedure(Procedure):
         if self.use_srs830_3 and _is_connected(SRS830_3):
             self.srs830_3_sine_voltage = SRS830_3.sine_voltage
             self.srs830_3_frequency = SRS830_3.frequency
+        if getattr(self, 'use_k6221', False) and _is_connected(K6221):
+            self.k6221_frequency = K6221.waveform_frequency
+            self.k6221_amplitude_RMS = K6221.waveform_amplitude / RMS_TO_PEAK
 
     # --- Centralized instrument readers ---
 
@@ -302,6 +458,19 @@ class ICEProcedure(Procedure):
             vals += [Gate_1.measure__voltage(), Gate_1.measure__current()] if self.use_keithley_1 else [math.nan] * 2
         if _is_connected(Gate_2):
             vals += [Gate_2.measure__voltage(), Gate_2.measure__current()] if self.use_keithley_2 else [math.nan] * 2
+        # Yokogawas are source-only: read back the programmed level.
+        # getattr default: older procedures without these toggles -> NaN.
+        if _is_connected(YokoGS200_1):
+            vals += [YokoGS200_1.source_level] if getattr(self, 'use_yoko_gs200_1', False) else [math.nan]
+        if _is_connected(YokoGS200_2):
+            vals += [YokoGS200_2.source_level] if getattr(self, 'use_yoko_gs200_2', False) else [math.nan]
+        if _is_connected(Yoko7651_1):
+            vals += [Yoko7651_1.source_voltage] if getattr(self, 'use_yoko7651_1', False) else [math.nan]
+        if _is_connected(Yoko7651_2):
+            vals += [Yoko7651_2.source_voltage] if getattr(self, 'use_yoko7651_2', False) else [math.nan]
+        if _is_connected(K6221):
+            # read back peak amplitude, convert to RMS for the CSV
+            vals += [K6221.waveform_amplitude / RMS_TO_PEAK] if getattr(self, 'use_k6221', False) else [math.nan]
         return vals
 
     def _read_lockin_values(self):
@@ -352,12 +521,20 @@ class ICEProcedure(Procedure):
 
     def smu_choice(self, name):
         """Return the SMU object based on name selection."""
-        if name == 'Gate_1': return Gate_1
-        if name == 'Gate_2': return Gate_2
-        if name == 'smua': return Dual_gate.smua
-        if name == 'smub': return Dual_gate.smub
-        log.error("SMU selection not supported")
-        raise ValueError(f"Unknown SMU: {name}")
+        yokos = ('YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2')
+        if name not in ('Gate_1', 'Gate_2', 'smua', 'smub') + yokos:
+            log.error("SMU selection not supported")
+            raise ValueError(f"Unknown SMU: {name}")
+        if name in ('smua', 'smub'):
+            inst = getattr(Dual_gate, name, 0) if _is_connected(Dual_gate) else 0
+        else:
+            inst = globals().get(name, 0)
+        if not _is_connected(inst):
+            raise ValueError(f"{name} selected as SMU but is not connected "
+                             f"(check the pre-launch dialog)")
+        if name in yokos:
+            return YokoVoltageSourceAdapter(inst)
+        return inst
 
     def smu_output(self, Gate, name):
         """Enable SMU output with appropriate configuration."""
@@ -400,7 +577,7 @@ def _proc_matches(proc_dict, selected_names):
 
 def _rebind_instruments_from_configuration():
     """Refresh module-level instrument globals after configuration reload."""
-    global magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2
+    global magnet, MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2, YokoGS200_1, YokoGS200_2, Yoko7651_1, Yoko7651_2, K6221
     magnet = _cfg.magnet
     MFLI_1 = _cfg.MFLI_1
     MFLI_2 = _cfg.MFLI_2
@@ -413,11 +590,17 @@ def _rebind_instruments_from_configuration():
     Dual_gate = _cfg.Dual_gate
     Gate_1 = _cfg.Gate_1
     Gate_2 = _cfg.Gate_2
+    YokoGS200_1 = getattr(_cfg, "YokoGS200_1", 0)
+    YokoGS200_2 = getattr(_cfg, "YokoGS200_2", 0)
+    Yoko7651_1 = getattr(_cfg, "Yoko7651_1", 0)
+    Yoko7651_2 = getattr(_cfg, "Yoko7651_2", 0)
+    K6221 = getattr(_cfg, "K6221", 0)
 
     # Update instrument refs in all procedure submodules that imported via from .base import *
     _inst_names = ['magnet', 'MFLI_1', 'MFLI_2', 'MFLI_3',
                    'SRS860_1', 'SRS860_2', 'SRS830_1', 'SRS830_2', 'SRS830_3',
-                   'Dual_gate', 'Gate_1', 'Gate_2']
+                   'Dual_gate', 'Gate_1', 'Gate_2',
+                   'YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2', 'K6221']
     for mod in sys.modules.values():
         if mod is None or not hasattr(mod, '__file__') or not mod.__file__:
             continue

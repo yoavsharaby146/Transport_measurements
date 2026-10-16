@@ -17,6 +17,7 @@ How to integrate (minimal changes)
 
 """
 from __future__ import annotations
+import re
 import json
 import os
 from dataclasses import dataclass, asdict
@@ -59,6 +60,21 @@ class InstrumentConfig:
     use_dual_gate: bool = False
     dual_gate_visa: str = ""
     dual_gate_visa_library: str = 'C:\\Windows\\System32\\visa64.dll'
+
+    use_k6221: bool = False
+    k6221_visa: str = ""
+
+    use_yoko_gs200_1: bool = False
+    yoko_gs200_1_visa: str = ""
+
+    use_yoko_gs200_2: bool = False
+    yoko_gs200_2_visa: str = ""
+
+    use_yoko7651_1: bool = False
+    yoko7651_1_visa: str = ""
+
+    use_yoko7651_2: bool = False
+    yoko7651_2_visa: str = ""
 
     use_srs860_1: bool = False
     srs860_1_visa: str = ""
@@ -116,24 +132,29 @@ class ConfigDialog(QtWidgets.QDialog):
         self._keithley_tab = self._build_keithley_tab()
         self._lockins_tab = self._build_lockins_tab()
         self._mfli_tab = self._build_mfli_tab()
+        self._yoko_tab = self._build_yoko_tab()
 
         self.tabs.addTab(self._magnet_tab, "Magnet")
         self.tabs.addTab(self._keithley_tab, "Keithley SMUs")
         self.tabs.addTab(self._lockins_tab, "Lock-ins")
         self.tabs.addTab(self._mfli_tab, "Zurich MFLI")
+        self.tabs.addTab(self._yoko_tab, "Yokogawa / 6221")
 
 
         # Buttons
+        self.btn_autoscan = QtWidgets.QPushButton("Auto-Search (VISA *IDN?)")
         self.btn_refresh = QtWidgets.QPushButton("Refresh lists")
         self.btn_save = QtWidgets.QPushButton("Save & Launch")
         self.btn_cancel = QtWidgets.QPushButton("Cancel")
 
+        self.btn_autoscan.clicked.connect(self._auto_search)
         self.btn_refresh.clicked.connect(self._refresh_all)
         self.btn_save.clicked.connect(self.accept)
         self.btn_cancel.clicked.connect(self.reject)
 
         btns = QtWidgets.QHBoxLayout()
         btns.addStretch(1)
+        btns.addWidget(self.btn_autoscan)
         btns.addWidget(self.btn_refresh)
         btns.addWidget(self.btn_save)
         btns.addWidget(self.btn_cancel)
@@ -188,6 +209,16 @@ class ConfigDialog(QtWidgets.QDialog):
         self.cmb_gate2.setEditText(self._cfg.gate2_visa)
         self.chk_dual.setChecked(self._cfg.use_dual_gate)
         self.cmb_dual.setEditText(self._cfg.dual_gate_visa)
+        self.chk_k6221.setChecked(self._cfg.use_k6221)
+        self.cmb_k6221.setEditText(self._cfg.k6221_visa)
+        self.chk_yoko_gs200_1.setChecked(self._cfg.use_yoko_gs200_1)
+        self.cmb_yoko_gs200_1.setEditText(self._cfg.yoko_gs200_1_visa)
+        self.chk_yoko_gs200_2.setChecked(self._cfg.use_yoko_gs200_2)
+        self.cmb_yoko_gs200_2.setEditText(self._cfg.yoko_gs200_2_visa)
+        self.chk_yoko7651_1.setChecked(self._cfg.use_yoko7651_1)
+        self.cmb_yoko7651_1.setEditText(self._cfg.yoko7651_1_visa)
+        self.chk_yoko7651_2.setChecked(self._cfg.use_yoko7651_2)
+        self.cmb_yoko7651_2.setEditText(self._cfg.yoko7651_2_visa)
 
         # Lock-ins
         self.chk_srs860_1.setChecked(self._cfg.use_srs860_1)
@@ -329,6 +360,28 @@ class ConfigDialog(QtWidgets.QDialog):
         grid.setColumnStretch(1, 1)
         return w
 
+    def _build_yoko_tab(self) -> QtWidgets.QWidget:
+        w = QtWidgets.QWidget(self)
+        grid = QtWidgets.QGridLayout(w)
+        self.chk_k6221 = QtWidgets.QCheckBox("Use K6221 (current source)")
+        self.cmb_k6221 = QtWidgets.QComboBox(); self.cmb_k6221.setEditable(True)
+        self.chk_yoko_gs200_1 = QtWidgets.QCheckBox("Use YokoGS200_1")
+        self.cmb_yoko_gs200_1 = QtWidgets.QComboBox(); self.cmb_yoko_gs200_1.setEditable(True)
+        self.chk_yoko_gs200_2 = QtWidgets.QCheckBox("Use YokoGS200_2")
+        self.cmb_yoko_gs200_2 = QtWidgets.QComboBox(); self.cmb_yoko_gs200_2.setEditable(True)
+        self.chk_yoko7651_1 = QtWidgets.QCheckBox("Use Yoko7651_1")
+        self.cmb_yoko7651_1 = QtWidgets.QComboBox(); self.cmb_yoko7651_1.setEditable(True)
+        self.chk_yoko7651_2 = QtWidgets.QCheckBox("Use Yoko7651_2")
+        self.cmb_yoko7651_2 = QtWidgets.QComboBox(); self.cmb_yoko7651_2.setEditable(True)
+
+        grid.addWidget(self.chk_k6221, 0, 0); grid.addWidget(self.cmb_k6221, 0, 1)
+        grid.addWidget(self.chk_yoko_gs200_1, 1, 0); grid.addWidget(self.cmb_yoko_gs200_1, 1, 1)
+        grid.addWidget(self.chk_yoko_gs200_2, 2, 0); grid.addWidget(self.cmb_yoko_gs200_2, 2, 1)
+        grid.addWidget(self.chk_yoko7651_1, 3, 0); grid.addWidget(self.cmb_yoko7651_1, 3, 1)
+        grid.addWidget(self.chk_yoko7651_2, 4, 0); grid.addWidget(self.cmb_yoko7651_2, 4, 1)
+        grid.setColumnStretch(1, 1)
+        return w
+
     def _build_mfli_tab(self) -> QtWidgets.QWidget:
         w = QtWidgets.QWidget(self)
         form = QtWidgets.QFormLayout(w)
@@ -418,7 +471,10 @@ class ConfigDialog(QtWidgets.QDialog):
     def _fill_visa_comboboxes(self, resources: List[str]):
         for cmb in (self.cmb_gate1, self.cmb_gate2, self.cmb_dual,
                      self.cmb_srs860_1, self.cmb_srs860_2,
-                       self.cmb_srs830_1, self.cmb_srs830_2, self.cmb_srs830_3):
+                       self.cmb_srs830_1, self.cmb_srs830_2, self.cmb_srs830_3,
+                       self.cmb_k6221,
+                       self.cmb_yoko_gs200_1, self.cmb_yoko_gs200_2,
+                       self.cmb_yoko7651_1, self.cmb_yoko7651_2):
             cmb.clear(); cmb.addItems(resources); cmb.setEditable(True)
 
 
@@ -438,6 +494,21 @@ class ConfigDialog(QtWidgets.QDialog):
 
             use_dual_gate=self.chk_dual.isChecked(),
             dual_gate_visa=self.cmb_dual.currentText().strip(),
+
+            use_k6221=self.chk_k6221.isChecked(),
+            k6221_visa=self.cmb_k6221.currentText().strip(),
+
+            use_yoko_gs200_1=self.chk_yoko_gs200_1.isChecked(),
+            yoko_gs200_1_visa=self.cmb_yoko_gs200_1.currentText().strip(),
+
+            use_yoko_gs200_2=self.chk_yoko_gs200_2.isChecked(),
+            yoko_gs200_2_visa=self.cmb_yoko_gs200_2.currentText().strip(),
+
+            use_yoko7651_1=self.chk_yoko7651_1.isChecked(),
+            yoko7651_1_visa=self.cmb_yoko7651_1.currentText().strip(),
+
+            use_yoko7651_2=self.chk_yoko7651_2.isChecked(),
+            yoko7651_2_visa=self.cmb_yoko7651_2.currentText().strip(),
 
             use_srs860_1=self.chk_srs860_1.isChecked(),
             srs860_1_visa=self.cmb_srs860_1.currentText().strip(),
@@ -623,6 +694,67 @@ class ConfigDialog(QtWidgets.QDialog):
                 if unique_devices:
                     cmb.setCurrentIndex(0)
 
+    # ---------- Auto-search ----------
+    def _auto_search(self) -> None:
+        """Scan VISA resources, query *IDN?, tick + fill matching slots.
+
+        First detected unit of each family fills the first free slot of
+        that family. Yokogawa 7651 never answers *IDN? — set it manually.
+        """
+        if pyvisa is None:
+            QtWidgets.QMessageBox.warning(self, "Auto-Search", "pyvisa not available.")
+            return
+
+        try:
+            rm = pyvisa.ResourceManager()
+            resources = list(rm.list_resources())
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Auto-Search", f"VISA scan failed:\n{e}")
+            return
+
+        # model key -> ordered (checkbox, combobox) slots
+        slots = {
+            '2450':  [(self.chk_gate1, self.cmb_gate1), (self.chk_gate2, self.cmb_gate2)],
+            '2600':  [(self.chk_dual, self.cmb_dual)],
+            '6221':  [(self.chk_k6221, self.cmb_k6221)],
+            'gs200': [(self.chk_yoko_gs200_1, self.cmb_yoko_gs200_1),
+                      (self.chk_yoko_gs200_2, self.cmb_yoko_gs200_2)],
+            'sr860': [(self.chk_srs860_1, self.cmb_srs860_1),
+                      (self.chk_srs860_2, self.cmb_srs860_2)],
+            'sr830': [(self.chk_srs830_1, self.cmb_srs830_1),
+                      (self.chk_srs830_2, self.cmb_srs830_2),
+                      (self.chk_srs830_3, self.cmb_srs830_3)],
+        }
+
+        found, unknown = [], []
+        for addr in resources:
+            try:
+                res = rm.open_resource(addr, open_timeout=2000)
+                res.timeout = 2000
+                idn = res.query('*IDN?').strip()
+                res.close()
+            except Exception:
+                continue
+            key = classify_prelaunch(idn)
+            if key is None:
+                continue
+            if key == 'unknown':
+                unknown.append(f"{addr}: {idn}")
+                continue
+            # first free slot: unchecked or empty address
+            for chk, cmb in slots.get(key, []):
+                if not chk.isChecked() or not cmb.currentText().strip():
+                    cmb.setEditText(addr)
+                    chk.setChecked(True)
+                    found.append(f"{key.upper()} @ {addr}")
+                    break
+
+        msg = "Auto-Search results:\n\n" + ("\n".join(found) if found else "nothing new detected")
+        if unknown:
+            msg += "\n\nUnrecognized *IDN? (set manually):\n" + "\n".join(unknown)
+        msg += "\n\nNote: Yokogawa 7651 never auto-detects — fill it manually."
+        QtWidgets.QMessageBox.information(self, "Auto-Search", msg)
+
     def _test_mfli_connection(self, index: int):
         """Test connection for an arbitrary MFLI (1, 2, 3, etc.)"""
         try:
@@ -655,6 +787,47 @@ class ConfigDialog(QtWidgets.QDialog):
         else:
             QtWidgets.QMessageBox.critical(self, "Test MFLI",
                                            f"Failed to connect.\n{err}\nYou can still Save and run without MFLI.")
+
+
+# ---------------- VISA auto-search (from InstrumentAllInOne_GUI) ----------------
+
+_KEITHLEY_2600_FAMILY = ('2600', '2601', '2602', '2603', '2604', '2605', '2606')
+_KEITHLEY_2450_FAMILY = ('2450', '2460', '2461', '2470')
+
+
+def classify_prelaunch(idn):
+    """Return a model key for an *IDN? string, else None (not ours).
+
+    Port of InstrumentAllInOne_GUI.classify_instrument — only the model
+    families usable by this pre-launcher are recognized.
+    """
+    if not idn:
+        return None
+    parts = [p.strip() for p in idn.split(',')]
+    vendor = parts[0].upper() if parts else ''
+    model = parts[1].upper() if len(parts) > 1 else ''
+
+    if 'KEITHLEY' in vendor:
+        m = re.search(r'MODEL\s*([0-9]+[A-Z]*)', idn, re.IGNORECASE)
+        digits = re.sub(r'\D', '', m.group(1)) if m else ''
+        if digits in _KEITHLEY_2600_FAMILY:
+            return '2600'
+        if digits in _KEITHLEY_2450_FAMILY:
+            return '2450'
+        if digits in ('6221',):
+            return '6221'
+        return 'unknown'
+    if 'STANFORD' in vendor or 'SRS' in vendor:
+        if 'SR830' in model:
+            return 'sr830'
+        if 'SR860' in model:
+            return 'sr860'
+        return 'unknown'
+    if 'YOKOGAWA' in vendor:
+        if 'GS200' in model:
+            return 'gs200'
+        return 'unknown'
+    return None
 
 
 def run_and_optionally_launch(launch_fn=None):
