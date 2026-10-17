@@ -1,5 +1,5 @@
 """
-Pre-Launcher Instrument Configuration Dialog (PyQt6)
+Pre-Launcher Instrument Configuration Dialog (PyQt5)
 -----------------------------------------------------------------
 What this provides
 - A small GUI that opens **before** your Launcher.
@@ -20,8 +20,14 @@ from __future__ import annotations
 import re
 import json
 import os
+import sys
+from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional
+
+# Ensure the repo root (which holds the Instruments package) is importable,
+# e.g. for Instruments.MFLI in _test_mfli_connection.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # --- Qt ---
 from PyQt5 import QtCore, QtWidgets
@@ -180,14 +186,6 @@ class ConfigDialog(QtWidgets.QDialog):
         except Exception:
             resources = []
         return resources
-
-    def _com_list(self) -> List[str]:
-        if list_ports is None:
-            return []
-        try:
-            return [p.device for p in list_ports.comports()]
-        except Exception:
-            return []
 
     def _apply_cfg_to_widgets(self) -> None:
         # Gate 1/2 and Dual
