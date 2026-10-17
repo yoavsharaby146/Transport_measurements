@@ -749,22 +749,22 @@ class ConfigDialog(QtWidgets.QDialog):
 
         def _query_idn(addr):
             """*IDN? with a terminator retry — GS200 USB-TMC often needs
-            read_termination='\\n' to answer."""
+            read_termination='\\n' to answer. Returns (idn_or_None, err_or_'')."""
             try:
                 res = rm.open_resource(addr, open_timeout=2000)
-            except Exception:
-                return None
+            except Exception as e:
+                return None, f"open failed: {e}"
             try:
                 res.timeout = 2500
                 try:
-                    return res.query('*IDN?').strip()
-                except Exception:
+                    return res.query('*IDN?').strip(), ''
+                except Exception as e1:
                     try:
                         res.read_termination = '\n'
                         res.write_termination = '\n'
-                        return res.query('*IDN?').strip()
-                    except Exception:
-                        return None
+                        return res.query('*IDN?').strip(), ''
+                    except Exception as e2:
+                        return None, f"no answer ({type(e1).__name__} / {type(e2).__name__})"
             finally:
                 try:
                     res.close()
@@ -773,9 +773,9 @@ class ConfigDialog(QtWidgets.QDialog):
 
         per_family, silent, unknown = {}, [], []
         for addr in resources:
-            idn = _query_idn(addr)
+            idn, err = _query_idn(addr)
             if not idn:
-                silent.append(addr)
+                silent.append(f"{addr}  {err}".rstrip())
                 continue
             key = classify_prelaunch(idn)
             if key is None:
@@ -910,7 +910,8 @@ def classify_prelaunch(idn):
             return 'sr860'
         return 'unknown'
     if 'YOKOGAWA' in vendor:
-        if 'GS200' in model:
+        # GS210 = newer firmware/revision of the GS200, same driver
+        if 'GS200' in model or 'GS210' in model:
             return 'gs200'
         return 'unknown'
     return None

@@ -106,7 +106,8 @@ def classify_instrument(idn):
         return 'unknown'
 
     if 'YOKOGAWA' in vendor:
-        if 'GS200' in model:
+        # GS210 = newer firmware/revision of the GS200, same driver
+        if 'GS200' in model or 'GS210' in model:
             return 'gs200'
         if '7651' in model:
             return 'yoko7651'
