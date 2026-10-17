@@ -17,6 +17,7 @@ How to integrate (minimal changes)
 
 """
 from __future__ import annotations
+import re
 import json
 import os
 from dataclasses import dataclass, asdict
@@ -134,16 +135,19 @@ class ConfigDialog(QtWidgets.QDialog):
 
 
         # Buttons
+        self.btn_autoscan = QtWidgets.QPushButton("Auto-Search (VISA *IDN?)")
         self.btn_refresh = QtWidgets.QPushButton("Refresh lists")
         self.btn_save = QtWidgets.QPushButton("Save & Launch")
         self.btn_cancel = QtWidgets.QPushButton("Cancel")
 
+        self.btn_autoscan.clicked.connect(self._auto_search)
         self.btn_refresh.clicked.connect(self._refresh_all)
         self.btn_save.clicked.connect(self.accept)
         self.btn_cancel.clicked.connect(self.reject)
 
         btns = QtWidgets.QHBoxLayout()
         btns.addStretch(1)
+        btns.addWidget(self.btn_autoscan)
         btns.addWidget(self.btn_refresh)
         btns.addWidget(self.btn_save)
         btns.addWidget(self.btn_cancel)
@@ -596,8 +600,13 @@ class ConfigDialog(QtWidgets.QDialog):
     #         QtWidgets.QMessageBox.critical(self, "Test MFLI",
     #                                        f"Failed to connect.\n{err}\nYou can still Save and run without MFLI.")
     #
-    def _scan_mfli_devices(self):
-        """Scan for all available MFLI devices and populate all device dropdowns."""
+    def _discover_mfli(self):
+        """Discover MFLI devices via LabOne. Returns [(device_id, host, port)].
+
+        Tries zhinst.toolkit Session against the configured/localhost data
+        server, falls back to zhinst.core ziDiscovery. No UI, no dialogs —
+        shared by _scan_mfli_devices and _auto_search.
+        """
         hosts = [
             self.edt_mfli_1_host.text().strip(),
             getattr(self, "edt_mfli_2_host", None) and self.edt_mfli_2_host.text().strip(),
@@ -648,6 +657,18 @@ class ConfigDialog(QtWidgets.QDialog):
             except Exception:
                 pass
 
+        # dedupe by device id, keep first sighting
+        seen, unique = set(), []
+        for did, host, port in found:
+            if did not in seen:
+                seen.add(did)
+                unique.append((did, host, port))
+        return unique
+
+    def _scan_mfli_devices(self):
+        """Scan for all available MFLI devices and populate all device dropdowns."""
+        found = self._discover_mfli()
+
         if not found:
             QtWidgets.QMessageBox.information(
                 self, "MFLI Finder",
@@ -665,6 +686,138 @@ class ConfigDialog(QtWidgets.QDialog):
                 cmb.addItems(unique_devices)
                 if unique_devices:
                     cmb.setCurrentIndex(0)
+
+    # ---------- Auto-search ----------
+    def _auto_search(self) -> None:
+        """Scan VISA resources, query *IDN?, reassign family slots.
+
+        Every run re-detects from scratch: for each instrument family with
+        at least one detection, its slots are cleared and refilled in
+        resource order — running twice never duplicates an instrument and
+        picks up address changes. Families with no detections are left
+        untouched (manual entries survive). Yokogawa 7651 never answers
+        *IDN? — set it manually.
+        """
+        if pyvisa is None:
+            QtWidgets.QMessageBox.warning(self, "Auto-Search", "pyvisa not available.")
+            return
+
+        try:
+            rm = pyvisa.ResourceManager()
+            resources = list(rm.list_resources())
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Auto-Search", f"VISA scan failed:\n{e}")
+            return
+
+        # model key -> ordered (checkbox, combobox) slots
+        slots = {
+            '2450':  [(self.chk_gate1, self.cmb_gate1), (self.chk_gate2, self.cmb_gate2)],
+            '2600':  [(self.chk_dual, self.cmb_dual)],
+            '6221':  [(self.chk_k6221, self.cmb_k6221)],
+            'gs200': [(self.chk_yoko_gs200_1, self.cmb_yoko_gs200_1),
+                      (self.chk_yoko_gs200_2, self.cmb_yoko_gs200_2)],
+            'sr860': [(self.chk_srs860_1, self.cmb_srs860_1),
+                      (self.chk_srs860_2, self.cmb_srs860_2),
+                      (self.chk_srs860_3, self.cmb_srs860_3),
+                      (self.chk_srs860_4, self.cmb_srs860_4)],
+            'sr830': [(self.chk_srs830_1, self.cmb_srs830_1),
+                      (self.chk_srs830_2, self.cmb_srs830_2),
+                      (self.chk_srs830_3, self.cmb_srs830_3)],
+        }
+
+        def _query_idn(addr):
+            """*IDN? with a terminator retry — GS200 USB-TMC often needs
+            read_termination='\\n' to answer. Returns (idn_or_None, err_or_'')."""
+            try:
+                res = rm.open_resource(addr, open_timeout=2000)
+            except Exception as e:
+                return None, f"open failed: {e}"
+            try:
+                res.timeout = 2500
+                try:
+                    return res.query('*IDN?').strip(), ''
+                except Exception as e1:
+                    try:
+                        res.read_termination = '\n'
+                        res.write_termination = '\n'
+                        return res.query('*IDN?').strip(), ''
+                    except Exception as e2:
+                        return None, f"no answer ({type(e1).__name__} / {type(e2).__name__})"
+            finally:
+                try:
+                    res.close()
+                except Exception:
+                    pass
+
+        per_family, silent, unknown = {}, [], []
+        for addr in resources:
+            idn, err = _query_idn(addr)
+            if not idn:
+                silent.append(f"{addr}  {err}".rstrip())
+                continue
+            key = classify_prelaunch(idn)
+            if key is None:
+                continue
+            if key == 'unknown':
+                unknown.append(f"{addr}: {idn}")
+                continue
+            per_family.setdefault(key, []).append((addr, idn))
+
+        found = []
+        for key, key_slots in slots.items():
+            detections = per_family.get(key, [])
+            if not detections:
+                continue  # nothing found: leave manual settings alone
+            # full reassignment for this family (fixes duplicates + stale addresses)
+            for chk, cmb in key_slots:
+                chk.setChecked(False)
+                cmb.clearEditText()
+            for (chk, cmb), (addr, idn) in zip(key_slots, detections):
+                cmb.setEditText(addr)
+                chk.setChecked(True)
+                found.append(f"{key.upper()} @ {addr}\n    {idn}")
+            if len(detections) > len(key_slots):
+                extra = ", ".join(a for a, _ in detections[len(key_slots):])
+                found.append(f"WARNING: more {key.upper()} units than slots "
+                             f"(ignored: {extra})")
+
+        # --- MFLI (LabOne discovery, not VISA) ---
+        try:
+            mfli_devices = self._discover_mfli()
+        except Exception:
+            mfli_devices = []
+        if mfli_devices:
+            mfli_slots = []
+            for idx in (1, 2, 3):
+                chk = getattr(self, f"chk_mfli_{idx}", None)
+                edt = getattr(self, f"edt_mfli_{idx}_host", None)
+                spn = getattr(self, f"spn_mfli_{idx}_port", None)
+                cmb = getattr(self, f"cmb_mfli_{idx}_dev", None)
+                if None not in (chk, edt, spn, cmb):
+                    mfli_slots.append((chk, edt, spn, cmb))
+            # same full-reassignment semantics as the VISA families
+            for chk, edt, spn, cmb in mfli_slots:
+                chk.setChecked(False)
+            for (chk, edt, spn, cmb), (did, host, port) in zip(mfli_slots, mfli_devices):
+                if host:
+                    edt.setText(str(host))
+                if port:
+                    spn.setValue(int(port))
+                cmb.setCurrentText(str(did))  # combos are editable
+                chk.setChecked(True)
+                found.append(f"MFLI @ {host}:{port}\n    {did}")
+            if len(mfli_devices) > len(mfli_slots):
+                extra = ", ".join(d for d, _, _ in mfli_devices[len(mfli_slots):])
+                found.append(f"WARNING: more MFLI units than slots (ignored: {extra})")
+
+        msg = "Auto-Search results:\n\n" + ("\n".join(found) if found else "nothing detected")
+        if silent:
+            msg += ("\n\nNo *IDN? answer (set manually if connected):\n"
+                    + "\n".join(silent))
+        if unknown:
+            msg += "\n\nUnrecognized *IDN? (set manually):\n" + "\n".join(unknown)
+        msg += "\n\nNote: Yokogawa 7651 never auto-detects — fill it manually."
+        QtWidgets.QMessageBox.information(self, "Auto-Search", msg)
 
     def _test_mfli_connection(self, index: int):
         """Test connection for an arbitrary MFLI (1, 2, 3, etc.)"""
@@ -698,6 +851,47 @@ class ConfigDialog(QtWidgets.QDialog):
         else:
             QtWidgets.QMessageBox.critical(self, "Test MFLI",
                                            f"Failed to connect.\n{err}\nYou can still Save and run without MFLI.")
+
+
+# ---------------- VISA auto-search classification ----------------
+
+_KEITHLEY_2600_FAMILY = ('2600', '2601', '2602', '2603', '2604', '2605', '2606')
+_KEITHLEY_2450_FAMILY = ('2450', '2460', '2461', '2470')
+
+
+def classify_prelaunch(idn):
+    """Return a model key for an *IDN? string, else None (not ours).
+
+    'unknown' means: recognized vendor but unsupported model.
+    """
+    if not idn:
+        return None
+    parts = [p.strip() for p in idn.split(',')]
+    vendor = parts[0].upper() if parts else ''
+    model = parts[1].upper() if len(parts) > 1 else ''
+
+    if 'KEITHLEY' in vendor:
+        m = re.search(r'MODEL\s*([0-9]+[A-Z]*)', idn, re.IGNORECASE)
+        digits = re.sub(r'\D', '', m.group(1)) if m else ''
+        if digits in _KEITHLEY_2600_FAMILY:
+            return '2600'
+        if digits in _KEITHLEY_2450_FAMILY:
+            return '2450'
+        if digits in ('6221',):
+            return '6221'
+        return 'unknown'
+    if 'STANFORD' in vendor or 'SRS' in vendor:
+        if 'SR830' in model:
+            return 'sr830'
+        if 'SR860' in model:
+            return 'sr860'
+        return 'unknown'
+    if 'YOKOGAWA' in vendor:
+        # GS210 = newer firmware/revision of the GS200, same driver
+        if 'GS200' in model or 'GS210' in model:
+            return 'gs200'
+        return 'unknown'
+    return None
 
 
 def run_and_optionally_launch(launch_fn=None):

@@ -60,11 +60,6 @@ Yoko7651_1        = getattr(_cfg, "Yoko7651_1", 0)
 Yoko7651_2        = getattr(_cfg, "Yoko7651_2", 0)
 K6221             = getattr(_cfg, "K6221", 0)
 
-# Set True when connected lock-ins return SNAP values as (Y, X) — verified
-# on the generic-computer instruments by measurement. Flip to False for
-# units that answer SNAP? in the requested (X, Y) order per the manual.
-LOCKIN_SWAP_XY = True
-
 # RMS -> (peak) amplitude conversion for the Keithley 6221 waveform.
 # The instrument's :SOUR:WAVE:AMPL is a PEAK value; the user works in RMS.
 RMS_TO_PEAK = 1.4142
@@ -508,12 +503,7 @@ class GenericProcedure(Procedure):
         measurement is not killed by one hiccup."""
         for i in range(attempts):
             try:
-                vals = list(reader())
-                # Instruments observed answering SNAP? as (Y, X) — put the
-                # pair back in (X, Y) so values match the column names.
-                if LOCKIN_SWAP_XY and len(vals) >= 2:
-                    vals[0], vals[1] = vals[1], vals[0]
-                return vals
+                return list(reader())
             except Exception as e:
                 log.warning("%s read failed (attempt %d/%d): %s", name, i + 1, attempts, e)
                 time.sleep(delay)
