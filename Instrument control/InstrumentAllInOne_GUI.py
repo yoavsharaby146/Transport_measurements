@@ -154,11 +154,10 @@ class Utility:
 class KeithleyPanel(ttk.Frame):
     """Base class for one connected instrument tab."""
 
-    def __init__(self, parent, inst, address, app=None):
+    def __init__(self, parent, inst, address):
         super().__init__(parent)
         self.inst = inst
         self.address = address
-        self.app = app
         self.lock = threading.Lock()
         self.stop_event = threading.Event()
         self._build_log()
@@ -192,33 +191,6 @@ class KeithleyPanel(ttk.Frame):
                 self.inst.adapter.connection.close()
         except Exception:
             pass
-
-    def on_close(self):
-        """Called when the tab is closed; panels may unregister from app registries."""
-        pass
-
-    # --- Role selector (AC/DC source roles for cross-instrument procedures) ---
-
-    def _build_role_selector(self, parent, values):
-        """Add a Role dropdown to a top bar. Does not limit the panel itself."""
-        ttk.Label(parent, text='Role:').pack(side='left', padx=5)
-        self.role_var = tk.StringVar(value='None')
-        cb = ttk.Combobox(parent, textvariable=self.role_var, width=10,
-                          values=values, state='readonly')
-        cb.pack(side='left', padx=5)
-        cb.bind('<<ComboboxSelected>>', self._on_role_change)
-
-    def _on_role_change(self, event=None):
-        role = self.role_var.get()
-        if self.app is not None:
-            self.app.set_role(self, role)
-        self.log_message(f'Role set to: {role}')
-
-    def notify_demoted(self):
-        self.role_var.set('None')
-        self.log_message('Role taken over by another instrument - role reset to None')
-        if hasattr(self, 'refresh_procedure_state'):
-            self.refresh_procedure_state()
 
 
 # ============================================================
@@ -409,11 +381,6 @@ class Panel6221(KeithleyPanel):
         self.lbl_output = ttk.Label(top, text='OUTPUT: OFF', foreground='red',
                                     font=('Arial', 12, 'bold'))
         self.lbl_output.pack(side='left', padx=15)
-
-        # Role assignment: AC source (this or another instrument) and/or DC source.
-        # Does not limit this panel's own tabs - they stay fully available.
-        self._build_role_selector(top, ['None', 'AC source', 'DC source'])
-
         ttk.Button(top, text='Hard Reset', command=self.reset_instrument).pack(side='right', padx=5)
 
         nb = ttk.Notebook(self)
@@ -421,16 +388,11 @@ class Panel6221(KeithleyPanel):
         dc = ttk.Frame(nb); nb.add(dc, text='DC Source')
         ramp = ttk.Frame(nb); nb.add(ramp, text='Ramping')
         sweep = ttk.Frame(nb); nb.add(sweep, text='DC Sweep')
-        proc = ttk.Frame(nb); nb.add(proc, text='AC+DC Procedure')
         wave = ttk.Frame(nb); nb.add(wave, text='Waveform')
         self._build_dc(dc)
         self._build_ramp(ramp)
         self._build_sweep(sweep)
-        self._build_procedure(proc)
         self._build_wave(wave)
-        if self.app is not None:
-            self.app.register_role_panel(self)
-            self.refresh_procedure_state()
 
     def _build_dc(self, parent):
         f = ttk.LabelFrame(parent, text='DC Current Source')
@@ -529,78 +491,6 @@ class Panel6221(KeithleyPanel):
         self.line_sweep, = self.ax_sweep.plot([], [], '.-', color='blue', linewidth=1)
         self.canvas_sweep = FigureCanvasTkAgg(self.fig_sweep, master=parent)
         self.canvas_sweep.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=5)
-
-    def _build_procedure(self, parent):
-        f = ttk.LabelFrame(
-            parent, text='AC+DC Procedure (needs this 6221 as DC source and '
-                         'another 6221 as AC source)')
-        f.pack(fill='x', padx=10, pady=10)
-
-        self.lbl_proc_status = ttk.Label(f, text='Checking roles...', font=('Arial', 10, 'bold'))
-        self.lbl_proc_status.grid(row=0, column=0, columnspan=6, sticky='w', padx=5, pady=2)
-
-        # --- AC section: drives the AC-role instrument (6221, SR830/SR860 or MFLI) ---
-        acf = ttk.LabelFrame(parent, text='AC Source (the AC-role instrument)')
-        acf.pack(fill='x', padx=10, pady=5)
-        for col, (label, attr, default) in enumerate([
-                ('Function:', 'p_wave_func', 'sine'),
-                ('Frequency (Hz):', 'ent_p_freq', '1000'),
-                ('Amplitude:', 'ent_p_ampl', '1e-6'),
-                ('Offset:', 'ent_p_offs', '0'),
-                ('Duty Cycle (%):', 'ent_p_duty', '50')]):
-            ttk.Label(acf, text=label).grid(row=0, column=col * 2, padx=5, pady=3, sticky='e')
-            if attr == 'p_wave_func':
-                self.p_wave_func_var = tk.StringVar(value=default)
-                self.p_wave_func_cb = ttk.Combobox(
-                    acf, textvariable=self.p_wave_func_var, width=11,
-                    values=['sine', 'ramp', 'square', 'arbitrary1',
-                            'arbitrary2', 'arbitrary3', 'arbitrary4'])
-                self.p_wave_func_cb.grid(row=0, column=col * 2 + 1, sticky='w')
-            else:
-                ent = ttk.Entry(acf, width=11)
-                ent.insert(0, default)
-                ent.grid(row=0, column=col * 2 + 1, sticky='w')
-                setattr(self, attr, ent)
-        # Unit labels filled in by refresh_procedure_state (A for 6221, V for others)
-        self.lbl_p_ampl_unit = ttk.Label(acf, text='A')
-        self.lbl_p_ampl_unit.grid(row=0, column=6, sticky='w')
-        self.lbl_p_offs_unit = ttk.Label(acf, text='A')
-        self.lbl_p_offs_unit.grid(row=0, column=8, sticky='w')
-        acbf = ttk.Frame(acf)
-        acbf.grid(row=1, column=0, columnspan=10, pady=8)
-        self.btn_p_set_ac = ttk.Button(acbf, text='Set AC Waveform',
-                                       command=self.proc_set_ac)
-        self.btn_p_set_ac.pack(side='left', padx=10)
-        self.btn_p_start_ac = ttk.Button(acbf, text='Start AC',
-                                         command=self.proc_start_ac)
-        self.btn_p_start_ac.pack(side='left', padx=10)
-        self.btn_p_stop_ac = ttk.Button(acbf, text='Stop AC',
-                                        command=self.proc_stop_ac)
-        self.btn_p_stop_ac.pack(side='left', padx=10)
-
-        # --- DC section: ramps THIS 6221 (reuses the Ramping tab engine) ---
-        dcf = ttk.LabelFrame(parent, text='DC Source Ramp (this 6221)')
-        dcf.pack(fill='x', padx=10, pady=5)
-        for col, (label, attr, default) in enumerate([
-                ('Target (A):', 'ent_p_ramp_target', '0'),
-                ('Step (A):', 'ent_p_ramp_step', '1e-6'),
-                ('Time/Step (s):', 'ent_p_ramp_time', '0.05')]):
-            ttk.Label(dcf, text=label).grid(row=0, column=col * 2, padx=5, pady=3, sticky='e')
-            ent = ttk.Entry(dcf, width=11)
-            ent.insert(0, default)
-            ent.grid(row=0, column=col * 2 + 1, sticky='w')
-            setattr(self, attr, ent)
-        dcbf = ttk.Frame(dcf)
-        dcbf.grid(row=1, column=0, columnspan=6, pady=8)
-        self.btn_p_start_ramp = ttk.Button(dcbf, text='Start DC Ramp',
-                                           command=self.proc_start_dc_ramp)
-        self.btn_p_start_ramp.pack(side='left', padx=10)
-        self.btn_p_stop_ramp = ttk.Button(dcbf, text='ABORT',
-                                          command=self.proc_stop_dc_ramp)
-        self.btn_p_stop_ramp.pack(side='left', padx=10)
-        self.lbl_p_ramp_status = ttk.Label(dcbf, text='--',
-                                           font=('Consolas', 11, 'bold'))
-        self.lbl_p_ramp_status.pack(side='left', padx=20)
 
     def _build_wave(self, parent):
         f = ttk.LabelFrame(parent, text='Waveform Generator')
@@ -800,122 +690,6 @@ class Panel6221(KeithleyPanel):
             self.after(0, lambda: self.btn_stop_sweep.config(state='disabled'))
             self.after(0, lambda: self.btn_start_sweep.config(state='normal'))
 
-    # --- AC+DC procedure logic ---
-
-    # This 6221 can also serve as the AC-role instrument for another panel
-    AC_AMPL_UNIT = 'A'
-
-    def _proc_ac_panel(self):
-        """Return the app-registered AC-role panel (any AC-capable instrument)."""
-        if self.app is None:
-            return None
-        ac = self.app.roles.get('AC source')
-        return ac if ac is not None and ac is not self else None
-
-    def refresh_procedure_state(self):
-        """Enable/disable procedure buttons according to assigned roles."""
-        ac = self._proc_ac_panel()
-        ok = (self.role_var.get() == 'DC source') and ac is not None
-        state = 'normal' if ok else 'disabled'
-        for btn in (self.btn_p_set_ac, self.btn_p_start_ac, self.btn_p_stop_ac,
-                    self.btn_p_start_ramp):
-            btn.config(state=state)
-        # Waveform function/duty only apply when the AC instrument is a 6221
-        ac_is_6221 = ac is not None and hasattr(ac.inst, 'waveform_function')
-        if ac is not None:
-            self.lbl_p_ampl_unit.config(text=ac.AC_AMPL_UNIT)
-            self.lbl_p_offs_unit.config(text=ac.AC_AMPL_UNIT)
-        fd_state = ('normal' if ok and ac_is_6221 else 'disabled')
-        self.ent_p_duty.config(state=fd_state)
-        self.p_wave_func_cb.config(state='readonly' if ok and ac_is_6221 else 'disabled')
-        if ok:
-            self.lbl_proc_status.config(
-                text=f'Ready. DC source: {self.address} | AC source: {ac.address}',
-                foreground='green')
-        elif self.role_var.get() != 'DC source':
-            self.lbl_proc_status.config(
-                text="Set this 6221's Role (top bar) to 'DC source' to use the procedure.",
-                foreground='orange')
-        else:
-            self.lbl_proc_status.config(
-                text="No instrument assigned as 'AC source'. Set the Role of a 6221, "
-                     "SR830/SR860 or MFLI tab to 'AC source'.",
-                foreground='orange')
-
-    def proc_set_ac(self):
-        ac = self._proc_ac_panel()
-        if ac is None:
-            return
-        try:
-            ac.proc_ac_set(float(self.ent_p_freq.get()),
-                           float(self.ent_p_ampl.get()),
-                           float(self.ent_p_offs.get()),
-                           func=self.p_wave_func_var.get(),
-                           duty=float(self.ent_p_duty.get()))
-            self.log_message(f'AC settings applied on {ac.address}.')
-        except Exception as e:
-            messagebox.showerror('AC Settings Error', str(e))
-
-    def proc_start_ac(self):
-        ac = self._proc_ac_panel()
-        if ac is None:
-            return
-        try:
-            ac.proc_ac_start()
-            self.log_message(f'AC output started on {ac.address}.')
-        except Exception as e:
-            self.log_message(f'AC start error: {e}')
-        if hasattr(ac, '_refresh_output'):
-            ac._refresh_output()
-
-    def proc_stop_ac(self):
-        ac = self._proc_ac_panel()
-        if ac is None:
-            return
-        try:
-            ac.proc_ac_stop()
-            self.log_message(f'AC output stopped on {ac.address}.')
-        except Exception as e:
-            self.log_message(f'AC stop error: {e}')
-        if hasattr(ac, '_refresh_output'):
-            ac._refresh_output()
-
-    # This panel acting as the AC-role instrument (called by the DC-role panel):
-
-    def proc_ac_set(self, freq, ampl, offset, func=None, duty=None):
-        with self.lock:
-            self.inst.waveform_function = func or 'sine'
-            self.inst.waveform_frequency = freq
-            self.inst.waveform_amplitude = ampl
-            self.inst.waveform_offset = offset
-            if duty is not None:
-                self.inst.waveform_dutycycle = duty
-
-    def proc_ac_start(self):
-        with self.lock:
-            self.inst.waveform_abort()   # ensure idle before arming
-            self.inst.waveform_arm()
-            self.inst.enable_source()
-            self.inst.waveform_start()
-
-    def proc_ac_stop(self):
-        with self.lock:
-            self.inst.waveform_abort()
-            self.inst.disable_source()
-
-    def proc_start_dc_ramp(self):
-        # Reuse the Ramping tab engine: mirror the values, then start the ramp.
-        self.ent_ramp_target.delete(0, tk.END)
-        self.ent_ramp_target.insert(0, self.ent_p_ramp_target.get())
-        self.ent_ramp_step.delete(0, tk.END)
-        self.ent_ramp_step.insert(0, self.ent_p_ramp_step.get())
-        self.ent_ramp_time.delete(0, tk.END)
-        self.ent_ramp_time.insert(0, self.ent_p_ramp_time.get())
-        self.start_ramp()
-
-    def proc_stop_dc_ramp(self):
-        self.stop_ramp()
-
     # --- waveform logic ---
 
     def apply_waveform(self):
@@ -960,17 +734,7 @@ class Panel6221(KeithleyPanel):
 
     def poll(self):
         self._refresh_output()
-        try:
-            self.refresh_procedure_state()
-            # Mirror the Ramping-tab status into the procedure tab
-            self.lbl_p_ramp_status.config(text=self.lbl_ramp_status['text'])
-        except Exception:
-            pass
         self.after(2000, self.poll)
-
-    def on_close(self):
-        if self.app is not None:
-            self.app.unregister_role_panel(self)
 
     def cleanup(self):
         self.stop_event.set()
@@ -1641,7 +1405,6 @@ class PanelSRS(KeithleyPanel):
         top.pack(fill='x', padx=5, pady=5)
         model = 'SR830' if self.is_sr830 else 'SR860'
         ttk.Label(top, text=model, font=('Arial', 10, 'bold')).pack(side='left', padx=5)
-        self._build_role_selector(top, ['None', 'AC source'])
         ttk.Button(top, text='Refresh Settings',
                    command=self.refresh_settings).pack(side='left', padx=20)
         ttk.Button(top, text='Auto Phase', command=self._auto_phase).pack(side='left', padx=5)
@@ -1675,8 +1438,6 @@ class PanelSRS(KeithleyPanel):
         self._build_gain_frame()
         self._build_aux_section()
         threading.Thread(target=self.startup_sequence, daemon=True).start()
-        if self.app is not None:
-            self.app.register_role_panel(self)
 
     def _build_source_frame(self):
         f = ttk.LabelFrame(self.controls, text='Source')
@@ -1843,34 +1604,6 @@ class PanelSRS(KeithleyPanel):
         if self.auto_var.get():
             self.measure_direct()
         self.after(1000, self.poll)
-
-    # --- AC-source role for the 6221 AC+DC procedure ---
-
-    AC_AMPL_UNIT = 'V'
-
-    def proc_ac_set(self, freq, ampl, offset, func=None, duty=None):
-        # func/duty not applicable to a lock-in sine output
-        with self.lock:
-            self.inst.frequency = freq
-            self.inst.sine_voltage = ampl
-            if not self.is_sr830:
-                try:
-                    self.inst.dc_offset = offset
-                except Exception:
-                    pass
-
-    def proc_ac_start(self):
-        self.log_message('Sine output is continuous on a lock-in - '
-                         'settings applied, output live.')
-
-    def proc_ac_stop(self):
-        with self.lock:
-            self.inst.sine_voltage = 0
-        self.log_message('Sine amplitude set to 0 V (lock-in has no output switch).')
-
-    def on_close(self):
-        if self.app is not None:
-            self.app.unregister_role_panel(self)
 
 
 class PanelSR830(PanelSRS):
@@ -2403,10 +2136,6 @@ class InstrumentAllInOneApp(tk.Tk):
         self.lbl_status = ttk.Label(toolbar, text='', font=('Arial', 10))
         self.lbl_status.pack(side='right', padx=10)
 
-        # 6221 role registry: role name -> Panel6221 holding it
-        self.k6221_roles = {}
-        self.k6221_panels = []
-
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill='both', expand=True, padx=10, pady=5)
 
@@ -2522,44 +2251,6 @@ class InstrumentAllInOneApp(tk.Tk):
 
     # --- tab management ---
 
-    def register_6221(self, panel):
-        """Called by Panel6221 on creation."""
-        self.k6221_panels.append(panel)
-
-    def unregister_6221(self, panel):
-        """Called by Panel6221 when its tab closes; releases any held role."""
-        self.k6221_panels = [p for p in self.k6221_panels if p is not panel]
-        for role, holder in list(self.k6221_roles.items()):
-            if holder is panel:
-                del self.k6221_roles[role]
-                self._log_main(f'6221 {panel.address} closed - role "{role}" released')
-        self._refresh_6221_roles()
-
-    def set_6221_role(self, panel, role):
-        """Assign a role ('AC source'/'DC source'/'None') to a Panel6221.
-        A role already held by another 6221 is taken over; the previous
-        holder is demoted to None."""
-        for r, holder in list(self.k6221_roles.items()):
-            if holder is panel:
-                del self.k6221_roles[r]
-        if role != 'None':
-            old = self.k6221_roles.get(role)
-            if old is not None and old is not panel:
-                del self.k6221_roles[role]
-                try:
-                    old.notify_demoted()
-                except Exception:
-                    pass
-            self.k6221_roles[role] = panel
-        self._refresh_6221_roles()
-
-    def _refresh_6221_roles(self):
-        for p in self.k6221_panels:
-            try:
-                p.refresh_procedure_state()
-            except Exception:
-                pass
-
     def create_tab(self, addr, key):
         if addr in self.open_addresses:
             self._log_main(f'{addr} already open - skipped')
@@ -2572,7 +2263,7 @@ class InstrumentAllInOneApp(tk.Tk):
                                  f'{DISPLAY_NAME[key]} at {addr} failed:\n{e}')
             return
 
-        panel = VISA_PANELS[key](self.notebook, inst, addr, app=self)
+        panel = VISA_PANELS[key](self.notebook, inst, addr)
         short = addr.split('::')[-1] if '::' in addr else addr
         self.notebook.add(panel, text=f'{key} - {short}')
         self.notebook.select(panel)
@@ -2606,7 +2297,6 @@ class InstrumentAllInOneApp(tk.Tk):
         if not messagebox.askyesno('Confirm', f'Disconnect {panel.address}?'):
             return
         panel.cleanup()
-        panel.on_close()
         self.notebook.forget(tab_id)
         self.open_addresses.pop(panel.address, None)
         self.lbl_status.config(text=f'Instruments: {len(self.open_addresses)}')
