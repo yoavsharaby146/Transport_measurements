@@ -115,6 +115,14 @@ K6221 = _maybe(
     name="K6221"
 )
 
+# Second Keithley 6221 — used by the AC+DC procedure (one unit AC, one DC)
+K6221_2 = _maybe(
+    Keithley6221,
+    enabled=overrides.get("use_k6221_2", False),
+    addr=overrides.get("k6221_2_visa", ""),
+    name="K6221_2"
+)
+
 # SRS lock-ins
 SRS860_1 = _maybe(
     SR860,

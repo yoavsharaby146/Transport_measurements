@@ -56,10 +56,16 @@ class AC_current_sweep_measurement(GenericProcedure):
     def getmeas(self, t0):
         return self._read_standard(t0)
 
+    def _pick_6221(self):
+        """First connected 6221 unit (K6221 preferred, else K6221_2)."""
+        if base._is_connected(base.K6221):
+            return base.K6221
+        if base._is_connected(base.K6221_2):
+            return base.K6221_2
+        raise ValueError("No K6221 connected (check the pre-launch dialog)")
+
     def execute(self):
-        K6221 = base.K6221
-        if not base._is_connected(K6221):
-            raise ValueError("K6221 selected but not connected (check the pre-launch dialog)")
+        K6221 = self._pick_6221()
 
         # RMS bounds: instrument accepts 2e-12..0.105 A peak amplitude
         peak_target = self.target_current * base.RMS_TO_PEAK
@@ -105,7 +111,10 @@ class AC_current_sweep_measurement(GenericProcedure):
                 break
 
     def shutdown(self):
-        K6221 = base.K6221
+        try:
+            K6221 = self._pick_6221()
+        except ValueError:
+            K6221 = 0
         if base._is_connected(K6221):
             log.info("Shutting down K6221: abort, amplitude to 0, output off")
             try:
@@ -124,7 +133,10 @@ proc_ac_current_sweep = {
         description="Sweeps the AC current amplitude of a Keithley 6221 from a start to a target value\n"
                     "while recording lock-in readings at every step.\n"
                     "Amplitudes are entered in RMS; the instrument is commanded in peak\n"
-                    "(sent value = RMS x 1.4142). CSV column K6221_AC_amplitude_RMS(A) is in RMS.",
+                    "(sent value = RMS x 1.4142). CSV column K6221_AC_amplitude_RMS(A) is in RMS.\n"
+                    "Uses the first connected 6221 unit (K6221 if ticked, else K6221_2).",
+        requires=lambda cfg: (base._is_connected(getattr(cfg, 'K6221', 0))
+                              or base._is_connected(getattr(cfg, 'K6221_2', 0))),
         inputs=[
             'Title', 'Resistor', 'Contacts', 'Source_contacts',
             'devices',

@@ -59,6 +59,7 @@ YokoGS200_2       = getattr(_cfg, "YokoGS200_2", 0)
 Yoko7651_1        = getattr(_cfg, "Yoko7651_1", 0)
 Yoko7651_2        = getattr(_cfg, "Yoko7651_2", 0)
 K6221             = getattr(_cfg, "K6221", 0)
+K6221_2           = getattr(_cfg, "K6221_2", 0)
 
 # RMS -> (peak) amplitude conversion for the Keithley 6221 waveform.
 # The instrument's :SOUR:WAVE:AMPL is a PEAK value; the user works in RMS.
@@ -279,6 +280,7 @@ _INPUT_CONNECTION_MAP = {
     'use_yoko7651_1':   lambda c: _is_connected(getattr(c, 'Yoko7651_1', 0)),
     'use_yoko7651_2':   lambda c: _is_connected(getattr(c, 'Yoko7651_2', 0)),
     'use_k6221':        lambda c: _is_connected(getattr(c, 'K6221', 0)),
+    'use_k6221_2':      lambda c: _is_connected(getattr(c, 'K6221_2', 0)),
     'use_MFLI_1':     lambda c: _is_connected(getattr(c, 'MFLI_1', 0)),
     'use_MFLI_2':     lambda c: _is_connected(getattr(c, 'MFLI_2', 0)),
     'use_MFLI_3':     lambda c: _is_connected(getattr(c, 'MFLI_3', 0)),
@@ -633,7 +635,7 @@ def _proc_matches(proc_dict, selected_names):
 
 def _rebind_instruments_from_configuration():
     """Refresh module-level instrument globals after configuration reload."""
-    global MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS860_3, SRS860_4, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2, YokoGS200_1, YokoGS200_2, Yoko7651_1, Yoko7651_2, K6221
+    global MFLI_1, MFLI_2, MFLI_3, SRS860_1, SRS860_2, SRS860_3, SRS860_4, SRS830_1, SRS830_2, SRS830_3, Dual_gate, Gate_1, Gate_2, YokoGS200_1, YokoGS200_2, Yoko7651_1, Yoko7651_2, K6221, K6221_2
     MFLI_1 = _cfg.MFLI_1
     MFLI_2 = _cfg.MFLI_2
     MFLI_3 = _cfg.MFLI_3
@@ -652,12 +654,13 @@ def _rebind_instruments_from_configuration():
     Yoko7651_1 = getattr(_cfg, "Yoko7651_1", 0)
     Yoko7651_2 = getattr(_cfg, "Yoko7651_2", 0)
     K6221 = getattr(_cfg, "K6221", 0)
+    K6221_2 = getattr(_cfg, "K6221_2", 0)
 
     # Update instrument refs in all procedure submodules that imported via from .base import *
     _inst_names = ['MFLI_1', 'MFLI_2', 'MFLI_3',
                    'SRS860_1', 'SRS860_2', 'SRS860_3', 'SRS860_4', 'SRS830_1', 'SRS830_2', 'SRS830_3',
                    'Dual_gate', 'Gate_1', 'Gate_2',
-                   'YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2', 'K6221']
+                   'YokoGS200_1', 'YokoGS200_2', 'Yoko7651_1', 'Yoko7651_2', 'K6221', 'K6221_2']
     for mod in sys.modules.values():
         if mod is None or not hasattr(mod, '__file__') or not mod.__file__:
             continue

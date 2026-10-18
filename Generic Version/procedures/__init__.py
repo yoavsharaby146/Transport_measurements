@@ -23,6 +23,7 @@ from .resistance_gate_sweep import Resistance_gate_sweep_measurement, proc_resis
 from .resistance_two_gate_sweep import Resistance_two_gate_scan_sweep_measurement, proc_resistance_two_gate_sweep
 from .resistance_two_gate_map import Resistance_two_gate_mapping_measurement, proc_resistance_two_gate_map
 from .ac_current_sweep import AC_current_sweep_measurement, proc_ac_current_sweep
+from .ac_dc_current_ramp import AC_DC_current_ramp_measurement, proc_ac_dc_ramp
 from .resistance_aux_sweep import Resistance_aux_voltage_measurement, proc_resistance_aux
 from .sequencer_rt_rv import Rt_RV_sequencer_measurement, proc_Rt_RV_sequencer
 
@@ -33,6 +34,7 @@ CATAGORIES = {
     "2D Mapping": "#EABEF9",
     "AC Current Sweep": "#BEF9EC",
     "Aux Sweep": "#F9BEE1",
+    "AC+DC": "#F9D3BE",
 }
 
 # Build the PROCEDURES dictionary
@@ -44,6 +46,7 @@ PROCEDURES.update(proc_resistance_two_gate_map)
 PROCEDURES.update(proc_ac_current_sweep)
 PROCEDURES.update(proc_resistance_aux)
 PROCEDURES.update(proc_Rt_RV_sequencer)
+PROCEDURES.update(proc_ac_dc_ramp)
 
 # Export all
 __all__ = [
@@ -62,6 +65,7 @@ __all__ = [
     'Resistance_two_gate_scan_sweep_measurement',
     'Resistance_two_gate_mapping_measurement',
     'AC_current_sweep_measurement',
+    'AC_DC_current_ramp_measurement',
     'Resistance_aux_voltage_measurement',
     'Rt_RV_sequencer_measurement',
     # Registration dicts
@@ -70,6 +74,7 @@ __all__ = [
     'proc_resistance_two_gate_sweep',
     'proc_resistance_two_gate_map',
     'proc_ac_current_sweep',
+    'proc_ac_dc_ramp',
     'proc_resistance_aux',
     'proc_Rt_RV_sequencer',
     # Aggregates
