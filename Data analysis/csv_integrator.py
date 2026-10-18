@@ -246,7 +246,8 @@ class IntegratorApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("CSV Integrator — Cumulative Trapezoid")
-        self.root.geometry("440x210")
+        self.root.geometry("460x220")
+        self.root.resizable(False, False)
 
         self.root.lift()
         self.root.attributes('-topmost', True)
@@ -262,11 +263,11 @@ class IntegratorApp:
                   command=self.run, height=2, width=22).pack(pady=10)
 
     def _ask_settings(self, df):
-        """One dialog: X column, Y column, slow axis, reset mode."""
+        """One dialog: X column, Y column(s), slow axis, reset mode, scales."""
         columns = df.columns
         win = tk.Toplevel(self.root)
         win.title("Integration Settings")
-        win.geometry("420x320")
+        win.resizable(False, False)
         win.lift()
 
         result = {}
@@ -274,17 +275,24 @@ class IntegratorApp:
         tk.Label(win, text="X column (integrate over, e.g. bias current):",
                  font=("Arial", 10)).pack(anchor="w", pady=(10, 0))
         x_var = tk.StringVar()
-        ttk.Combobox(win, textvariable=x_var, values=columns,
-                     state="readonly", width=45).pack(anchor="w")
+        x_combo = ttk.Combobox(win, textvariable=x_var, values=columns,
+                               state="readonly", width=45)
+        x_combo.current(0)
+        x_combo.pack(anchor="w")
 
-        tk.Label(win, text="Y column(s) (integrand, e.g. lock-in voltage —\n"
-                           "ctrl/shift-click for multiple):",
-                 font=("Arial", 10), justify="left").pack(anchor="w", pady=(8, 0))
-        y_list = tk.Listbox(win, selectmode="extended", height=4,
-                            exportselection=False, width=47)
-        for c in columns:
-            y_list.insert("end", c)
-        y_list.pack(anchor="w")
+        tk.Label(win, text="Y column(s) — tick all to integrate:",
+                 font=("Arial", 10)).pack(anchor="w", pady=(8, 0))
+        y_frame = tk.Frame(win, bg="#F4F4F2", bd=1, relief="solid")
+        y_frame.pack(anchor="w", fill="x", pady=2)
+        y_vars = {}
+        for i, c in enumerate(columns):
+            v = tk.BooleanVar(value=False)
+            y_vars[c] = v
+            tk.Checkbutton(y_frame, text=c, variable=v, anchor="w",
+                           bg="#F4F4F2", font=("Arial", 9),
+                           activebackground="#F4F4F2").grid(
+                row=i // 2, column=i % 2, sticky="w", padx=4)
+        y_rows = (len(columns) + 1) // 2
 
         tk.Label(win, text="Slow axis column (setpoints, e.g. gate / field):",
                  font=("Arial", 10)).pack(anchor="w", pady=(8, 0))
@@ -320,35 +328,47 @@ class IntegratorApp:
             except ValueError:
                 result['scale'] = None   # trigger error message in run()
             result['x'] = x_var.get()
-            result['ys'] = [columns[i] for i in y_list.curselection()]
+            result['ys'] = [c for c in columns if y_vars[c].get()]
             result['slow'] = None if slow_var.get() == NONE_SLOW else slow_var.get()
             result['mode'] = RESET_LABELS[mode_var.get()]
             win.destroy()
 
         tk.Button(win, text="Confirm", command=confirm,
                   width=15).pack(pady=15)
+
+        # fixed size fitted to content (Y checkboxes dominate the height)
+        win_h = 400 + max(0, min(y_rows - 2, 6)) * 24
+        win_w = max(460, 200 + 2 * max((len(c) for c in columns), default=10) * 7)
+        win.geometry(f"{win_w}x{win_h}")
         self.root.wait_window(win)
         return result or None
 
     def run(self):
-        # 1. Select file
-        file_path = filedialog.askopenfilename(
-            parent=self.root, title="Select Measurement CSV",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        # 1. Select file(s)
+        file_paths = filedialog.askopenfilename(
+            parent=self.root, title="Select Measurement CSV(s)",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            multiple=True
         )
-        if not file_path:
+        if not file_paths:
             return
 
         try:
-            df = read_data_csv(file_path)
-            print(f"Loaded: {os.path.basename(file_path)} "
-                  f"({len(df)} rows, {len(df.columns)} columns)")
-            if df.height < 2:
-                messagebox.showerror("Error", "Need at least 2 rows.")
-                return
+            dfs = {}
+            for p in file_paths:
+                df = read_data_csv(p)
+                print(f"Loaded: {os.path.basename(p)} "
+                      f"({len(df)} rows, {len(df.columns)} columns)")
+                if df.height < 2:
+                    messagebox.showerror(
+                        "Error",
+                        f"{os.path.basename(p)} has fewer than 2 rows.")
+                    return
+                dfs[p] = df
 
-            # 2. Settings
-            cfg = self._ask_settings(df)
+            # 2. Settings (from first file's columns)
+            first = next(iter(dfs.values()))
+            cfg = self._ask_settings(first)
             if not cfg:
                 return
             x_col, y_cols, slow_col, mode = (cfg['x'], cfg['ys'],
@@ -371,11 +391,11 @@ class IntegratorApp:
                                      "(use 1.0 for no conversion).")
                 return
 
-            # 3. Setpoint tolerance if needed
+            # 3. Setpoint tolerance if needed (from first file)
             tolerance = 1e-6
             if slow_col is not None and mode in (RESET_SETPOINT, RESET_BOTH,
                                                  RESET_ZERO):
-                vals = df[slow_col].to_numpy().astype(float)
+                vals = first[slow_col].to_numpy().astype(float)
                 auto_tol = auto_compute_tolerance(vals)
                 tolerance = simpledialog.askfloat(
                     "Setpoint Tolerance",
@@ -390,43 +410,87 @@ class IntegratorApp:
                     return
 
             # 4. Integrate each selected Y column
-            out_df, segments = None, None
-            for yc in y_cols:
-                out_df, segments = integrate_df(df if out_df is None else out_df,
-                                                x_col, yc, slow_col,
-                                                tolerance, mode, x_scale, y_div)
-            new_cols = [f"integ_{yc}" for yc in y_cols]
-            print(f"\n{len(segments)} integration segment(s):")
-            for i, (s, e) in enumerate(segments):
-                print(f"  segment {i}: rows {s}..{e - 1} ({e - s} rows)")
+            def integrate_all(df):
+                out = None
+                for yc in y_cols:
+                    out, segs = integrate_df(df if out is None else out,
+                                             x_col, yc, slow_col,
+                                             tolerance, mode, x_scale, y_div)
+                return out, segs
 
-            # 5. Save
-            name = os.path.splitext(os.path.basename(file_path))[0]
-            out_path = filedialog.asksaveasfilename(
-                parent=self.root,
-                defaultextension=".csv",
-                filetypes=[("CSV", "*.csv")],
-                initialfile=f"{name}_integrated.csv"
-            )
-            if not out_path:
+            if len(dfs) == 1:
+                # single file: manual save location
+                file_path = next(iter(dfs))
+                out_df, segments = integrate_all(dfs[file_path])
+                new_cols = [f"integ_{yc}" for yc in y_cols]
+                print(f"\n{len(segments)} integration segment(s):")
+                for i, (s, e) in enumerate(segments):
+                    print(f"  segment {i}: rows {s}..{e - 1} ({e - s} rows)")
+
+                # save
+                name = os.path.splitext(os.path.basename(file_path))[0]
+                out_path = filedialog.asksaveasfilename(
+                    parent=self.root,
+                    defaultextension=".csv",
+                    filetypes=[("CSV", "*.csv")],
+                    initialfile=f"{name}_integrated.csv"
+                )
+                if not out_path:
+                    return
+                out_df.write_csv(out_path)
+
+                msg = (f"Integration complete!\n\n"
+                       f"Source: {os.path.basename(file_path)}\n"
+                       f"Y columns: {', '.join(y_cols)}\n"
+                       f"Conversions: X·{x_scale:g}, Y/{y_div:g}\n"
+                       f"New columns: {', '.join(new_cols)}\n"
+                       f"Reset mode: {mode}\n"
+                       f"Segments: {len(segments)}\n"
+                       f"Saved: {out_path}")
+                print(f"\n{msg}")
+                messagebox.showinfo("Success", msg)
+                self.root.quit()
                 return
-            out_df.write_csv(out_path)
 
-            msg = (f"Integration complete!\n\n"
-                   f"Source: {os.path.basename(file_path)}\n"
+            # multiple files: same settings for all, auto-save beside source
+            lines = []
+            ok = 0
+            for p, df in dfs.items():
+                name = os.path.basename(p)
+                stem = os.path.splitext(name)[0]
+                needed = [x_col] + y_cols + ([slow_col] if slow_col else [])
+                missing = [c for c in needed if c not in df.columns]
+                if missing:
+                    lines.append(f"✗ {name} — missing columns: "
+                                 f"{', '.join(missing)}")
+                    continue
+                try:
+                    out_df, segments = integrate_all(df)
+                    out_path = os.path.join(os.path.dirname(p),
+                                            f"{stem}_integrated.csv")
+                    out_df.write_csv(out_path)
+                    ok += 1
+                    print(f"\n{name}: {len(segments)} segment(s), "
+                          f"saved {os.path.basename(out_path)}")
+                    lines.append(f"✓ {name} — {len(segments)} segment(s) → "
+                                 f"{os.path.basename(out_path)}")
+                except Exception as e:
+                    lines.append(f"✗ {name} — {e}")
+
+            msg = (f"Batch integration complete!\n\n"
+                   f"Files: {len(dfs)} ({ok} ok)\n"
                    f"Y columns: {', '.join(y_cols)}\n"
                    f"Conversions: X·{x_scale:g}, Y/{y_div:g}\n"
-                   f"New columns: {', '.join(new_cols)}\n"
-                   f"Reset mode: {mode}\n"
-                   f"Segments: {len(segments)}\n"
-                   f"Saved: {out_path}")
+                   f"Reset mode: {mode}\n\n"
+                   + "\n".join(lines))
             print(f"\n{msg}")
-            messagebox.showinfo("Success", msg)
+            messagebox.showinfo("Batch Result", msg)
             self.root.quit()
 
         except Exception as e:
             error_msg = f"An error occurred:\n{str(e)}"
             print(error_msg)
+            messagebox.showerror("Error", error_msg)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
