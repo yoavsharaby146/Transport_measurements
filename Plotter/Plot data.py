@@ -340,18 +340,28 @@ class InteractivePlotter:
         # --- MARGIN PERSISTENCE (saves toolbar adjustments across Update Plot) ---
         self._plot_initialized = False
 
+        # --- CONTROL PANE WIDTH (fit pane to natural content width once) ---
+        self._control_pane_fitted = False
+
         self.setup_ui()
+
+        # Size the left pane after the widgets are laid out
+        self.root.after(200, self._fit_control_pane)
 
     def setup_ui(self):
         main_container = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        self.main_paned = main_container
         main_container.pack(fill=tk.BOTH, expand=True)
 
         control_container = ttk.Frame(main_container)
+        self.control_container = control_container
         main_container.add(control_container, width=420)
 
         canvas_scroll = tk.Canvas(control_container, highlightthickness=0)
+        self.control_canvas = canvas_scroll
         scrollbar = ttk.Scrollbar(control_container, orient="vertical", command=canvas_scroll.yview)
         control_frame = ttk.Frame(canvas_scroll, padding="10")
+        self.control_frame = control_frame
 
         control_frame.bind("<Configure>", lambda e: canvas_scroll.configure(scrollregion=canvas_scroll.bbox("all")))
         canvas_scroll.create_window((0, 0), window=control_frame, anchor="nw")
@@ -698,6 +708,29 @@ class InteractivePlotter:
         
         # Draw initial colormap preview
         self.root.after(100, self._draw_cmap_preview)
+
+    def _fit_control_pane(self):
+        """Size the left control pane to the natural width of its widgets.
+
+        The pane starts at a fixed 420 px, which is narrower than the content
+        (rows span four columns of entries/comboboxes), clipping the right
+        side of the controls. Runs at startup (and retries until the layout
+        is realized), then leaves the pane user-resizable.
+        """
+        if self._control_pane_fitted:
+            return
+        try:
+            self.control_frame.update_idletasks()
+            need = self.control_frame.winfo_reqwidth()
+            if need > 50:
+                need += 35  # frame padding + vertical scrollbar allowance
+                self.main_paned.paneconfigure(self.control_container,
+                                              width=need, minsize=need)
+                self._control_pane_fitted = True
+            else:
+                self.root.after(300, self._fit_control_pane)
+        except Exception:
+            pass
 
     def _draw_cmap_preview(self):
         """Render the currently selected colormap as a horizontal gradient bar in the control panel."""
