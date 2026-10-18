@@ -136,6 +136,8 @@ Supersedes `KeithleyAllInOne_GUI.py` (kept for reference). One window for the wh
 - **Scan VISA Instruments** — queries `*IDN?` on every VISA resource, auto-detects and opens
   a model-appropriate tab per instrument:
   - Keithley 2000 / 2182 / 2450-family (incl. 2460/2461/2470) / 6221 / 2600-series (2604B...)
+    - 6221: DC source, abortable software ramp, DC current sweep (start/stop/step/delay,
+      live plot, optional return to start), waveform generator
   - SRS SR830 / SR860 lock-ins (source, input, gain, aux I/O, snap measurements, auto phase)
   - Yokogawa GS200 (source V/I, ramp engines, safety zero)
 - **Scan LabOne (MFLI)** — connects a Zurich Instruments MFLI through the LabOne data server

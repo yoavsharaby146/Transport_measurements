@@ -387,9 +387,11 @@ class Panel6221(KeithleyPanel):
         nb.pack(fill='x', padx=10, pady=5)
         dc = ttk.Frame(nb); nb.add(dc, text='DC Source')
         ramp = ttk.Frame(nb); nb.add(ramp, text='Ramping')
+        sweep = ttk.Frame(nb); nb.add(sweep, text='DC Sweep')
         wave = ttk.Frame(nb); nb.add(wave, text='Waveform')
         self._build_dc(dc)
         self._build_ramp(ramp)
+        self._build_sweep(sweep)
         self._build_wave(wave)
 
     def _build_dc(self, parent):
@@ -443,6 +445,52 @@ class Panel6221(KeithleyPanel):
         self.btn_stop_ramp.pack(side='left', padx=10)
         self.lbl_ramp_status = ttk.Label(bf, text='--', font=('Consolas', 11, 'bold'))
         self.lbl_ramp_status.pack(side='left', padx=20)
+
+    def _build_sweep(self, parent):
+        f = ttk.LabelFrame(parent, text='DC Current Sweep (software, abortable)')
+        f.pack(fill='x', padx=10, pady=10)
+
+        for col, (label, attr, default, width) in enumerate([
+                ('Start (A):', 'ent_sweep_start', '0', 12),
+                ('Stop (A):', 'ent_sweep_stop', '1e-6', 12),
+                ('Step (A):', 'ent_sweep_step', '1e-7', 12),
+                ('Delay/Point (s):', 'ent_sweep_delay', '0.05', 10)]):
+            ttk.Label(f, text=label).grid(row=0, column=col * 2, padx=5, pady=5, sticky='e')
+            ent = ttk.Entry(f, width=width)
+            ent.insert(0, default)
+            ent.grid(row=0, column=col * 2 + 1, sticky='w')
+            setattr(self, attr, ent)
+
+        self.sweep_range_var = tk.StringVar(value='Auto')
+        ttk.Label(f, text='Source Range:').grid(row=1, column=0, padx=5, pady=5, sticky='e')
+        ttk.Combobox(f, textvariable=self.sweep_range_var, width=12,
+                     values=['Auto', '105e-3', '10e-3', '1e-3', '100e-6', '10e-6',
+                             '1e-6']).grid(row=1, column=1, sticky='w')
+
+        self.sweep_return_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f, text='Return to start after sweep',
+                        variable=self.sweep_return_var).grid(
+            row=2, column=0, columnspan=4, sticky='w', padx=5)
+
+        bf = ttk.Frame(f)
+        bf.grid(row=2, column=4, columnspan=5, pady=5)
+        self.btn_start_sweep = ttk.Button(bf, text='Start Sweep', command=self.start_sweep)
+        self.btn_start_sweep.pack(side='left', padx=10)
+        self.btn_stop_sweep = ttk.Button(bf, text='ABORT', command=self.stop_sweep,
+                                         state='disabled')
+        self.btn_stop_sweep.pack(side='left', padx=10)
+        self.lbl_sweep_status = ttk.Label(bf, text='--', font=('Consolas', 11, 'bold'))
+        self.lbl_sweep_status.pack(side='left', padx=20)
+
+        # Live plot: sourced current vs elapsed time
+        self.fig_sweep, self.ax_sweep = plt.subplots(figsize=(6, 2.5), dpi=100)
+        self.ax_sweep.set_title('DC Sweep')
+        self.ax_sweep.set_xlabel('Time (s)')
+        self.ax_sweep.set_ylabel('Current (A)')
+        self.ax_sweep.grid(True)
+        self.line_sweep, = self.ax_sweep.plot([], [], '.-', color='blue', linewidth=1)
+        self.canvas_sweep = FigureCanvasTkAgg(self.fig_sweep, master=parent)
+        self.canvas_sweep.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=5)
 
     def _build_wave(self, parent):
         f = ttk.LabelFrame(parent, text='Waveform Generator')
@@ -571,6 +619,77 @@ class Panel6221(KeithleyPanel):
             self.after(0, lambda: self.btn_stop_ramp.config(state='disabled'))
             self.after(0, lambda: self.btn_start_ramp.config(state='normal'))
 
+    # --- DC sweep logic ---
+
+    def start_sweep(self):
+        try:
+            start = float(self.ent_sweep_start.get())
+            stop = float(self.ent_sweep_stop.get())
+            step = float(self.ent_sweep_step.get())
+            delay = float(self.ent_sweep_delay.get())
+        except ValueError:
+            messagebox.showerror('Error', 'Invalid sweep parameters')
+            return
+        if step <= 0:
+            messagebox.showerror('Error', 'Step must be positive')
+            return
+        self.log_message(f'Starting DC sweep: {start} A -> {stop} A, step {step} A, '
+                         f'range {self.sweep_range_var.get()}')
+        self.stop_event.clear()
+        self.btn_start_sweep.config(state='disabled')
+        self.btn_stop_sweep.config(state='normal')
+        self._sweep_x = []
+        self._sweep_y = []
+        self.ax_sweep.relim()
+        self.ax_sweep.autoscale_view()
+        threading.Thread(target=self._run_sweep_thread,
+                         args=(start, stop, step, delay), daemon=True).start()
+
+    def stop_sweep(self):
+        self.stop_event.set()
+        self.log_message('Sweep abort requested.')
+
+    def _update_sweep_graph(self):
+        self.line_sweep.set_data(self._sweep_x, self._sweep_y)
+        if self._sweep_y:
+            self.lbl_sweep_status.config(text=f'{self._sweep_y[-1]:.4e} A')
+        self.ax_sweep.relim()
+        self.ax_sweep.autoscale_view()
+        self.canvas_sweep.draw()
+
+    def _run_sweep_thread(self, start, stop, step, delay):
+        try:
+            with self.lock:
+                rng = self.sweep_range_var.get()
+                if rng == 'Auto':
+                    self.inst.source_auto_range = True
+                else:
+                    # Fixed range: no relay switching mid-sweep, output stays continuous
+                    self.inst.source_range = float(rng)
+                self.inst.enable_source()
+            values = np.arange(start, stop + (step / 2 if stop >= start else -step / 2),
+                               step if stop >= start else -step)
+            t0 = time.perf_counter()
+            for val in values:
+                if self.stop_event.is_set():
+                    break
+                with self.lock:
+                    self.inst.source_current = float(val)
+                self._sweep_x.append(time.perf_counter() - t0)
+                self._sweep_y.append(float(val))
+                self.after(0, self._update_sweep_graph)
+                time.sleep(delay)
+            if self.sweep_return_var.get() and not self.stop_event.is_set():
+                with self.lock:
+                    self.inst.source_current = start
+            self.log_message('Sweep aborted.' if self.stop_event.is_set()
+                             else f'Sweep complete ({len(self._sweep_y)} points).')
+        except Exception as e:
+            self.log_message(f'Sweep error: {e}')
+        finally:
+            self.after(0, lambda: self.btn_stop_sweep.config(state='disabled'))
+            self.after(0, lambda: self.btn_start_sweep.config(state='normal'))
+
     # --- waveform logic ---
 
     def apply_waveform(self):
@@ -625,6 +744,7 @@ class Panel6221(KeithleyPanel):
                 self.inst.disable_source()
         except Exception:
             pass
+        plt.close(self.fig_sweep)
         super().cleanup()
 
 
