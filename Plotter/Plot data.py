@@ -215,6 +215,7 @@ class InteractivePlotter:
         self.v_ytick_size = tk.StringVar(value="10")
         self.v_x_not = tk.StringVar(value="Scientific")
         self.v_y_not = tk.StringVar(value="Scientific")
+        self.v_z_not = tk.StringVar(value="Scientific")  # Notation for Color Map colorbar (Z axis)
         self.x_log = tk.BooleanVar()
         self.y_log = tk.BooleanVar()
         self.z_log = tk.BooleanVar()  # Log scale for Color Map Z (colormap/colorbar)
@@ -1482,6 +1483,21 @@ class InteractivePlotter:
         ttk.Label(f_not, text="Y Notation:").pack(side='left')
         ttk.Combobox(f_not, textvariable=self.v_y_not, values=["Scientific", "Plain", "Engineering"], width=15,
                       state='readonly').pack(side='left', padx=5)
+
+        f_not2 = ttk.Frame(tab_tick)
+        f_not2.pack(fill='x', pady=(2, 0))
+        ttk.Label(f_not2, text="Z Notation:").pack(side='left')
+        ttk.Combobox(f_not2, textvariable=self.v_z_not, values=["Scientific", "Plain", "Engineering"], width=15,
+                      state='readonly').pack(side='left', padx=5)
+        ttk.Label(f_not2, text="(Z = Color Map colorbar)", font=('Arial', 8, 'italic'),
+                  foreground='gray').pack(side='left', padx=5)
+
+        ttk.Label(tab_tick,
+                  text="Log-scale tick control: 'Maj Step' = log base (e.g. 2 or 10; blank = 10). "
+                       "'Min Divs' = 1 means decades only, blank/other = auto sub-ticks. "
+                       "Notation 'Plain' gives plain numbers (1, 100, 1e4 shown as 10000) instead of 10^k.",
+                  font=('Arial', 8, 'italic'), foreground='gray', wraplength=420,
+                  justify='left').pack(anchor='w', pady=(4, 0))
 
         # ============================================
         # TAB 2: Font Settings
@@ -3036,13 +3052,40 @@ class InteractivePlotter:
                                fontname=font, color=self.zlabel_color, rotation=zlabel_rot)
                 # Get the actual label text object from the colorbar
                 zlabel_text = cbar.ax.yaxis.label
-                # Only set linear locators when NOT using log scale (log scale auto-generates good ticks)
+                # Tick locators for the colorbar.
+                # Linear: MultipleLocator / AutoMinorLocator (Z Maj Step / Z Min Divs).
+                # Log: LogLocator with user-controlled base (Z Maj Step, e.g. 2 or 10)
+                # and minor subs (Z Min Divs = 1 -> decades only, else auto sub-ticks).
                 if not self.z_log.get():
                     if z_maj: cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(z_maj))
                     if z_min > 1: cbar.ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(z_min))
+                    # Z notation (Scientific / Plain / Engineering) on linear colorbars
+                    z_not = self.v_z_not.get()
+                    try:
+                        if z_not == "Scientific":
+                            cbar.ax.ticklabel_format(axis='y', style='sci', scilimits=(-2, 2), useMathText=True)
+                        elif z_not == "Plain":
+                            cbar.ax.ticklabel_format(axis='y', style='plain', useOffset=False)
+                        elif z_not == "Engineering":
+                            cbar.ax.yaxis.set_major_formatter(ticker.EngFormatter())
+                    except Exception:
+                        pass
                 else:
-                    cbar.ax.yaxis.set_major_locator(ticker.LogLocator())
-                    cbar.ax.yaxis.set_minor_locator(ticker.LogLocator(subs='auto'))
+                    try:
+                        z_base = float(z_maj) if z_maj else 10.0
+                    except (TypeError, ValueError):
+                        z_base = 10.0
+                    if z_base <= 1.0:
+                        z_base = 10.0
+                    z_subs = None if z_min == 1 else 'auto'
+                    cbar.ax.yaxis.set_major_locator(ticker.LogLocator(base=z_base))
+                    cbar.ax.yaxis.set_minor_locator(ticker.LogLocator(base=z_base, subs=z_subs))
+                    # 'Plain' notation on log colorbars: plain numbers instead of 10^k
+                    # (applies to minor ticks too — they default to 10^k style labels)
+                    if self.v_z_not.get() == "Plain":
+                        z_plain_fmt = ticker.FuncFormatter(lambda v, p: f'{v:g}')
+                        cbar.ax.yaxis.set_major_formatter(z_plain_fmt)
+                        cbar.ax.yaxis.set_minor_formatter(z_plain_fmt)
                 cbar.ax.tick_params(labelsize=yt_sz, pad=z_pad_val, labelcolor=self.z_tick_color, color=self.z_tick_color)
                 if not self.z_log.get() and z_min > 1:
                     min_z_dir = self.v_minor_tick_dir_z.get()
@@ -3069,6 +3112,34 @@ class InteractivePlotter:
                 elif mode == "Engineering":
                     (ax_obj.xaxis if char == 'x' else ax_obj.yaxis).set_major_formatter(ticker.EngFormatter())
 
+            def apply_log_locator(axis_obj, base_val, subs_divs):
+                """Log-scale tick control.
+
+                base_val comes from the axis 'Maj Step' field: interpreted as the
+                logarithm base (e.g. 2 gives ticks 1, 2, 4, 8...). Blank/None = 10.
+                subs_divs comes from 'Min Divs': 1 = decades only (no sub-ticks),
+                anything else = automatic sub-ticks (2..9).
+                """
+                try:
+                    base = float(base_val) if base_val else 10.0
+                except (TypeError, ValueError):
+                    base = 10.0
+                if base <= 1.0:
+                    base = 10.0
+                subs = None if subs_divs == 1 else 'auto'
+                axis_obj.set_major_locator(ticker.LogLocator(base=base))
+                axis_obj.set_minor_locator(ticker.LogLocator(base=base, subs=subs))
+
+            def apply_log_format(ax_obj, char, mode):
+                """On log axes the default labels are scientific (10^k).
+                'Plain' switches to plain numeric labels (e.g. 0.01, 100, 10000),
+                for both major and minor ticks (minor default to 10^k style)."""
+                if mode == "Plain":
+                    fmt = ticker.FuncFormatter(lambda v, p: f'{v:g}')
+                    axis_obj = ax_obj.xaxis if char == 'x' else ax_obj.yaxis
+                    axis_obj.set_major_formatter(fmt)
+                    axis_obj.set_minor_formatter(fmt)
+
             # Apply figure background color and alpha
             self.fig.patch.set_facecolor(self.fig_bg_color)
             try:
@@ -3084,6 +3155,15 @@ class InteractivePlotter:
             except:
                 plot_alpha = 1.0
             
+            # --- LOG SCALES: set BEFORE the tick-formatting loop ---
+            # (set_xscale/set_yscale reset locators+formatters to defaults, so the
+            #  user-controlled LogLocator applied inside the loop must come after.)
+            if self.x_log.get() and ptype != "Color Map":
+                self.ax.set_xscale('log')
+            if self.y_log.get() and ptype != "Color Map":
+                for a in axes_list:
+                    a.set_yscale('log')
+
             # Determine which axes are "top" axes (skip bottom-X formatting for them)
             is_top_x_axis = set()
             if ptype == "XXY (Dual X)" and len(axes_list) > 1:
@@ -3114,6 +3194,10 @@ class InteractivePlotter:
                         if x2_maj_val: ax_curr.xaxis.set_major_locator(ticker.MultipleLocator(x2_maj_val))
                         x2_min_div = int(val(self.v_x2_min_div, 0))
                         if x2_min_div > 1: ax_curr.xaxis.set_minor_locator(ticker.AutoMinorLocator(x2_min_div))
+                    else:
+                        # Top-axis X log scale: LogLocator (X2 Maj Step = base, X2 Min Divs = 1 -> decades only)
+                        apply_log_locator(ax_curr.xaxis, val(self.v_x2_maj), int(val(self.v_x2_min_div, 0)))
+                        apply_log_format(ax_curr, 'x', self.v_x_not.get())
                     x_tick_len = 0 if x_dir == "none" else maj_len
                     ax_curr.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
                         length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.x2tick_color,
@@ -3140,6 +3224,19 @@ class InteractivePlotter:
                         ax_curr.tick_params(axis='x', which='minor', direction=min_x_dir if min_x_dir != "none" else "out",
                             length=min_x_len,
                             bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
+                else:
+                    # X log scale: LogLocator (Maj Step = log base, Min Divs = 1 -> decades only)
+                    apply_log_locator(ax_curr.xaxis, x_maj, x_min)
+                    apply_log_format(ax_curr, 'x', self.v_x_not.get())
+                    x_tick_len = 0 if x_dir == "none" else maj_len
+                    ax_curr.tick_params(axis='x', direction=x_dir if x_dir != "none" else "out",
+                        length=x_tick_len, labelsize=xt_sz, pad=x_pad_val, labelcolor=self.xtick_color,
+                        color=self.xtick_color,
+                        bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
+                    min_x_len = 0 if min_x_dir == "none" else min_len
+                    ax_curr.tick_params(axis='x', which='minor', direction=min_x_dir if min_x_dir != "none" else "out",
+                        length=min_x_len,
+                        bottom=self.v_x_tick_bottom.get(), top=self.v_x_tick_top.get())
 
                 if (ptype == "XYXY (Dual X+Y)" and id(ax_curr) in is_top_x_axis) or \
                    (ptype == "Dual Y-Axis" and ax_curr == axes_list[1]):
@@ -3154,6 +3251,10 @@ class InteractivePlotter:
                             apply_format(ax_curr, 'y', self.v_y_not.get())
                         if y2_maj_val: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y2_maj_val))
                         if y2_min_div > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y2_min_div))
+                    else:
+                        # Right Y log scale: LogLocator (Y2 Maj Step = base, Y2 Min Divs = 1 -> decades only)
+                        apply_log_locator(ax_curr.yaxis, y2_maj_val, y2_min_div)
+                        apply_log_format(ax_curr, 'y', self.v_y_not.get())
                     y_tick_len = 0 if y_dir_y2 == "none" else maj_len
                     ax_curr.tick_params(axis='y', direction=y_dir_y2 if y_dir_y2 != "none" else "out",
                         length=y_tick_len, labelsize=yt_sz, pad=y2_pad_val, labelcolor=self.y2tick_color,
@@ -3180,6 +3281,10 @@ class InteractivePlotter:
                             apply_format(ax_curr, 'y', self.v_y_not.get())
                         if y_maj: ax_curr.yaxis.set_major_locator(ticker.MultipleLocator(y_maj))
                         if y_min > 1: ax_curr.yaxis.set_minor_locator(ticker.AutoMinorLocator(y_min))
+                    else:
+                        # Y log scale: LogLocator (Y Maj Step = base, Y Min Divs = 1 -> decades only)
+                        apply_log_locator(ax_curr.yaxis, y_maj, y_min)
+                        apply_log_format(ax_curr, 'y', self.v_y_not.get())
 
             # --- APPLY DECIMAL PLACES PER AXIS ---
             # Parse decimal settings
@@ -3212,8 +3317,8 @@ class InteractivePlotter:
                 cbar.ax.yaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{z_dec}f'))
 
             target_ax = self.ax
-            if self.x_log.get() and ptype != "Color Map":
-                target_ax.set_xscale('log')
+            # (log scales were already applied BEFORE the tick-formatting loop;
+            #  calling set_xscale again here would reset the custom log locators)
 
             # Set xlabel with rotation (use mode-specific column name for XXY/XYXY)
             if ptype == "XXY (Dual X)":
@@ -3916,6 +4021,7 @@ class InteractivePlotter:
                 "ytick_size": self.v_ytick_size.get(),
                 "x_notation": self.v_x_not.get(),
                 "y_notation": self.v_y_not.get(),
+                "z_notation": self.v_z_not.get(),
             }
             
             # === TICK APPEARANCE SETTINGS ===
@@ -6072,6 +6178,7 @@ class InteractivePlotter:
                 self.v_ytick_size.set(font_settings.get("ytick_size", "10"))
                 self.v_x_not.set(font_settings.get("x_notation", "Scientific"))
                 self.v_y_not.set(font_settings.get("y_notation", "Scientific"))
+                self.v_z_not.set(font_settings.get("z_notation", "Scientific"))
             
             # === RESTORE TICK APPEARANCE ===
             tick_appearance = session_data.get("tick_appearance", {})
