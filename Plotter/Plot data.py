@@ -223,8 +223,10 @@ class InteractivePlotter:
         # --- COLOR MAP INTERPOLATION (performance) ---
         self._cmap_interp_method = tk.StringVar(value="cubic")   # cubic | linear | nearest
         self._cmap_grid_res = tk.StringVar(value="300")
+        self.cmap_display_interp = tk.StringVar(value="Bilinear")  # color map display: Sharp | Bilinear | Bicubic | Auto
         self._cmap_cache_key = None   # cache key of the last computed zi
         self._cmap_cache_zi = None    # cached interpolated grid (avoids re-running griddata)
+        self._cmap_mesh = None        # (mesh_x, mesh_y) real coords for non-uniform grids (pcolormesh), else None
 
         # --- TICK DIRECTION & LENGTH (Origin Pro-like) ---
         self.v_tick_dir_x = tk.StringVar(value="out")       # "out", "in", "inout", "none"
@@ -605,6 +607,12 @@ class InteractivePlotter:
         ttk.Entry(interp_frame, textvariable=self._cmap_grid_res, width=6).pack(side='left', padx=2)
         ttk.Label(interp_frame, text="(linear/nearest are much faster)", font=('Arial', 8, 'italic'),
                   foreground='gray').pack(side='left', padx=4)
+        ttk.Label(interp_frame, text="Display:").pack(side='left', padx=(8, 0))
+        disp_combo = ttk.Combobox(interp_frame, textvariable=self.cmap_display_interp,
+                                  values=["Sharp", "Bilinear", "Bicubic", "Auto"],
+                                  state='readonly', width=8)
+        disp_combo.pack(side='left', padx=2)
+        disp_combo.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
         row += 1
         ttk.Separator(control_frame, orient='horizontal').grid(row=row, column=0, columnspan=4, sticky='ew', pady=10)
         row += 1
@@ -2599,6 +2607,69 @@ class InteractivePlotter:
                                 transform=ax.get_xaxis_transform(),
                                 color='k', clip_on=False, linewidth=0.8, zorder=10)
 
+    # --- COLOR MAP: SWEEP-ROW RESAMPLING (V-shaped / variable-width maps) ---
+
+    def _cmap_resample_rows(self, X, Y, Z):
+        """Resample sweep-structured data onto a common grid.
+
+        Measurement maps where each Y row is an X sweep with its OWN start,
+        end and point count (e.g. V-shaped maps whose x-range narrows with
+        |gate voltage|) do not form a rectangular grid. Interpolating them
+        as scattered points (griddata) smears the rows into diagonal streaks.
+        Instead, every row is interpolated LINEARLY along the sweep onto a
+        shared uniform grid (exact for 1D sweeps) and cells outside a
+        row's measured range become NaN (masked, drawn as background).
+
+        Also works for TRANSPOSED maps: if grouping by Y fails, the data is
+        checked column-wise (group by X, sweep in Y) and the result transposed.
+
+        Returns (zi, h_coords, v_coords) — zi[v_idx, h_idx] — or None when the
+        data is not sweep-structured (caller falls back to griddata).
+        """
+        fin = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
+        X, Y, Z = X[fin], Y[fin], Z[fin]
+        if len(X) < 4:
+            return None
+        # Normal orientation: group by Y (rows), sweep along X.
+        res = self._resample_sweep_groups(Y, X, Z)
+        if res is not None:
+            zi, sgrid, gvals = res
+            return zi, sgrid, gvals
+        # Transposed orientation: group by X (columns), sweep along Y.
+        res = self._resample_sweep_groups(X, Y, Z)
+        if res is not None:
+            zi_t, sgrid, gvals = res
+            return zi_t.T, gvals, sgrid
+        return None
+
+    def _resample_sweep_groups(self, g, s, z):
+        """Group points by `g` (row/column coordinate) and resample each
+        group's sweep in `s` onto a shared uniform grid.
+        Returns (zi, sgrid, gvals) or None if the data is not sweep-structured."""
+        gvals, g_inv, g_counts = np.unique(g, return_inverse=True, return_counts=True)
+        n_groups = len(gvals)
+        # Sweep-structured means: many groups, each with several points.
+        if n_groups < 2 or 2 * n_groups > len(g) or g_counts.min() < 2:
+            return None
+        # Group points, sorted along the sweep within each group.
+        idx = np.lexsort((s, g_inv))
+        ss, zz = s[idx], z[idx]
+        starts = np.concatenate(([0], np.cumsum(g_counts)[:-1]))
+        # Shared sweep grid: fine enough for the densest group.
+        try:
+            gres = int(float(self._cmap_grid_res.get()))
+        except (ValueError, TypeError):
+            gres = 300
+        ns = int(np.clip(max(int(g_counts.max()), gres), 2, 8000))
+        sgrid = np.linspace(float(s.min()), float(s.max()), ns)
+        zi = np.full((n_groups, ns), np.nan)
+        for r in range(n_groups):
+            a = starts[r]
+            b = a + g_counts[r]
+            # np.interp masks outside the group's own sweep range (left/right NaN)
+            zi[r] = np.interp(sgrid, ss[a:b], zz[a:b], left=np.nan, right=np.nan)
+        return zi, sgrid, gvals
+
     def update_plot(self):
         sel_ds = self.get_selected_datasets()
         if not sel_ds or self.current_dataset_key is None: return
@@ -2974,10 +3045,37 @@ class InteractivePlotter:
                     # interpolation at all.
                     xu, x_inv = np.unique(Xn, return_inverse=True)
                     yu, y_inv = np.unique(Yn, return_inverse=True)
+                    # Sweep-row path: each Y row is an X sweep with its own width /
+                    # point count (V-shaped maps). Resample per row instead of
+                    # scattering (avoids diagonal griddata streaks).
+                    row_res = (self._cmap_resample_rows(X, Y, Z)
+                               if len(xu) * len(yu) != len(Xn) else None)
                     if len(xu) * len(yu) == len(Xn):
                         zi = np.full((len(yu), len(xu)), np.nan)
                         zi[y_inv, x_inv] = Z
+                        # Sections with different x/y step widths -> non-uniform grid.
+                        # imshow stretches grid indices uniformly over the extent, which
+                        # distorts such data; remember the REAL coordinates so the plot
+                        # can be rendered with pcolormesh instead (exact positioning).
+                        fin_xy = np.isfinite(X) & np.isfinite(Y)
+                        mesh_x = np.unique(X[fin_xy])
+                        mesh_y = np.unique(Y[fin_xy])
+                        dx = np.diff(mesh_x)
+                        dy = np.diff(mesh_y)
+                        uniform = ((dx.size == 0 or np.allclose(dx, dx[0], rtol=1e-3, atol=0.0)) and
+                                   (dy.size == 0 or np.allclose(dy, dy[0], rtol=1e-3, atol=0.0)))
+                        self._cmap_mesh = None if uniform else (mesh_x, mesh_y)
+                    elif row_res is not None:
+                        zi, h_coords, v_coords = row_res
+                        # Uniform spacing on both axes -> imshow is exact.
+                        # Otherwise pcolormesh places rows/columns at real coordinates.
+                        dh = np.diff(h_coords)
+                        dv = np.diff(v_coords)
+                        h_uni = dh.size == 0 or np.allclose(dh, dh[0], rtol=1e-3, atol=0.0)
+                        v_uni = dv.size == 0 or np.allclose(dv, dv[0], rtol=1e-3, atol=0.0)
+                        self._cmap_mesh = None if (h_uni and v_uni) else (h_coords, v_coords)
                     else:
+                        self._cmap_mesh = None
                         try:
                             gres = int(float(self._cmap_grid_res.get()))
                         except (ValueError, TypeError):
@@ -3041,8 +3139,21 @@ class InteractivePlotter:
                 # matplotlib doesn't allow passing both vmin/vmax and a Normalize instance.
                 im_vmin = None if norm is not None else cmap_vmin
                 im_vmax = None if norm is not None else cmap_vmax
-                im = self.ax.imshow(zi, extent=(cmap_x_min, cmap_x_max, cmap_y_min, cmap_y_max), origin='lower', aspect='auto',
-                                    cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm)
+                if self._cmap_mesh is not None:
+                    # Non-uniform grid (sections with different step widths):
+                    # pcolormesh places every cell at its real measured coordinates.
+                    mesh_x, mesh_y = self._cmap_mesh
+                    im = self.ax.pcolormesh(mesh_x, mesh_y, zi, shading='nearest',
+                                            cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm)
+                else:
+                    # Display interpolation: Sharp = crisp pixels (can look pixelated
+                    # when zoomed), Bilinear/Bicubic = smooth upscale (recommended),
+                    # Auto = matplotlib default (nearest on upscale, antialiased on downscale).
+                    _disp_map = {"Sharp": "nearest", "Bilinear": "bilinear",
+                                 "Bicubic": "bicubic", "Auto": "auto"}
+                    im = self.ax.imshow(zi, extent=(cmap_x_min, cmap_x_max, cmap_y_min, cmap_y_max), origin='lower', aspect='auto',
+                                        cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm,
+                                        interpolation=_disp_map.get(self.cmap_display_interp.get(), "auto"))
                 # Track ylabel_text for custom positioning
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
