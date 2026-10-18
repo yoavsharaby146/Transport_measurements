@@ -190,6 +190,37 @@ python "txt_csv converter.py"
 1. Select one or more `.txt` input files
 2. Choose an output location — converted `.csv` files are written alongside
 
+### 7. `csv_integrator.py` — Cumulative Trapezoid Integrator
+
+Adds a cumulative trapezoid integral of a Y column over an X column (e.g. ∫V dI over a bias sweep) to a measurement CSV.
+
+**Features:**
+- **Start/direction agnostic** — the trapezoid uses the actual per-step dx, so sweeps that start anywhere (not necessarily 0) and run up or down integrate correctly with no special handling
+- **Map aware** — pick a slow-axis column (gate voltage, field); integration resets at every slow-axis setpoint (same clustering logic as `map_splitter.py`) so it never runs across setpoint jumps. Auto-detected tolerance with manual override
+- **Hysteresis aware** — optionally reset at every sweep-direction reversal (each monotonic run gets its own integral, starting at 0). Turnaround points are shared between runs; jitter/repeated boundary values don't cause false splits
+- **5 reset modes** — never (whole file), per setpoint, per direction reversal, per setpoint + reversal, per zero crossing of X (both sides anchored at zero: Φ(I) = ∫₀^I y dx from 0 to the positive edge and from 0 to the negative edge, independently of sweep order; map-aware, splits within each slow-axis setpoint)
+- **Multiple Y columns** — ctrl/shift-click several integrands (e.g. several lock-in channels); each gets its own `integ_<Ycolumn>` output column, sharing the same X, scales, and reset mode
+- **X scale / Y divide** — constant conversions applied before integrating: X multiplied by `x_scale` (e.g. 1/R when X is a stored voltage representing current = U/R), Y divided by `y_div` (e.g. lock-in AC excitation current I_ac — Y/I_ac = dV/dI, so the integral reconstructs voltage); defaults 1.0
+- **Preamble-safe loading** via shared `csv_utils` helper
+
+**Usage:**
+```bash
+python csv_integrator.py
+```
+
+**Self-check** (exact linear integral, setpoint reset, direction reset, jitter guard, end-to-end):
+```bash
+python csv_integrator.py --selfcheck
+```
+
+**Workflow:**
+1. Select a CSV data file
+2. Pick the X column (integrate over, e.g. bias current), Y column (integrand, e.g. voltage), slow axis (or "None"), and reset mode
+3. If a slow axis is used with setpoint reset, review the auto-detected tolerance
+4. Save — output = all original columns + new `integ_<Ycolumn>` column
+
+**Physics note:** for a bias sweep +30µA → −30µA in 0.1µA steps, each output point k holds the running trapezoid sum Σ (V_j + V_{j+1})/2 · (I_{j+1} − I_j) from the sweep start to k. Result units are V·A.
+
 ---
 
 ## Typical Workflow
