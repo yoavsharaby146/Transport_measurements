@@ -137,7 +137,11 @@ Supersedes `KeithleyAllInOne_GUI.py` (kept for reference). One window for the wh
   a model-appropriate tab per instrument:
   - Keithley 2000 / 2182 / 2450-family (incl. 2460/2461/2470) / 6221 / 2600-series (2604B...)
     - 6221: DC source, abortable software ramp, DC current sweep (start/stop/step/delay,
-      live plot, optional return to start), waveform generator
+      live plot, optional return to start, fixed or auto source range), waveform generator,
+      and a dual-instrument **AC+DC procedure**: assign one 6221 as "AC source" and another
+      as "DC source" (Role dropdown per tab), then control the AC waveform and ramp the DC
+      current from one place. Procedure buttons stay disabled until both roles are assigned;
+      closing a tab releases its role
   - SRS SR830 / SR860 lock-ins (source, input, gain, aux I/O, snap measurements, auto phase)
   - Yokogawa GS200 (source V/I, ramp engines, safety zero)
 - **Scan LabOne (MFLI)** — connects a Zurich Instruments MFLI through the LabOne data server
