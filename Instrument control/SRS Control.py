@@ -281,17 +281,19 @@ class SR860_Direct:
 
     # --- AUXILIARY OUTPUT/INPUT COMMANDS ---
     def get_aux_out(self, channel):
-        """Get auxiliary output voltage (channel 1-4)"""
-        return float(self.query(f"AUXV? {channel}"))
+        """Get auxiliary output voltage (channel 1-4).
+        SR860 AUXV/OAUX indices are 0-based; GUI channels are 1-based."""
+        return float(self.query(f"AUXV? {channel - 1}"))
 
     def set_aux_out(self, channel, value):
-        """Set auxiliary output voltage (channel 1-4, range -10.5 to 10.5V)"""
+        """Set auxiliary output voltage (channel 1-4, range -10.5 to 10.5V).
+        SR860 AUXV index is 0-based; GUI channels are 1-based."""
         value = max(-10.5, min(10.5, value))  # Clamp to valid range
-        self.write(f"AUXV {channel},{value:.4f}")
+        self.write(f"AUXV {channel - 1},{value:.4f}")
 
     def get_aux_in(self, channel):
-        """Get auxiliary input voltage (channel 1-4)"""
-        return float(self.query(f"OAUX? {channel}"))
+        """Get auxiliary input voltage (channel 1-4). SR860: 0-based index."""
+        return float(self.query(f"OAUX? {channel - 1}"))
 
     # Convenience properties for each channel
     @property

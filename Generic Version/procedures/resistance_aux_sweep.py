@@ -89,12 +89,28 @@ class Resistance_aux_voltage_measurement(GenericProcedure):
                 f"connected (check the pre-launch dialog)")
         return inst
 
-    def _read_aux(self):
-        """Read back the programmed AUX output voltage."""
+    def _read_aux(self, attempts=3, delay=0.5):
+        """Read back the programmed AUX output voltage.
+
+        Retries transient VISA timeouts (same USB hiccups base.
+        _read_lockin_with_retry handles for snap reads); re-raises the
+        last error if the instrument stays unreadable.
+        """
         inst = self._aux_instrument()
         if self.aux_source.startswith('MFLI'):
-            return float(inst.get_auxout(self.aux - 1))  # MFLI: 0-based
-        return float(getattr(inst, f'dac{self.aux}'))    # SRS: 1-based
+            reader = lambda: inst.get_auxout(self.aux - 1)  # MFLI: 0-based
+        else:
+            reader = lambda: getattr(inst, f'dac{self.aux}')  # SRS: 1-based
+        last_err = None
+        for i in range(attempts):
+            try:
+                return float(reader())
+            except Exception as e:
+                last_err = e
+                log.warning("%s AUX read failed (attempt %d/%d): %s",
+                            self.aux_source, i + 1, attempts, e)
+                time.sleep(delay)
+        raise last_err
 
     def _ramp_aux_to(self, target):
         """Ramp the AUX output to target (short ramp, called per sweep point)."""
