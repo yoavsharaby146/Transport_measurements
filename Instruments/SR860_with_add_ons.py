@@ -168,7 +168,7 @@ class SR860(Instrument):
                                    """ Reads the theta value in degrees. """
                                    )
     channel1 = Instrument.control(
-        "DDEF?1;", "DDEF1,%d,0",
+        "DDEF? 1", "DDEF 1,%d,0",
         """ A string property that represents the type of Channel 1,
         taking the values X, R, X Noise, Aux In 1, or Aux In 2.
         This property can be set.""",
@@ -177,7 +177,7 @@ class SR860(Instrument):
         map_values=True
     )
     channel2 = Instrument.control(
-        "DDEF?2;", "DDEF2,%d,0",
+        "DDEF? 2", "DDEF 2,%d,0",
         """ A string property that represents the type of Channel 2,
         taking the values Y, Theta, Y Noise, Aux In 3, or Aux In 4.
         This property can be set.""",
@@ -277,7 +277,7 @@ class SR860(Instrument):
         map_values=True
     )
     aux_out_1 = Instrument.control(
-        "AUXV?0;", "AUXV0,%f;",
+        "AUXV? 0", "AUXV 0, %f",
         """ A floating point property that controls the output of Aux output 1 in
         Volts, taking values between -10.5 V and +10.5 V.
         This property can be set.""",
@@ -288,7 +288,7 @@ class SR860(Instrument):
     dac1 = aux_out_1
 
     aux_out_2 = Instrument.control(
-        "AUXV?1;", "AUXV1,%f;",
+        "AUXV? 1", "AUXV 1, %f",
         """ A floating point property that controls the output of Aux output 2 in
         Volts, taking values between -10.5 V and +10.5 V.
         This property can be set.""",
@@ -299,7 +299,7 @@ class SR860(Instrument):
     dac2 = aux_out_2
 
     aux_out_3 = Instrument.control(
-        "AUXV?2;", "AUXV2,%f;",
+        "AUXV? 2", "AUXV 2, %f",
         """ A floating point property that controls the output of Aux output 3 in
         Volts, taking values between -10.5 V and +10.5 V.
         This property can be set.""",
@@ -310,7 +310,7 @@ class SR860(Instrument):
     dac3 = aux_out_3
 
     aux_out_4 = Instrument.control(
-        "AUXV?3;", "AUXV3,%f;",
+        "AUXV? 3", "AUXV 3, %f",
         """ A floating point property that controls the output of Aux output 4 in
         Volts, taking values between -10.5 V and +10.5 V.
         This property can be set.""",
@@ -321,28 +321,28 @@ class SR860(Instrument):
     dac4 = aux_out_4
 
     aux_in_1 = Instrument.measurement(
-        "OAUX?0;",
+        "OAUX? 0",
         """ Reads the Aux input 1 value in Volts with 1/3 mV resolution. """
     )
     # For consistency with other lock-in instrument classes
     adc1 = aux_in_1
 
     aux_in_2 = Instrument.measurement(
-        "OAUX?1;",
+        "OAUX? 1",
         """ Reads the Aux input 2 value in Volts with 1/3 mV resolution. """
     )
     # For consistency with other lock-in instrument classes
     adc2 = aux_in_2
 
     aux_in_3 = Instrument.measurement(
-        "OAUX?2;",
+        "OAUX? 2",
         """ Reads the Aux input 3 value in Volts with 1/3 mV resolution. """
     )
     # For consistency with other lock-in instrument classes
     adc3 = aux_in_3
 
     aux_in_4 = Instrument.measurement(
-        "OAUX?3;",
+        "OAUX? 3",
         """ Reads the Aux input 4 value in Volts with 1/3 mV resolution. """
     )
     # For consistency with other lock-in instrument classes
