@@ -461,7 +461,7 @@ class GenericProcedure(Procedure):
         if self.use_srs830_3 and _is_connected(SRS830_3):
             self.srs830_3_sine_voltage = SRS830_3.sine_voltage
             self.srs830_3_frequency = SRS830_3.frequency
-        if self.use_k6221 and _is_connected(K6221):
+        if getattr(self, 'use_k6221', False) and _is_connected(K6221):
             self.k6221_frequency = K6221.waveform_frequency
             self.k6221_amplitude_RMS = K6221.waveform_amplitude / RMS_TO_PEAK
 
@@ -491,7 +491,11 @@ class GenericProcedure(Procedure):
             vals += [Yoko7651_2.source_voltage] if self.use_yoko7651_2 else [math.nan]
         if _is_connected(K6221):
             # read back peak amplitude, convert to RMS for the CSV
-            vals += [K6221.waveform_amplitude / RMS_TO_PEAK] if self.use_k6221 else [math.nan]
+            # (procedures without a use_k6221 toggle — e.g. the 6221-DC
+            # differential measurement — record NaN here; the 6221 is
+            # their DC source, its level lives in DC_current(A))
+            use_k6221 = getattr(self, 'use_k6221', False)
+            vals += [K6221.waveform_amplitude / RMS_TO_PEAK] if use_k6221 else [math.nan]
         return vals
 
     # --- Lock-in read with retry (transient VISA timeouts) ---

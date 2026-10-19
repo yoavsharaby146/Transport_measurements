@@ -274,7 +274,6 @@ class Differential_Resistance_6221DC(GenericProcedure):
     use_yoko_gs200_2 = BooleanParameter('Use Yoko GS200_2', group_by='devices', default=False)
     use_yoko7651_1 = BooleanParameter('Use Yoko7651_1', group_by='devices', default=False)
     use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
-    use_k6221 = BooleanParameter('Use k6221 (record amplitude column)', group_by='devices', default=False)
 
     _MID_COLUMNS = ['DC_current(A)']
 
@@ -380,6 +379,8 @@ proc_diff_resistance_6221dc = {
                     "source (target / step size / delay, starting from the "
                     "present level) and the AC excitation from a lock-in sine "
                     "output (set amplitude/frequency on the lock-in itself).\n"
+                    "The 6221 DC level is recorded in DC_current(A). It is the DC "
+                    "source here, so no 6221 AC amplitude column is recorded.\n"
                     "Sources are NOT turned off at the end.",
         requires=lambda cfg: base._is_connected(getattr(cfg, 'K6221', 0)),
         inputs=[
@@ -392,7 +393,6 @@ proc_diff_resistance_6221dc = {
             'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
             'use_yoko_gs200_1', 'use_yoko_gs200_2',
             'use_yoko7651_1', 'use_yoko7651_2',
-            'use_k6221',
         ],
         displays=[
             'Title', 'target_current', 'step_size',
