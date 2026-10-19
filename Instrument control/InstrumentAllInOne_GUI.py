@@ -738,12 +738,7 @@ class Panel6221(KeithleyPanel):
 
     def cleanup(self):
         self.stop_event.set()
-        try:
-            with self.lock:
-                self.inst.waveform_abort()
-                self.inst.disable_source()
-        except Exception:
-            pass
+        # Disconnect leaves instrument state untouched (lab preference).
         plt.close(self.fig_sweep)
         super().cleanup()
 
@@ -772,6 +767,7 @@ class Panel2450(KeithleyPanel):
         system = ttk.Frame(nb); nb.add(system, text='System Config')
         self._build_manual(manual)
         self._build_ramp(ramp)
+        self._build_sweep(ramp)
         self._build_system(system)
         self._build_monitor()
         self._update_ui_labels()
@@ -843,6 +839,102 @@ class Panel2450(KeithleyPanel):
         self.btn_stop_ramp = ttk.Button(frame, text='ABORT', command=self.stop_ramp,
                                         state='disabled')
         self.btn_stop_ramp.grid(row=1, column=3, pady=10)
+
+    def _build_sweep(self, parent):
+        frame = ttk.LabelFrame(parent, text='DC Sweep (Start -> Stop)')
+        frame.pack(fill='x', padx=10, pady=10)
+
+        fields = [('Start:', 'ent_sweep_start', '0.0'),
+                  ('Stop:', 'ent_sweep_stop', '1.0'),
+                  ('Step:', 'ent_sweep_step', '0.01'),
+                  ('Delay/point (s):', 'ent_sweep_delay', '0.1')]
+        for col, (text, attr, default) in enumerate(fields):
+            ttk.Label(frame, text=text).grid(row=0, column=col * 2, padx=5)
+            ent = ttk.Entry(frame, width=10)
+            ent.insert(0, default)
+            ent.grid(row=0, column=col * 2 + 1, padx=5)
+            setattr(self, attr, ent)
+
+        ttk.Label(frame, text='Cycles:').grid(row=0, column=8, padx=5)
+        self.sweep_cycles_var = tk.IntVar(value=1)
+        cf = ttk.Frame(frame)
+        cf.grid(row=0, column=9, padx=5)
+        ttk.Radiobutton(cf, text='1-way', variable=self.sweep_cycles_var,
+                        value=1).pack(side='left')
+        ttk.Radiobutton(cf, text='Return', variable=self.sweep_cycles_var,
+                        value=2).pack(side='left')
+
+        self.btn_start_sweep = ttk.Button(frame, text='Start Sweep',
+                                          command=self.start_sweep)
+        self.btn_start_sweep.grid(row=1, column=1, pady=10)
+        self.btn_stop_sweep = ttk.Button(frame, text='ABORT', command=self.stop_sweep,
+                                         state='disabled')
+        self.btn_stop_sweep.grid(row=1, column=3, pady=10)
+
+    def start_sweep(self):
+        try:
+            start = float(self.ent_sweep_start.get())
+            stop = float(self.ent_sweep_stop.get())
+            step = float(self.ent_sweep_step.get())
+            delay = float(self.ent_sweep_delay.get())
+        except ValueError:
+            messagebox.showerror('Error', 'Invalid sweep parameters')
+            return
+        if step == 0 or start == stop:
+            messagebox.showerror('Error', 'Step must be nonzero and Start != Stop')
+            return
+        self.log_message(f'Starting DC sweep {start} -> {stop} '
+                         f'(step {step}, delay {delay}s)...')
+        self.stop_event.clear()
+        self.btn_stop_sweep.config(state='normal')
+        self.btn_start_sweep.config(state='disabled')
+        self.data_x = []
+        self.data_y = []
+        self.ax.relim()
+        self.ax.autoscale_view()
+        threading.Thread(target=self._run_sweep_thread,
+                         args=(start, stop, step, delay,
+                               self.sweep_cycles_var.get()), daemon=True).start()
+
+    def stop_sweep(self):
+        self.stop_event.set()
+        self.log_message('Sweep abort requested.')
+
+    def _run_sweep_thread(self, start, stop, step, delay, cycles):
+        """Step the source from start to stop, measuring at every point.
+
+        ponytail: no ramp-to-start leg — the source jumps from its current
+        level to `start` on the first write; if that jump is large, ramp
+        there first with the Linear Ramp frame above.
+        """
+        try:
+            with self.lock:
+                self.inst.enable_source()
+            mode = self.source_mode_var.get()
+            points = int(abs(stop - start) / abs(step)) + 1
+            vals = list(np.linspace(start, stop, points))
+            if cycles >= 2:
+                vals += vals[-2::-1]  # return leg, endpoints not duplicated
+            for v in vals:
+                with self.lock:
+                    if mode == 'voltage':
+                        self.inst.write(f':SOUR:VOLT {v:.4f}')
+                        meas = float(self.inst.ask(':MEAS:CURR?'))
+                        self._ramp_callback(v, meas)
+                    else:
+                        self.inst.write(f':SOUR:CURR {v:.6e}')
+                        meas = float(self.inst.ask(':MEAS:VOLT?'))
+                        self._ramp_callback(meas, v)
+                if self.stop_event.is_set():
+                    break
+                time.sleep(delay)
+            self.log_message('Sweep aborted.' if self.stop_event.is_set()
+                             else 'Sweep completed.')
+        except Exception as e:
+            self.log_message(f'Sweep error: {e}')
+        finally:
+            self.after(1, lambda: self.btn_stop_sweep.config(state='disabled'))
+            self.after(1, lambda: self.btn_start_sweep.config(state='normal'))
 
     def _build_system(self, parent):
         frame_term = ttk.LabelFrame(parent, text='Terminals')
@@ -1102,11 +1194,7 @@ class Panel2450(KeithleyPanel):
 
     def cleanup(self):
         self.stop_event.set()
-        try:
-            with self.lock:
-                self.inst.disable_source()
-        except Exception:
-            pass
+        # Disconnect leaves instrument state untouched (lab preference).
         plt.close(self.fig)
         super().cleanup()
 
@@ -1379,12 +1467,8 @@ class Panel2600(KeithleyPanel):
         self.smua_ui.stop_event.set()
         self.smub_ui.stop_event.set()
         for ui in (self.smua_ui, self.smub_ui):
-            try:
-                with self.lock:
-                    ui.chan.output_off()
-            except Exception:
-                pass
             plt.close(ui.fig)
+        # Disconnect leaves instrument state untouched (lab preference).
         try:
             self.inst.close()
         except Exception:
@@ -1938,12 +2022,7 @@ class _PanelYoko(KeithleyPanel):
 
     def cleanup(self):
         self.stop_event.set()
-        try:
-            with self.lock:
-                self._set_level(0)
-                self._output_set(False)
-        except Exception:
-            pass
+        # Disconnect leaves instrument state untouched (lab preference).
         plt.close(self.fig)
         super().cleanup()
 
@@ -2041,11 +2120,7 @@ class PanelMFLI(KeithleyPanel):
 
     def cleanup(self):
         self.stop_event.set()
-        try:
-            with self.lock:
-                self.inst.turn_voltage(False)
-        except Exception:
-            pass
+        # Disconnect leaves instrument state untouched (lab preference).
 
 
 # ============================================================

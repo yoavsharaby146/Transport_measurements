@@ -549,12 +549,7 @@ class Panel6221(KeithleyPanel):
 
     def cleanup(self):
         self.stop_event.set()
-        try:
-            with self.lock:
-                self.inst.waveform_abort()
-                self.inst.disable_source()
-        except Exception:
-            pass
+        # Disconnect leaves instrument state untouched (lab preference).
         super().cleanup()
 
 
@@ -912,11 +907,7 @@ class Panel2450(KeithleyPanel):
 
     def cleanup(self):
         self.stop_event.set()
-        try:
-            with self.lock:
-                self.inst.disable_source()
-        except Exception:
-            pass
+        # Disconnect leaves instrument state untouched (lab preference).
         plt.close(self.fig)
         super().cleanup()
 
@@ -1189,12 +1180,8 @@ class Panel2600(KeithleyPanel):
         self.smua_ui.stop_event.set()
         self.smub_ui.stop_event.set()
         for ui in (self.smua_ui, self.smub_ui):
-            try:
-                with self.lock:
-                    ui.chan.output_off()
-            except Exception:
-                pass
             plt.close(ui.fig)
+        # Disconnect leaves instrument state untouched (lab preference).
         try:
             self.inst.close()
         except Exception:
