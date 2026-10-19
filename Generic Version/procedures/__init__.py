@@ -23,7 +23,8 @@ from .resistance_gate_sweep import Resistance_gate_sweep_measurement, proc_resis
 from .resistance_two_gate_sweep import Resistance_two_gate_scan_sweep_measurement, proc_resistance_two_gate_sweep
 from .resistance_two_gate_map import Resistance_two_gate_mapping_measurement, proc_resistance_two_gate_map
 from .ac_current_sweep import AC_current_sweep_measurement, proc_ac_current_sweep
-from .ac_dc_current_ramp import AC_DC_current_ramp_measurement, proc_ac_dc_ramp
+from .differential_resistance import (Differential_Resistance_AUX, proc_diff_resistance_AUX,
+                                      Differential_Resistance_6221DC, proc_diff_resistance_6221dc)
 from .resistance_aux_sweep import Resistance_aux_voltage_measurement, proc_resistance_aux
 from .sequencer_rt_rv import Rt_RV_sequencer_measurement, proc_Rt_RV_sequencer
 
@@ -35,6 +36,7 @@ CATAGORIES = {
     "AC Current Sweep": "#BEF9EC",
     "Aux Sweep": "#F9BEE1",
     "AC+DC": "#F9D3BE",
+    "Differential Resistance": "#F9EF9E",
 }
 
 # Build the PROCEDURES dictionary
@@ -46,7 +48,8 @@ PROCEDURES.update(proc_resistance_two_gate_map)
 PROCEDURES.update(proc_ac_current_sweep)
 PROCEDURES.update(proc_resistance_aux)
 PROCEDURES.update(proc_Rt_RV_sequencer)
-PROCEDURES.update(proc_ac_dc_ramp)
+PROCEDURES.update(proc_diff_resistance_AUX)
+PROCEDURES.update(proc_diff_resistance_6221dc)
 
 # Export all
 __all__ = [
@@ -65,7 +68,8 @@ __all__ = [
     'Resistance_two_gate_scan_sweep_measurement',
     'Resistance_two_gate_mapping_measurement',
     'AC_current_sweep_measurement',
-    'AC_DC_current_ramp_measurement',
+    'Differential_Resistance_AUX',
+    'Differential_Resistance_6221DC',
     'Resistance_aux_voltage_measurement',
     'Rt_RV_sequencer_measurement',
     # Registration dicts
@@ -74,7 +78,8 @@ __all__ = [
     'proc_resistance_two_gate_sweep',
     'proc_resistance_two_gate_map',
     'proc_ac_current_sweep',
-    'proc_ac_dc_ramp',
+    'proc_diff_resistance_AUX',
+    'proc_diff_resistance_6221dc',
     'proc_resistance_aux',
     'proc_Rt_RV_sequencer',
     # Aggregates

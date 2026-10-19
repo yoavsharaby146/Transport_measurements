@@ -57,11 +57,9 @@ class AC_current_sweep_measurement(GenericProcedure):
         return self._read_standard(t0)
 
     def _pick_6221(self):
-        """First connected 6221 unit (K6221 preferred, else K6221_2)."""
+        """The connected 6221 unit."""
         if base._is_connected(base.K6221):
             return base.K6221
-        if base._is_connected(base.K6221_2):
-            return base.K6221_2
         raise ValueError("No K6221 connected (check the pre-launch dialog)")
 
     def execute(self):
@@ -134,9 +132,8 @@ proc_ac_current_sweep = {
                     "while recording lock-in readings at every step.\n"
                     "Amplitudes are entered in RMS; the instrument is commanded in peak\n"
                     "(sent value = RMS x 1.4142). CSV column K6221_AC_amplitude_RMS(A) is in RMS.\n"
-                    "Uses the first connected 6221 unit (K6221 if ticked, else K6221_2).",
-        requires=lambda cfg: (base._is_connected(getattr(cfg, 'K6221', 0))
-                              or base._is_connected(getattr(cfg, 'K6221_2', 0))),
+                    "Uses the connected K6221 unit.",
+        requires=lambda cfg: base._is_connected(getattr(cfg, 'K6221', 0)),
         inputs=[
             'Title', 'Resistor', 'Contacts', 'Source_contacts',
             'devices',
