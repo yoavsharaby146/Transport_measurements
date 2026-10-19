@@ -27,6 +27,7 @@ class AC_DC_current_ramp_measurement(GenericProcedure):
                               default='K6221_2')
 
     # --- AC source configuration ---
+    ac_running = BooleanParameter('AC already running (skip setup)', default=False)
     waveform = ListParameter('Waveform', choices=['sine', 'square', 'ramp'],
                              default='sine')
     frequency = FloatParameter('AC frequency (Hz)', default=100)
@@ -35,7 +36,6 @@ class AC_DC_current_ramp_measurement(GenericProcedure):
 
     # --- DC source ramp configuration ---
     dc_compliance = FloatParameter('DC compliance (V)', default=10)
-    start_current = FloatParameter('DC start current (A)', default=0)
     target_current = FloatParameter('DC target current (A)', default=1e-6)
     step_size = FloatParameter('DC step size (A)', default=1e-8)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=1)
@@ -95,32 +95,43 @@ class AC_DC_current_ramp_measurement(GenericProcedure):
                              f"(2e-12..0.105 A peak)")
 
         time_0 = time.time()
-        log.info(f"Configuring {self.ac_source} as AC source: {self.waveform} @ "
-                 f"{self.frequency} Hz, {self.ac_current} A RMS, compliance "
-                 f"{self.ac_compliance} V")
-        ac.waveform_function = self.waveform
-        ac.waveform_frequency = self.frequency
-        ac.waveform_amplitude = peak_amp
-        ac.waveform_offset = 0
-        ac.waveform_dutycycle = 50
-        ac.source_compliance = self.ac_compliance
-        ac.waveform_ranging = 'best'
-        ac.waveform_duration_set_infinity()
-        ac.waveform_arm()
-        ac.enable_source()
-        ac.waveform_start()
+        if self.ac_running:
+            # Waveform duration is infinite and nothing in the procedure or
+            # the GUI turns it off, so an AC source started once (previous
+            # run or the Instrument Control GUI) just keeps running — skip
+            # the setup/arm/start cycle entirely.
+            log.info(f"AC source {self.ac_source} assumed already running - "
+                     f"skipping waveform setup")
+            ac.enable_source()
+        else:
+            log.info(f"Configuring {self.ac_source} as AC source: {self.waveform} @ "
+                     f"{self.frequency} Hz, {self.ac_current} A RMS, compliance "
+                     f"{self.ac_compliance} V")
+            ac.waveform_function = self.waveform
+            ac.waveform_frequency = self.frequency
+            ac.waveform_amplitude = peak_amp
+            ac.waveform_offset = 0
+            ac.waveform_dutycycle = 50
+            ac.source_compliance = self.ac_compliance
+            ac.waveform_ranging = 'best'
+            ac.waveform_duration_set_infinity()
+            ac.waveform_arm()
+            ac.enable_source()
+            ac.waveform_start()
 
         log.info(f"Configuring {self.dc_source} as DC source: compliance "
                  f"{self.dc_compliance} V")
         dc.source_compliance = self.dc_compliance
         dc.source_auto_range = True
         dc.enable_source()
-        dc.source_current = self.start_current
 
-        current_ranges = self.generate_range(self.start_current, self.target_current,
+        # Start from wherever the DC source actually is (same as the gate
+        # voltage sweep) — no forced jump to a user-entered start value.
+        start_current = float(dc.source_current)
+        current_ranges = self.generate_range(start_current, self.target_current,
                                              self.step_size * 1000)  # step in milli-units
 
-        log.info(f"Ramping DC current on {self.dc_source} from {self.start_current} A "
+        log.info(f"Ramping DC current on {self.dc_source} from {start_current:.4e} A "
                  f"to {self.target_current} A in {len(current_ranges)} steps, "
                  f"AC running on {self.ac_source}")
 
@@ -138,27 +149,10 @@ class AC_DC_current_ramp_measurement(GenericProcedure):
                 break
 
     def shutdown(self):
-        # Ramp both roles safely down regardless of which unit held them
-        try:
-            ac, dc = self._pick_6221s()
-        except Exception:
-            ac = dc = None
-        if base._is_connected(ac):
-            log.info("Shutting down AC unit: abort, amplitude 0, output off")
-            try:
-                ac.waveform_abort()
-                ac.waveform_amplitude = 0
-                ac.disable_source()
-            except Exception as e:
-                log.warning(f"AC 6221 shutdown issue: {e}")
-        if base._is_connected(dc):
-            log.info("Shutting down DC unit: current 0, output off")
-            try:
-                dc.source_current = 0
-                dc.disable_source()
-            except Exception as e:
-                log.warning(f"DC 6221 shutdown issue: {e}")
-        log.info("AC+DC current ramp finished")
+        # Sources intentionally left running after the measurement (lab
+        # preference): AC waveform continues, DC current stays at the last
+        # sweep value.
+        log.info("AC+DC current ramp finished (sources left on)")
 
 
 proc_ac_dc_ramp = {
@@ -166,18 +160,22 @@ proc_ac_dc_ramp = {
         cls=AC_DC_current_ramp_measurement,
         category="AC+DC",
         description="Uses TWO Keithley 6221 units: one runs a continuous AC waveform\n"
-                    "(selected as 'AC source unit'), the other ramps its DC current from\n"
-                    "start to target (selected as 'DC source unit') while lock-in readings\n"
-                    "are recorded at every step. AC amplitude entered in RMS (sent as peak\n"
-                    "= RMS x 1.4142). CSV columns AC_amplitude_RMS(A) and DC_current(A).\n"
+                    "(selected as 'AC source unit'), the other sweeps its DC current from\n"
+                    "the present level to a target (selected as 'DC source unit') while\n"
+                    "lock-in readings are recorded at every step — same sweep style as the\n"
+                    "gate voltage sweep (target, step size, delay per point). AC amplitude\n"
+                    "entered in RMS (sent as peak = RMS x 1.4142). CSV columns\n"
+                    "AC_amplitude_RMS(A) and DC_current(A). Sources are NOT turned off at\n"
+                    "the end of the measurement.\n"
                     "This procedure only appears when both 6221 units are connected.",
         requires=lambda cfg: (base._is_connected(getattr(cfg, 'K6221', 0))
                               and base._is_connected(getattr(cfg, 'K6221_2', 0))),
         inputs=[
             'Title', 'Resistor', 'Contacts', 'Source_contacts',
             'ac_source', 'dc_source',
+            'ac_running',
             'waveform', 'frequency', 'ac_current', 'ac_compliance',
-            'dc_compliance', 'start_current', 'target_current', 'step_size',
+            'dc_compliance', 'target_current', 'step_size',
             'acq_delay',
             'devices',
             'use_MFLI_1', 'use_MFLI_2', 'use_MFLI_3',
@@ -192,7 +190,7 @@ proc_ac_dc_ramp = {
             'Title',
             'ac_source', 'dc_source',
             'waveform', 'frequency', 'ac_current',
-            'start_current', 'target_current', 'step_size',
+            'target_current', 'step_size',
         ],
         x=['time(s)'],
         y=['time(s)', 'time(s)']
