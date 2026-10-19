@@ -609,10 +609,12 @@ class Panel6221(KeithleyPanel):
                     self.inst.source_current = val
                 self.after(0, lambda v=val: self.lbl_ramp_status.config(text=f'{v:.4e} A'))
                 time.sleep(time_step)
-            with self.lock:
-                self.inst.source_current = target
-            self.log_message('Ramp aborted.' if self.stop_event.is_set()
-                             else 'Ramp completed.')
+            if not self.stop_event.is_set():
+                with self.lock:
+                    self.inst.source_current = target
+                self.log_message('Ramp completed.')
+            else:
+                self.log_message('Ramp aborted - holding current level.')
         except Exception as e:
             self.log_message(f'Ramp error: {e}')
         finally:
