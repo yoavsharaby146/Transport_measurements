@@ -210,6 +210,15 @@ class InteractivePlotter:
         self.v_font_fam = tk.StringVar(value="Arial")
         self.v_t_size = tk.StringVar(value="14")
         self.v_l_size = tk.StringVar(value="12")
+        # --- PER-AXIS LABEL FONT SIZES (blank = use global Axis Label Size) ---
+        self.v_xlabel_size = tk.StringVar()
+        self.v_ylabel_size = tk.StringVar()
+        self.v_y2label_size = tk.StringVar()
+        self.v_x2label_size = tk.StringVar()
+        self.v_zlabel_size = tk.StringVar()
+        # --- PER-AXIS TICK FONT SIZES (blank = use global Y Tick Size) ---
+        self.v_y2tick_size = tk.StringVar()
+        self.v_ztick_size = tk.StringVar()
         self.v_leg_size = tk.StringVar(value="10")
         self.v_xtick_size = tk.StringVar(value="10")
         self.v_ytick_size = tk.StringVar(value="10")
@@ -264,6 +273,16 @@ class InteractivePlotter:
         self.v_sec_x_maj = tk.StringVar(value="")       # Major tick step for top X-axis
         self.v_sec_x_min_div = tk.StringVar(value="")   # Minor tick divisions for top X-axis
         self.sec_x_label_color = 'black'                 # Label color for secondary X-axis
+
+        # --- SECONDARY Y-AXIS (Right Axis) ---
+        self.enable_secondary_y = tk.BooleanVar(value=False)
+        self.v_sec_y_forward = tk.StringVar(value="y")  # Forward transform formula (left -> right)
+        self.v_sec_y_inverse = tk.StringVar(value="y")  # Inverse transform formula (right -> left)
+        self.v_sec_y_label = tk.StringVar(value="")     # Label for secondary right Y-axis
+        self.v_sec_y_tick_size = tk.StringVar(value="10")  # Tick font size for right Y-axis
+        self.v_sec_y_maj = tk.StringVar(value="")       # Major tick step for right Y-axis
+        self.v_sec_y_min_div = tk.StringVar(value="")   # Minor tick divisions for right Y-axis
+        self.sec_y_label_color = 'black'                 # Label color for secondary Y-axis
 
         # --- CACHE SETTINGS ---
         self.cache_folder = None  # User-selected folder for cache files
@@ -1317,7 +1336,7 @@ class InteractivePlotter:
         add_pos_entry(tab_positions, "Y Label:", self.ylabel_x, self.ylabel_y)
         
         ttk.Separator(tab_positions, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(tab_positions, text="Y2 Label Position (Dual Y-Axis)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_positions, text="Y2 Label Position (Dual Y-Axis / Secondary Y)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_pos_entry(tab_positions, "Y2 Label:", self.y2label_x, self.y2label_y)
         
         ttk.Separator(tab_positions, orient='horizontal').pack(fill='x', pady=10)
@@ -1325,7 +1344,7 @@ class InteractivePlotter:
         add_pos_entry(tab_positions, "Z Label:", self.zlabel_x, self.zlabel_y)
         
         ttk.Separator(tab_positions, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(tab_positions, text="X2 Label Position (XXY/XYXY)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_positions, text="X2 Label Position (XXY/XYXY / Secondary X)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_pos_entry(tab_positions, "X2 Label:", self.x2label_x, self.x2label_y)
         
         # ============================================
@@ -1353,7 +1372,7 @@ class InteractivePlotter:
                   font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
         
         ttk.Separator(tab_rotation, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(tab_rotation, text="Y2 Label Rotation (Dual Y-Axis)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_rotation, text="Y2 Label Rotation (Dual Y-Axis / Secondary Y)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_rot_entry(tab_rotation, "Y2 Label Rotation:", self.y2label_rotation)
         ttk.Label(tab_rotation, text="(Default: 90° = vertical, reading bottom-to-top)", 
                   font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
@@ -1365,7 +1384,7 @@ class InteractivePlotter:
                   font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
         
         ttk.Separator(tab_rotation, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Label(tab_rotation, text="X2 Label Rotation (XXY/XYXY)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_rotation, text="X2 Label Rotation (XXY/XYXY / Secondary X)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
         add_rot_entry(tab_rotation, "X2 Label Rotation:", self.x2label_rotation)
         ttk.Label(tab_rotation, text="(Default: 0° = horizontal, for top X2 axis label)",
                   font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
@@ -1449,9 +1468,57 @@ class InteractivePlotter:
         ttk.Label(f_min, text="Minor Divisions:", width=15).pack(side='left')
         ttk.Entry(f_min, textvariable=self.v_sec_x_min_div, width=10).pack(side='left', padx=2)
         ttk.Label(f_min, text="(blank = auto)", font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=5)
-        
+
         # ============================================
-        # TAB 7: Transparency
+        # TAB 7: Secondary Y-Axis (Right Axis)
+        # ============================================
+        tab_sec_y = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_sec_y, text="Secondary Y")
+
+        ttk.Label(tab_sec_y, text="Secondary Right Y-Axis", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Checkbutton(tab_sec_y, text="Enable Secondary Right Y-Axis",
+                        variable=self.enable_secondary_y).pack(pady=5, anchor='w')
+
+        ttk.Separator(tab_sec_y, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_sec_y, text="Transformation Formulas", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        ttk.Label(tab_sec_y, text="Use 'y' as the variable. Examples: y / 1e10, y * 4.1357e-15, 1 / y",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 5), anchor='w')
+        ttk.Label(tab_sec_y, text="Supports numpy as np: np.sqrt(y), np.log10(y), y**2, etc.",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(0, 10), anchor='w')
+
+        add_entry(tab_sec_y, "Transform:", self.v_sec_y_forward, width=12)
+        ttk.Label(tab_sec_y, text="Inverse auto-derived for: y*K, y/K, y+K, y-K, 1/y, y**K, np.sqrt, np.log10, etc.",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(2, 5), anchor='w')
+
+        ttk.Separator(tab_sec_y, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_sec_y, text="Right Axis Label", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_sec_y, "Right Y Label:", self.v_sec_y_label, width=15)
+
+        # Label color for secondary Y-axis
+        add_col(tab_sec_y, "Right Y Label Color:", "sec_y_label_color", self.sec_y_label_color)
+
+        ttk.Separator(tab_sec_y, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Label(tab_sec_y, text="Right Axis Tick Settings", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+
+        f_sz_y = ttk.Frame(tab_sec_y)
+        f_sz_y.pack(fill='x', pady=2)
+        ttk.Label(f_sz_y, text="Tick Font Size:", width=15).pack(side='left')
+        ttk.Entry(f_sz_y, textvariable=self.v_sec_y_tick_size, width=10).pack(side='left', padx=2)
+
+        f_maj_y = ttk.Frame(tab_sec_y)
+        f_maj_y.pack(fill='x', pady=2)
+        ttk.Label(f_maj_y, text="Major Tick Step:", width=15).pack(side='left')
+        ttk.Entry(f_maj_y, textvariable=self.v_sec_y_maj, width=10).pack(side='left', padx=2)
+        ttk.Label(f_maj_y, text="(blank = auto)", font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=5)
+
+        f_min_y = ttk.Frame(tab_sec_y)
+        f_min_y.pack(fill='x', pady=2)
+        ttk.Label(f_min_y, text="Minor Divisions:", width=15).pack(side='left')
+        ttk.Entry(f_min_y, textvariable=self.v_sec_y_min_div, width=10).pack(side='left', padx=2)
+        ttk.Label(f_min_y, text="(blank = auto)", font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=5)
+
+        # ============================================
+        # TAB 8: Transparency
         # ============================================
         tab_transparency = ttk.Frame(notebook, padding=10)
         notebook.add(tab_transparency, text="Transparency")
@@ -1568,10 +1635,20 @@ class InteractivePlotter:
 
         add_sz(tab_font, "Title Size:", self.v_t_size)
         add_sz(tab_font, "Axis Label Size:", self.v_l_size)
+        add_sz(tab_font, "X Label Size:", self.v_xlabel_size)
+        add_sz(tab_font, "Y Label Size:", self.v_ylabel_size)
+        add_sz(tab_font, "Y2 Label Size:", self.v_y2label_size)
+        add_sz(tab_font, "X2 Label Size:", self.v_x2label_size)
+        add_sz(tab_font, "Z Label Size:", self.v_zlabel_size)
         add_sz(tab_font, "Legend Size:", self.v_leg_size)
         add_sz(tab_font, "X Tick Size:", self.v_xtick_size)
         add_sz(tab_font, "Y Tick Size:", self.v_ytick_size)
+        add_sz(tab_font, "Y2 Tick Size:", self.v_y2tick_size)
+        add_sz(tab_font, "Z Tick Size:", self.v_ztick_size)
         add_sz(tab_font, "X2 Tick Size:", self.v_sec_x_tick_size)
+        add_sz(tab_font, "Y2 Tick Size (Sec. Y):", self.v_sec_y_tick_size)
+        ttk.Label(tab_font, text="(per-axis sizes: blank = use the global 'Axis Label Size' / 'Y Tick Size')",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(pady=(2, 0))
 
         # ============================================
         # TAB 3: Tick Appearance
@@ -2733,6 +2810,7 @@ class InteractivePlotter:
         custom_ylabel_pos = (0.04, 0.5)
         custom_y2label_pos = (0.96, 0.5)
         custom_zlabel_pos = (0.96, 0.5)
+        custom_x2label_pos = (0.5, 0.98)
         
         if use_custom_pos:
             try:
@@ -2741,6 +2819,7 @@ class InteractivePlotter:
                 custom_ylabel_pos = (val(self.ylabel_x, 0.04), val(self.ylabel_y, 0.5))
                 custom_y2label_pos = (val(self.y2label_x, 0.96), val(self.y2label_y, 0.5))
                 custom_zlabel_pos = (val(self.zlabel_x, 0.96), val(self.zlabel_y, 0.5))
+                custom_x2label_pos = (val(self.x2label_x, 0.5), val(self.x2label_y, 0.98))
             except Exception as e:
                 print(f"Error parsing custom positions: {e}")
                 use_custom_pos = False
@@ -2766,9 +2845,18 @@ class InteractivePlotter:
         zf_s = self.v_z_div.get()
         t_sz = val(self.v_t_size, 14);
         l_sz = val(self.v_l_size, 12)
+        # Per-axis label sizes (blank = global Axis Label Size)
+        x_l_sz = val(self.v_xlabel_size, l_sz)
+        y_l_sz = val(self.v_ylabel_size, l_sz)
+        y2_l_sz = val(self.v_y2label_size, l_sz)
+        x2_l_sz = val(self.v_x2label_size, l_sz)
+        z_l_sz = val(self.v_zlabel_size, l_sz)
         leg_sz = val(self.v_leg_size, 10);
         xt_sz = val(self.v_xtick_size, 10);
         yt_sz = val(self.v_ytick_size, 10)
+        # Per-axis tick sizes (blank = global Y Tick Size)
+        y2t_sz = val(self.v_y2tick_size, yt_sz)
+        zt_sz = val(self.v_ztick_size, yt_sz)
         font = self.v_font_fam.get()
 
         def get_tick_vals(prefix):
@@ -3188,11 +3276,11 @@ class InteractivePlotter:
                                         cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm,
                                         interpolation=_disp_map.get(self.cmap_display_interp.get(), "auto"))
                 # Track ylabel_text for custom positioning
-                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=y_l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
                 cbar = self.fig.colorbar(im, ax=self.ax)
                 # Set colorbar label and get the text object for custom positioning
-                cbar.set_label(self.v_zlabel.get() or self.z_combo.get(), fontsize=l_sz, labelpad=z_lab_pad,
+                cbar.set_label(self.v_zlabel.get() or self.z_combo.get(), fontsize=z_l_sz, labelpad=z_lab_pad,
                                fontname=font, color=self.zlabel_color, rotation=zlabel_rot)
                 # Get the actual label text object from the colorbar
                 zlabel_text = cbar.ax.yaxis.label
@@ -3230,7 +3318,7 @@ class InteractivePlotter:
                         z_plain_fmt = ticker.FuncFormatter(lambda v, p: f'{v:g}')
                         cbar.ax.yaxis.set_major_formatter(z_plain_fmt)
                         cbar.ax.yaxis.set_minor_formatter(z_plain_fmt)
-                cbar.ax.tick_params(labelsize=yt_sz, pad=z_pad_val, labelcolor=self.z_tick_color, color=self.z_tick_color)
+                cbar.ax.tick_params(labelsize=zt_sz, pad=z_pad_val, labelcolor=self.z_tick_color, color=self.z_tick_color)
                 if not self.z_log.get() and z_min > 1:
                     min_z_dir = self.v_minor_tick_dir_z.get()
                     min_z_len = val(self.v_minor_tick_length, 2.0)
@@ -3401,7 +3489,7 @@ class InteractivePlotter:
                         apply_log_format(ax_curr, 'y', self.v_y_not.get())
                     y_tick_len = 0 if y_dir_y2 == "none" else maj_len
                     ax_curr.tick_params(axis='y', direction=y_dir_y2 if y_dir_y2 != "none" else "out",
-                        length=y_tick_len, labelsize=yt_sz, pad=y2_pad_val, labelcolor=self.y2tick_color,
+                        length=y_tick_len, labelsize=y2t_sz, pad=y2_pad_val, labelcolor=self.y2tick_color,
                         color=self.y2tick_color,
                         left=False, right=True, labelright=True, labelleft=False)
                     if y2_min_div > 1:
@@ -3471,7 +3559,7 @@ class InteractivePlotter:
                 x_fallback = self.xyxy_x1_col.get() or xcol
             else:
                 x_fallback = xcol
-            xlabel_text = target_ax.set_xlabel(self.v_xlabel.get() or x_fallback, fontsize=l_sz, labelpad=x_lab_pad, fontname=font,
+            xlabel_text = target_ax.set_xlabel(self.v_xlabel.get() or x_fallback, fontsize=x_l_sz, labelpad=x_lab_pad, fontname=font,
                                  color=self.xlabel_color, rotation=xlabel_rot)
             
             # Set title with rotation
@@ -3516,13 +3604,13 @@ class InteractivePlotter:
 
             if ptype == "Dual Y-Axis":
                 y1_label = self.v_ylabel.get() or (ycols[0] if ycols else "Y1")
-                ylabel_text = self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                ylabel_text = self.ax.set_ylabel(y1_label, fontsize=y_l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
                 if use_custom_pos:
                     ylabel_text.set_position(custom_ylabel_pos)
                     ylabel_text.set_transform(self.fig.transFigure)
                 y2_label = self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2")
-                y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                y2label_text = axes_list[1].set_ylabel(y2_label, fontsize=y2_l_sz, labelpad=y_lab_pad, fontname=font,
                                         color=self.y2label_color, rotation=y2label_rot)
                 if use_custom_pos:
                     y2label_text.set_position(custom_y2label_pos)
@@ -3532,7 +3620,7 @@ class InteractivePlotter:
                 if val(self.v_y2_min): axes_list[1].set_ylim(bottom=val(self.v_y2_min))
                 if val(self.v_y2_max): axes_list[1].set_ylim(top=val(self.v_y2_max))
             elif ptype == "XXY (Dual X)":
-                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=y_l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
                 if use_custom_pos:
                     ylabel_text.set_position(custom_ylabel_pos)
@@ -3541,7 +3629,7 @@ class InteractivePlotter:
                 x2_fallback = self.xxy_x2_col.get() if self.xxy_x2_col.get() else "X2"
                 x2_label = self.v_x2label.get() or x2_fallback
                 x2_lbl_rot = float(self.x2label_rotation.get() or 0) if use_custom_rot else 0
-                axes_list[1].set_xlabel(x2_label, fontsize=l_sz, fontname=font, color=self.x2label_color, rotation=x2_lbl_rot)
+                axes_list[1].set_xlabel(x2_label, fontsize=x2_l_sz, fontname=font, color=self.x2label_color, rotation=x2_lbl_rot)
                 # Apply custom X2 label position if enabled
                 if use_custom_pos:
                     try:
@@ -3558,7 +3646,7 @@ class InteractivePlotter:
                 if val(self.v_y_max) and not has_y_breaks: self.ax.set_ylim(top=val(self.v_y_max))
             elif ptype == "XYXY (Dual X+Y)":
                 y1_label = self.v_ylabel.get() or "Y1"
-                ylabel_text = self.ax.set_ylabel(y1_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                ylabel_text = self.ax.set_ylabel(y1_label, fontsize=y_l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
                 if use_custom_pos:
                     ylabel_text.set_position(custom_ylabel_pos)
@@ -3567,7 +3655,7 @@ class InteractivePlotter:
                 # XYXY: ax2 = ax_right.twiny() shares the y-axis with ax_right
                 # Must set ylabel on ax_right (the twinx owner of the right Y axis)
                 # ax2's yaxis is shared and won't properly render the label
-                y2label_text = ax_right.set_ylabel(y2_label, fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                y2label_text = ax_right.set_ylabel(y2_label, fontsize=y2_l_sz, labelpad=y_lab_pad, fontname=font,
                                         color=self.y2label_color, rotation=y2label_rot)
                 if use_custom_pos:
                     y2label_text.set_position(custom_y2label_pos)
@@ -3576,7 +3664,7 @@ class InteractivePlotter:
                 x2_fallback_xyxy = self.xyxy_x2_col.get() if self.xyxy_x2_col.get() else "X2"
                 x2_label = self.v_x2label.get() or x2_fallback_xyxy
                 x2_lbl_rot = float(self.x2label_rotation.get() or 0) if use_custom_rot else 0
-                axes_list[1].set_xlabel(x2_label, fontsize=l_sz, fontname=font, color=self.x2label_color, rotation=x2_lbl_rot)
+                axes_list[1].set_xlabel(x2_label, fontsize=x2_l_sz, fontname=font, color=self.x2label_color, rotation=x2_lbl_rot)
                 # Apply custom X2 label position if enabled
                 if use_custom_pos:
                     try:
@@ -3594,7 +3682,7 @@ class InteractivePlotter:
                 if val(self.v_y2_min): axes_list[1].set_ylim(bottom=val(self.v_y2_min))
                 if val(self.v_y2_max): axes_list[1].set_ylim(top=val(self.v_y2_max))
             elif ptype != "Color Map":
-                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=l_sz, labelpad=y_lab_pad, fontname=font,
+                ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=y_l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
                 if use_custom_pos:
                     ylabel_text.set_position(custom_ylabel_pos)
@@ -3782,11 +3870,22 @@ class InteractivePlotter:
                             # Create the secondary axis
                             sec_x_ax = target_ax.secondary_xaxis('top', functions=(fwd_func, inv_func))
                             
-                            # Apply label
+                            # Apply label (custom position/rotation work for ANY plot
+                            # type). NOTE: set_label_coords is useless on a
+                            # secondary_xaxis — its coordinate bbox is the flat top
+                            # spine (height ~0), so Y moves do nothing. Use a
+                            # figure-level text instead, like the title/X/Y labels.
                             sec_label = self.v_sec_x_label.get().strip()
                             if sec_label:
-                                sec_x_ax.set_xlabel(sec_label, fontsize=l_sz, fontname=font,
-                                                    color=self.sec_x_label_color)
+                                sec_x_lbl_rot = val(self.x2label_rotation, 0) if use_custom_rot else 0
+                                sec_x_lbl = sec_x_ax.set_xlabel(sec_label, fontsize=x2_l_sz, fontname=font,
+                                                                color=self.sec_x_label_color, rotation=sec_x_lbl_rot)
+                                if use_custom_pos:
+                                    sec_x_lbl.set_visible(False)
+                                    self.fig.text(custom_x2label_pos[0], custom_x2label_pos[1], sec_label,
+                                                  fontsize=x2_l_sz, fontname=font,
+                                                  color=self.sec_x_label_color,
+                                                  ha='center', va='top', rotation=sec_x_lbl_rot)
                             
                             # Apply tick settings
                             sec_xt_sz = val(self.v_sec_x_tick_size, 10)
@@ -3818,6 +3917,77 @@ class InteractivePlotter:
                                     length=min_x_len)
                 except Exception as sec_e:
                     print(f"Secondary X-Axis error: {sec_e}")
+
+            # --- SECONDARY RIGHT Y-AXIS ---
+            if self.enable_secondary_y.get():
+                try:
+                    fwd_y_formula = self.v_sec_y_forward.get().strip()
+
+                    if fwd_y_formula:
+                        # Auto-derive inverse if not manually set
+                        # (same pattern table as the X version, with 'y' as variable)
+                        inv_y_formula = self.v_sec_y_inverse.get().strip()
+                        if not inv_y_formula or inv_y_formula == fwd_y_formula:
+                            auto_inv_y = self._auto_derive_inverse(fwd_y_formula.replace('y', 'x'))
+                            if auto_inv_y:
+                                inv_y_formula = auto_inv_y.replace('x', 'y')
+
+                        if inv_y_formula:
+                            # Create safe lambda functions from the formulas
+                            # Support numpy operations via 'np' in the namespace
+                            safe_dict_y = {"np": np, "__builtins__": {}}
+                            fwd_y_func = eval(f"lambda y: {fwd_y_formula}", safe_dict_y)
+                            inv_y_func = eval(f"lambda y: {inv_y_formula}", safe_dict_y)
+
+                            # Create the secondary right Y-axis
+                            sec_y_ax = target_ax.secondary_yaxis('right', functions=(fwd_y_func, inv_y_func))
+
+                            # Apply label (custom position/rotation work for ANY plot
+                            # type). Same as secondary X: use figure-level text for
+                            # custom positions (secondary_yaxis label coords are
+                            # relative to its flat right-spine bbox).
+                            sec_y_label = self.v_sec_y_label.get().strip()
+                            if sec_y_label:
+                                sec_y_lbl_rot = val(self.y2label_rotation, 90) if use_custom_rot else 90
+                                sec_y_lbl = sec_y_ax.set_ylabel(sec_y_label, fontsize=y2_l_sz, fontname=font,
+                                                                color=self.sec_y_label_color, rotation=sec_y_lbl_rot)
+                                if use_custom_pos:
+                                    sec_y_lbl.set_visible(False)
+                                    self.fig.text(custom_y2label_pos[0], custom_y2label_pos[1], sec_y_label,
+                                                  fontsize=y2_l_sz, fontname=font,
+                                                  color=self.sec_y_label_color,
+                                                  ha='right', va='center', rotation=sec_y_lbl_rot)
+
+                            # Apply tick settings
+                            sec_yt_sz = val(self.v_sec_y_tick_size, 10)
+                            sec_y_ax.tick_params(axis='y', labelsize=sec_yt_sz, labelcolor=self.y2tick_color, color=self.y2tick_color)
+
+                            # Apply major tick step if specified
+                            sec_y_maj_val = val(self.v_sec_y_maj)
+                            if sec_y_maj_val:
+                                sec_y_ax.yaxis.set_major_locator(ticker.MultipleLocator(sec_y_maj_val))
+
+                            # Apply minor tick divisions if specified
+                            sec_y_min_div = int(val(self.v_sec_y_min_div, 0))
+                            if sec_y_min_div > 1:
+                                sec_y_ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(sec_y_min_div))
+
+                            # Apply tick direction to match right ticks
+                            y_dir_y2 = self.v_tick_dir_y2.get()
+                            maj_len_y2 = val(self.v_major_tick_length, 4.0)
+                            min_len_y2 = val(self.v_minor_tick_length, 2.0)
+                            y_tick_len = 0 if y_dir_y2 == "none" else maj_len_y2
+                            sec_y_ax.tick_params(axis='y', direction=y_dir_y2 if y_dir_y2 != "none" else "out",
+                                                 length=y_tick_len)
+                            # Apply minor tick direction for secondary Y
+                            if sec_y_min_div > 1:
+                                min_y_dir_y2 = self.v_minor_tick_dir_y2.get()
+                                min_y_len = 0 if min_y_dir_y2 == "none" else min_len_y2
+                                sec_y_ax.tick_params(axis='y', which='minor',
+                                    direction=min_y_dir_y2 if min_y_dir_y2 != "none" else "out",
+                                    length=min_y_len)
+                except Exception as sec_y_e:
+                    print(f"Secondary Y-Axis error: {sec_y_e}")
 
             self.fig.tight_layout(pad=3.0)
             
@@ -3856,25 +4026,25 @@ class InteractivePlotter:
                 if xlabel_text is not None:
                     xlabel_text.set_visible(False)
                     self.fig.text(custom_xlabel_pos[0], custom_xlabel_pos[1],
-                                  self.v_xlabel.get() or xcol, fontsize=l_sz,
+                                  self.v_xlabel.get() or xcol, fontsize=x_l_sz,
                                   fontname=font, color=self.xlabel_color, ha='center', va='bottom', rotation=xlabel_rot)
                 # Y label
                 if ylabel_text is not None:
                     ylabel_text.set_visible(False)
                     self.fig.text(custom_ylabel_pos[0], custom_ylabel_pos[1],
-                                  self.v_ylabel.get() or "Values", fontsize=l_sz,
+                                  self.v_ylabel.get() or "Values", fontsize=y_l_sz,
                                   fontname=font, color=self.ylabel_color, ha='left', va='center', rotation=ylabel_rot)
                 # Y2 label (for Dual Y-Axis)
                 if y2label_text is not None:
                     y2label_text.set_visible(False)
                     self.fig.text(custom_y2label_pos[0], custom_y2label_pos[1],
-                                  self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2"), 
-                                  fontsize=l_sz, fontname=font, color=self.y2label_color, ha='right', va='center', rotation=y2label_rot)
+                                  self.v_y2label.get() or (ycols[1] if len(ycols) > 1 else "Y2"),
+                                  fontsize=y2_l_sz, fontname=font, color=self.y2label_color, ha='right', va='center', rotation=y2label_rot)
                 # Z label (for Color Map)
                 if zlabel_text is not None:
                     zlabel_text.set_visible(False)
                     self.fig.text(custom_zlabel_pos[0], custom_zlabel_pos[1],
-                                  self.v_zlabel.get() or self.z_combo.get(), fontsize=l_sz,
+                                  self.v_zlabel.get() or self.z_combo.get(), fontsize=z_l_sz,
                                   fontname=font, color=self.zlabel_color, ha='left', va='center', rotation=zlabel_rot)
             
             self.canvas.draw()
@@ -4163,6 +4333,13 @@ class InteractivePlotter:
                 "label_size": self.v_l_size.get(),
                 "xtick_size": self.v_xtick_size.get(),
                 "ytick_size": self.v_ytick_size.get(),
+                "xlabel_size": self.v_xlabel_size.get(),
+                "ylabel_size": self.v_ylabel_size.get(),
+                "y2label_size": self.v_y2label_size.get(),
+                "x2label_size": self.v_x2label_size.get(),
+                "zlabel_size": self.v_zlabel_size.get(),
+                "y2tick_size": self.v_y2tick_size.get(),
+                "ztick_size": self.v_ztick_size.get(),
                 "x_notation": self.v_x_not.get(),
                 "y_notation": self.v_y_not.get(),
                 "z_notation": self.v_z_not.get(),
@@ -4209,6 +4386,18 @@ class InteractivePlotter:
                 "major_step": self.v_sec_x_maj.get(),
                 "minor_divisions": self.v_sec_x_min_div.get(),
                 "label_color": self.sec_x_label_color,
+            }
+
+            # === SECONDARY Y-AXIS ===
+            session_data["secondary_y_axis"] = {
+                "enabled": self.enable_secondary_y.get(),
+                "forward": self.v_sec_y_forward.get(),
+                "inverse": self.v_sec_y_inverse.get(),
+                "label": self.v_sec_y_label.get(),
+                "tick_size": self.v_sec_y_tick_size.get(),
+                "major_step": self.v_sec_y_maj.get(),
+                "minor_divisions": self.v_sec_y_min_div.get(),
+                "label_color": self.sec_y_label_color,
             }
 
             # === PLOT SETTINGS ===
@@ -6320,6 +6509,13 @@ class InteractivePlotter:
                 self.v_l_size.set(font_settings.get("label_size", "12"))
                 self.v_xtick_size.set(font_settings.get("xtick_size", "10"))
                 self.v_ytick_size.set(font_settings.get("ytick_size", "10"))
+                self.v_xlabel_size.set(font_settings.get("xlabel_size", ""))
+                self.v_ylabel_size.set(font_settings.get("ylabel_size", ""))
+                self.v_y2label_size.set(font_settings.get("y2label_size", ""))
+                self.v_x2label_size.set(font_settings.get("x2label_size", ""))
+                self.v_zlabel_size.set(font_settings.get("zlabel_size", ""))
+                self.v_y2tick_size.set(font_settings.get("y2tick_size", ""))
+                self.v_ztick_size.set(font_settings.get("ztick_size", ""))
                 self.v_x_not.set(font_settings.get("x_notation", "Scientific"))
                 self.v_y_not.set(font_settings.get("y_notation", "Scientific"))
                 self.v_z_not.set(font_settings.get("z_notation", "Scientific"))
@@ -6366,6 +6562,18 @@ class InteractivePlotter:
                 self.v_sec_x_maj.set(sec_x_settings.get("major_step", ""))
                 self.v_sec_x_min_div.set(sec_x_settings.get("minor_divisions", ""))
                 self.sec_x_label_color = sec_x_settings.get("label_color", "black")
+
+            # === RESTORE SECONDARY Y-AXIS ===
+            sec_y_settings = session_data.get("secondary_y_axis", {})
+            if sec_y_settings:
+                self.enable_secondary_y.set(sec_y_settings.get("enabled", False))
+                self.v_sec_y_forward.set(sec_y_settings.get("forward", "y"))
+                self.v_sec_y_inverse.set(sec_y_settings.get("inverse", "y"))
+                self.v_sec_y_label.set(sec_y_settings.get("label", ""))
+                self.v_sec_y_tick_size.set(sec_y_settings.get("tick_size", "10"))
+                self.v_sec_y_maj.set(sec_y_settings.get("major_step", ""))
+                self.v_sec_y_min_div.set(sec_y_settings.get("minor_divisions", ""))
+                self.sec_y_label_color = sec_y_settings.get("label_color", "black")
 
             # === RESTORE PLOT SETTINGS ===
             plot_settings = session_data.get("plot_settings", {})
