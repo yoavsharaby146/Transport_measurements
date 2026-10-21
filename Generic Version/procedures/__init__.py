@@ -26,6 +26,11 @@ from .ac_current_sweep import AC_current_sweep_measurement, proc_ac_current_swee
 from .differential_resistance import (Differential_Resistance_AUX, proc_diff_resistance_AUX,
                                       Differential_Resistance_6221DC, proc_diff_resistance_6221dc)
 from .resistance_aux_sweep import Resistance_aux_voltage_measurement, proc_resistance_aux
+from .resistance_aux_gate_map import Resistance_aux_gate_map, proc_resistance_aux_gate_map
+from .differential_resistance_aux_map import (Differential_Resistance_AUX_map,
+                                              proc_diff_resistance_aux_map)
+from .sequencer_rv_dvdi import RV_dV_dI_sequencer_measurement, proc_RV_dV_dI_sequencer
+from .sequencer_rv_r_aux import RV_R_AUX_sequencer_measurement, proc_RV_R_AUX_sequencer
 from .sequencer_rt_rv import Rt_RV_sequencer_measurement, proc_Rt_RV_sequencer
 
 # Category colors
@@ -50,6 +55,10 @@ PROCEDURES.update(proc_resistance_aux)
 PROCEDURES.update(proc_Rt_RV_sequencer)
 PROCEDURES.update(proc_diff_resistance_AUX)
 PROCEDURES.update(proc_diff_resistance_6221dc)
+PROCEDURES.update(proc_resistance_aux_gate_map)
+PROCEDURES.update(proc_diff_resistance_aux_map)
+PROCEDURES.update(proc_RV_dV_dI_sequencer)
+PROCEDURES.update(proc_RV_R_AUX_sequencer)
 
 # Export all
 __all__ = [
@@ -72,6 +81,10 @@ __all__ = [
     'Differential_Resistance_6221DC',
     'Resistance_aux_voltage_measurement',
     'Rt_RV_sequencer_measurement',
+    'Differential_Resistance_AUX_map',
+    'Resistance_aux_gate_map',
+    'RV_dV_dI_sequencer_measurement',
+    'RV_R_AUX_sequencer_measurement',
     # Registration dicts
     'proc_resistance_time',
     'proc_resistance_gate',
@@ -82,6 +95,10 @@ __all__ = [
     'proc_diff_resistance_6221dc',
     'proc_resistance_aux',
     'proc_Rt_RV_sequencer',
+    'proc_resistance_aux_gate_map',
+    'proc_diff_resistance_aux_map',
+    'proc_RV_dV_dI_sequencer',
+    'proc_RV_R_AUX_sequencer',
     # Aggregates
     'CATAGORIES',
     'PROCEDURES',

@@ -5195,16 +5195,38 @@ class InteractivePlotter:
     
     def _profile_sample_positions(self, points):
         """Dense sample positions along a polyline. Returns (X, Y, D) arrays
-        where D is cumulative arc length along the drawn line."""
+        where D is cumulative arc length along the drawn line.
+
+        Sampling density follows the measured data spacing when raw data is
+        available, so a high-resolution scan is NOT decimated to a fixed
+        500 samples per span (that was the old behavior — profiles came out
+        pixelated / aliased). The legacy density stays as a lower bound and
+        a hard cap bounds memory on huge scans.
+        """
         xmin, xmax, ymin, ymax = self._cmap_extent
         span = max(xmax - xmin, ymax - ymin) or 1.0
+        step = span / 500.0  # legacy density (lower bound)
+        try:
+            # _cmap_raw_tol_x/y are HALF the median unique-spacing of the
+            # measured X/Y values -> full median nearest-point spacing:
+            raw_step = 2.0 * min(self._cmap_raw_tol_x, self._cmap_raw_tol_y)
+            if np.isfinite(raw_step) and raw_step > 0:
+                step = min(step, raw_step)
+        except Exception:
+            pass
+
+        # ponytail: hard sample cap (per segment) bounds memory/CPU on huge
+        # scans; raise it if profiles of >100k-pt segments ever needed.
+        def _n_for(seg_len):
+            return min(max(int(np.ceil(seg_len / step)), 10), 100000)
+
         segs = []
         cumulative_distance = 0.0
         for i in range(len(points) - 1):
             x0, y0 = points[i]
             x1, y1 = points[i + 1]
             seg_len = float(np.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2))
-            n_samples = max(int(seg_len / span * 500), 10)
+            n_samples = _n_for(seg_len)
             t = np.arange(n_samples) / n_samples
             sx = x0 + t * (x1 - x0)
             sy = y0 + t * (y1 - y0)

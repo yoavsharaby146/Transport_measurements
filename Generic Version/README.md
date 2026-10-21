@@ -26,6 +26,10 @@ python "Transport measurements.py"
 | Resistance two gate mapping measurement | 2D gate × gate map, Snake or Forward/Backward scan modes |
 | AC current sweep measurement | Sweep K6221 AC current amplitude, RMS in / peak sent (×1.4142) |
 | AC and DC current ramp measurement | Two K6221 units: one runs the AC waveform, the other ramps DC current (user assigns which unit is AC / DC). Only shown when both 6221s are connected |
+| Differential Resistance AUX Gate Map | 2D gate × AUX map with dV/dI readout (DC bias on a lock-in AUX output, AC from lock-in sine or K6221), Snake or Forward/Backward scan modes |
+| Resistance AUX Gate Map | 2D gate × AUX map with resistance readout (AUX voltage swept on a chosen lock-in), Snake or Forward/Backward scan modes |
+| RV dV/dI sequencer measurement | Sequence RV gate sweeps and dV/dI AUX sweeps |
+| RV R_AUX sequencer measurement | Sequence RV gate sweeps and R_AUX output sweeps |
 
 ## Supported Instruments
 
