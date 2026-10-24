@@ -122,7 +122,7 @@ class InteractivePlotter:
         self.v_x2label = tk.StringVar()
         self.v_zlabel = tk.StringVar()
         self.v_legend = tk.StringVar()
-        self.show_legend = tk.BooleanVar(value=True)
+        self.show_legend = tk.BooleanVar(value=False)
         self.show_grid = tk.BooleanVar(value=True)
         
         # --- LEGEND SETTINGS ---
@@ -236,6 +236,11 @@ class InteractivePlotter:
         self._cmap_cache_key = None   # cache key of the last computed zi
         self._cmap_cache_zi = None    # cached interpolated grid (avoids re-running griddata)
         self._cmap_mesh = None        # (mesh_x, mesh_y) real coords for non-uniform grids (pcolormesh), else None
+        self._cmap_multi_cache = {}   # {file_key: (cache_key, zi, mesh)} per-file grids for multi-file maps
+        self._cmap_raw_key = None     # cache key of the concatenated raw (X, Y, Z) + KD-tree
+        self._cmap_raw_kdtrees = []   # per-file (tree, tol, tx, ty, Xf, Yf, Zf) for raw profiles
+        self._cmap_raw_step = None    # true median NN spacing (jitter-proof sampling density)
+        self._cmap_pitch = (None, None)  # robust per-axis pitch (jitter-proof)
 
         # --- TICK DIRECTION & LENGTH (Origin Pro-like) ---
         self.v_tick_dir_x = tk.StringVar(value="out")       # "out", "in", "inout", "none"
@@ -2000,6 +2005,8 @@ class InteractivePlotter:
         # Data changed — any cached color-map interpolation is stale
         self._cmap_cache_key = None
         self._cmap_cache_zi = None
+        self._cmap_multi_cache = {}
+        self._cmap_raw_key = None
         self.refresh_dataset_list(new_load=True)
 
     def unload_files(self):
@@ -2014,6 +2021,8 @@ class InteractivePlotter:
         # Data changed — any cached color-map interpolation is stale
         self._cmap_cache_key = None
         self._cmap_cache_zi = None
+        self._cmap_multi_cache = {}
+        self._cmap_raw_key = None
         self.refresh_dataset_list(new_load=False)
         self.update_plot()
 
@@ -2719,6 +2728,81 @@ class InteractivePlotter:
 
     # --- COLOR MAP: SWEEP-ROW RESAMPLING (V-shaped / variable-width maps) ---
 
+    @staticmethod
+    def _axis_pitch(v):
+        """Robust spacing of a (possibly jittered) 1D coordinate sweep.
+
+        Perfect grid -> median diff. Jittered rows/columns (every value
+        unique, values clustered around true sweep positions) -> median of
+        the LARGE gaps between clusters. Returns None if not estimable."""
+        v = np.sort(v[np.isfinite(v)])
+        if v.size < 2:
+            return None
+        d = np.diff(v)
+        med = float(np.median(d))
+        if med <= 0:
+            return None
+        # Cluster gaps (sweep pitch) are typically 50-500x the within-cluster
+        # jitter diffs; a 10x threshold keeps most of the within-cluster tail
+        # out, and keeping only gaps within 4x of the LARGEST gap removes the
+        # remaining stragglers.
+        big = d[d > 10.0 * med]
+        if big.size >= 2:
+            hi = big[big > 0.25 * big.max()]
+            if hi.size >= 1:
+                return float(np.median(hi))
+        return med
+
+    def _cmap_compute_grid(self, X, Y, Z, Xn, Yn):
+        """Interpolate ONE file's (X, Y, Z) into a display grid.
+
+        Xn/Yn are X/Y normalized to [0, 1] (unit-square geometry makes the
+        interpolation invariant to X/Y divide factors).
+
+        Returns (zi, mesh):
+          zi   — 2D Z grid (NaN where unmeasured; drawn transparent)
+          mesh — (mesh_x, mesh_y) when the grid is non-uniform (render with
+                 pcolormesh at real coordinates), else None (imshow is exact).
+        """
+        # Fast path: data already forms a complete regular grid (typical for
+        # measurement maps) → plain reshape, no interpolation at all.
+        xu, x_inv = np.unique(Xn, return_inverse=True)
+        yu, y_inv = np.unique(Yn, return_inverse=True)
+        # Sweep-row path: each Y row is an X sweep with its own width / point
+        # count (V-shaped maps). Resample per row instead of scattering
+        # (avoids diagonal griddata streaks).
+        row_res = (self._cmap_resample_rows(X, Y, Z)
+                   if len(xu) * len(yu) != len(Xn) else None)
+        if len(xu) * len(yu) == len(Xn):
+            zi = np.full((len(yu), len(xu)), np.nan)
+            zi[y_inv, x_inv] = Z
+            # Sections with different x/y step widths -> non-uniform grid.
+            fin_xy = np.isfinite(X) & np.isfinite(Y)
+            mesh_x = np.unique(X[fin_xy])
+            mesh_y = np.unique(Y[fin_xy])
+            dx = np.diff(mesh_x)
+            dy = np.diff(mesh_y)
+            uniform = ((dx.size == 0 or np.allclose(dx, dx[0], rtol=1e-3, atol=0.0)) and
+                       (dy.size == 0 or np.allclose(dy, dy[0], rtol=1e-3, atol=0.0)))
+            return zi, (None if uniform else (mesh_x, mesh_y))
+        if row_res is not None:
+            zi, h_coords, v_coords = row_res
+            dh = np.diff(h_coords)
+            dv = np.diff(v_coords)
+            h_uni = dh.size == 0 or np.allclose(dh, dh[0], rtol=1e-3, atol=0.0)
+            v_uni = dv.size == 0 or np.allclose(dv, dv[0], rtol=1e-3, atol=0.0)
+            return zi, (None if (h_uni and v_uni) else (h_coords, v_coords))
+        try:
+            gres = int(float(self._cmap_grid_res.get()))
+        except (ValueError, TypeError):
+            gres = 300
+        gres = max(gres, 2)
+        xi, yi = np.meshgrid(np.linspace(0.0, 1.0, gres),
+                             np.linspace(0.0, 1.0, gres))
+        zi = griddata((Xn, Yn), Z, (xi, yi),
+                      method=self._cmap_interp_method.get())
+        return zi, None
+
     def _cmap_resample_rows(self, X, Y, Z):
         """Resample sweep-structured data onto a common grid.
 
@@ -3135,112 +3219,154 @@ class InteractivePlotter:
 
             elif ptype == "Color Map":
                 # ... (Existing Color Map Logic) ...
-                if len(sel_ds) != 1 or len(ycols) != 1: raise ValueError("Color Map: 1 File, 1 Y.")
-                df = sel_ds[0][1]
-                X = self._axis_transform(df[xcol].to_numpy(), xf_s)
-                Y = self._axis_transform(df[ycols[0]].to_numpy(), yf_s)
-                Z = self._axis_transform(df[self.z_combo.get()].to_numpy(), zf_s)
-
-                # --- Normalize X and Y to a unit square BEFORE interpolation ---
-                # griddata's cubic interpolator depends on the GEOMETRY of the (X, Y)
-                # point cloud. Dividing one axis makes the domain highly anisotropic,
-                # which changes the interpolation result (overshoots / NaN coverage)
-                # and therefore shifts the Z color range — even though Z itself was
-                # not changed. Normalizing to [0, 1] makes the geometry identical for
-                # any divide factor, so the coloring stays invariant to X/Y scaling.
-                cmap_x_min, cmap_x_max = float(X.min()), float(X.max())
-                cmap_y_min, cmap_y_max = float(Y.min()), float(Y.max())
-                x_range = (cmap_x_max - cmap_x_min) or 1.0
-                y_range = (cmap_y_max - cmap_y_min) or 1.0
-                Xn = (X - cmap_x_min) / x_range
-                Yn = (Y - cmap_y_min) / y_range
-                # --- Interpolation with cache (recomputed only when the DATA
-                # changes; cosmetic updates reuse the cached grid) ---
-                cache_key = (sel_ds[0][0], xcol, ycols[0], self.z_combo.get(),
-                             xf_s, yf_s, zf_s,
-                             self._cmap_interp_method.get(), self._cmap_grid_res.get())
-                zi_recomputed = self._cmap_cache_key != cache_key
-                if zi_recomputed:
-                    # Fast path: data already forms a complete regular grid
-                    # (typical for measurement maps) → plain reshape, no
-                    # interpolation at all.
-                    xu, x_inv = np.unique(Xn, return_inverse=True)
-                    yu, y_inv = np.unique(Yn, return_inverse=True)
-                    # Sweep-row path: each Y row is an X sweep with its own width /
-                    # point count (V-shaped maps). Resample per row instead of
-                    # scattering (avoids diagonal griddata streaks).
-                    row_res = (self._cmap_resample_rows(X, Y, Z)
-                               if len(xu) * len(yu) != len(Xn) else None)
-                    if len(xu) * len(yu) == len(Xn):
-                        zi = np.full((len(yu), len(xu)), np.nan)
-                        zi[y_inv, x_inv] = Z
-                        # Sections with different x/y step widths -> non-uniform grid.
-                        # imshow stretches grid indices uniformly over the extent, which
-                        # distorts such data; remember the REAL coordinates so the plot
-                        # can be rendered with pcolormesh instead (exact positioning).
-                        fin_xy = np.isfinite(X) & np.isfinite(Y)
-                        mesh_x = np.unique(X[fin_xy])
-                        mesh_y = np.unique(Y[fin_xy])
-                        dx = np.diff(mesh_x)
-                        dy = np.diff(mesh_y)
-                        uniform = ((dx.size == 0 or np.allclose(dx, dx[0], rtol=1e-3, atol=0.0)) and
-                                   (dy.size == 0 or np.allclose(dy, dy[0], rtol=1e-3, atol=0.0)))
-                        self._cmap_mesh = None if uniform else (mesh_x, mesh_y)
-                    elif row_res is not None:
-                        zi, h_coords, v_coords = row_res
-                        # Uniform spacing on both axes -> imshow is exact.
-                        # Otherwise pcolormesh places rows/columns at real coordinates.
-                        dh = np.diff(h_coords)
-                        dv = np.diff(v_coords)
-                        h_uni = dh.size == 0 or np.allclose(dh, dh[0], rtol=1e-3, atol=0.0)
-                        v_uni = dv.size == 0 or np.allclose(dv, dv[0], rtol=1e-3, atol=0.0)
-                        self._cmap_mesh = None if (h_uni and v_uni) else (h_coords, v_coords)
+                if len(ycols) != 1 or not sel_ds: raise ValueError("Color Map: 1 Y column, at least 1 file.")
+                zcol_name = self.z_combo.get()
+                # Multiple files share ONE pair of axes: each file is gridded
+                # separately and drawn on the same axes. NaN regions stay
+                # transparent, so maps measured on the same axes sit together —
+                # adjacent regions tile into one map, overlapping regions stack
+                # (later files on top). One shared colorbar / Z scale.
+                map_grids = []   # (zi, mesh, extent) per selected file
+                raw_parts = []   # (X, Y, Z) per file for the raw profile cache
+                z_parts = []     # finite Z per file -> shared color range
+                zi_recomputed = False
+                for fk, df in sel_ds:
+                    X = self._axis_transform(df[xcol].to_numpy(), xf_s)
+                    Y = self._axis_transform(df[ycols[0]].to_numpy(), yf_s)
+                    Z = self._axis_transform(df[zcol_name].to_numpy(), zf_s)
+                    raw_parts.append((X, Y, Z))
+                    zf_fin = Z[np.isfinite(Z)]
+                    if zf_fin.size:
+                        z_parts.append(zf_fin)
+                    # --- Normalize X and Y to a unit square BEFORE interpolation ---
+                    # griddata's cubic interpolator depends on the GEOMETRY of the
+                    # (X, Y) point cloud. Normalizing to [0, 1] keeps the coloring
+                    # invariant to any X/Y divide factor (see _cmap_compute_grid).
+                    c_x0, c_x1 = float(X.min()), float(X.max())
+                    c_y0, c_y1 = float(Y.min()), float(Y.max())
+                    x_range = (c_x1 - c_x0) or 1.0
+                    y_range = (c_y1 - c_y0) or 1.0
+                    Xn = (X - c_x0) / x_range
+                    Yn = (Y - c_y0) / y_range
+                    # --- Interpolation with cache (recomputed only when the DATA
+                    # changes; cosmetic updates reuse the cached grid) ---
+                    cache_key = (fk, xcol, ycols[0], zcol_name, xf_s, yf_s, zf_s,
+                                 self._cmap_interp_method.get(), self._cmap_grid_res.get())
+                    if len(sel_ds) == 1:
+                        # single file: original single-slot cache
+                        if self._cmap_cache_key != cache_key:
+                            zi, mesh = self._cmap_compute_grid(X, Y, Z, Xn, Yn)
+                            self._cmap_cache_key = cache_key
+                            self._cmap_cache_zi = zi
+                            self._cmap_mesh = mesh
+                            zi_recomputed = True
+                        zi = self._cmap_cache_zi
+                        mesh = self._cmap_mesh
                     else:
-                        self._cmap_mesh = None
+                        entry = self._cmap_multi_cache.get(fk)
+                        if entry is None or entry[0] != cache_key:
+                            zi, mesh = self._cmap_compute_grid(X, Y, Z, Xn, Yn)
+                            self._cmap_multi_cache[fk] = (cache_key, zi, mesh)
+                            zi_recomputed = True
+                        else:
+                            zi, mesh = entry[1], entry[2]
+                    map_grids.append((zi, mesh, (c_x0, c_x1, c_y0, c_y1)))
+                # --- Raw (uninterpolated) cache + KD-tree for line profiles ---
+                # Concatenated across ALL selected files; keyed so cosmetic
+                # updates reuse it.
+                raw_key = (tuple(fk for fk, _ in sel_ds), xcol, ycols[0], zcol_name,
+                           xf_s, yf_s, zf_s)
+                if self._cmap_raw_key != raw_key:
+                    cat_X, cat_Y, cat_Z = [], [], []
+                    trees = []   # per-file: (tree, tol_f, tx, ty, px, py, Xf, Yf, Zf)
+                    nn_min = None      # finest true point spacing across files
+                    pitch_x_min = None  # finest robust X pitch across files
+                    pitch_y_min = None  # finest robust Y pitch across files
+                    for (X, Y, Z) in raw_parts:
+                        fin = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
+                        Xf, Yf, Zf = X[fin], Y[fin], Z[fin]
+                        if Xf.size == 0:
+                            continue
+                        cat_X.append(Xf); cat_Y.append(Yf); cat_Z.append(Zf)
+                        # Per-file tolerances: files with DIFFERENT resolutions
+                        # must not share one tolerance (pooled median would be
+                        # too tight for the coarser map -> NaN gaps in profiles).
                         try:
-                            gres = int(float(self._cmap_grid_res.get()))
-                        except (ValueError, TypeError):
-                            gres = 300
-                        gres = max(gres, 2)
-                        xi, yi = np.meshgrid(np.linspace(0.0, 1.0, gres),
-                                             np.linspace(0.0, 1.0, gres))
-                        zi = griddata((Xn, Yn), Z, (xi, yi),
-                                      method=self._cmap_interp_method.get())
-                    self._cmap_cache_key = cache_key
-                    self._cmap_cache_zi = zi
-                    # Cache raw (uninterpolated) data + KD-tree for raw
-                    # line profiles (exact measured values, no averaging).
-                    fin = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
-                    Xf, Yf, Zf = X[fin], Y[fin], Z[fin]
-                    self._cmap_raw_xyz = (Xf, Yf, Zf)
+                            tx = float(np.median(np.diff(np.unique(Xf)))) / 2.0
+                        except Exception:
+                            tx = float('inf')
+                        try:
+                            ty = float(np.median(np.diff(np.unique(Yf)))) / 2.0
+                        except Exception:
+                            ty = float('inf')
+                        tree_f = None
+                        med_nn = None
+                        try:
+                            from scipy.spatial import cKDTree
+                            tree_f = cKDTree(np.column_stack((Xf, Yf)))
+                            # True point spacing from nearest-neighbor distances.
+                            # Coordinate-diff medians COLLAPSE when the scan has
+                            # jitter (every value unique) — NN distance does not.
+                            if Xf.size >= 2:
+                                nn_d, _ = tree_f.query(np.column_stack((Xf, Yf)), k=2)
+                                med_nn = float(np.median(nn_d[:, 1]))
+                        except Exception:
+                            tree_f = None
+                        # Robust per-axis pitch (jitter-proof, see _axis_pitch).
+                        # When jitter ~ pitch the clusters MERGE and the estimate
+                        # collapses — floor it with the NN spacing (true point
+                        # spacing) in that case.
+                        px = self._axis_pitch(Xf)
+                        py = self._axis_pitch(Yf)
+                        if med_nn is not None and np.isfinite(med_nn) and med_nn > 0:
+                            if px is None or px < med_nn:
+                                px = med_nn
+                            if py is None or py < med_nn:
+                                py = med_nn
+                        # Tolerance = the generous of (grid-based, NN-based,
+                        # pitch-based): grid keeps anisotropic sweep maps wide,
+                        # NN rescues jittered scans, pitch covers a line crossing
+                        # BETWEEN sweep rows (worst-case ~ half the row pitch).
+                        tol_f = 2.0 * max(tx, ty)
+                        if med_nn is not None and np.isfinite(med_nn):
+                            tol_f = max(tol_f, 8.0 * med_nn)
+                            nn_min = min(nn_min, med_nn) if nn_min is not None else med_nn
+                        for p in (px, py):
+                            if p is not None and np.isfinite(p):
+                                tol_f = max(tol_f, 0.5 * p)
+                        if px is not None and np.isfinite(px):
+                            pitch_x_min = min(pitch_x_min, px) if pitch_x_min is not None else px
+                        if py is not None and np.isfinite(py):
+                            pitch_y_min = min(pitch_y_min, py) if pitch_y_min is not None else py
+                        trees.append((tree_f, tol_f, tx, ty, px, py, Xf, Yf, Zf))
+                    RX = np.concatenate(cat_X)
+                    RY = np.concatenate(cat_Y)
+                    RZ = np.concatenate(cat_Z)
+                    self._cmap_raw_xyz = (RX, RY, RZ)
+                    self._cmap_raw_kdtrees = trees
+                    # Pooled tolerances (sampling-density floor + legacy fallbacks)
                     try:
-                        self._cmap_raw_tol_x = (float(np.median(np.diff(np.unique(Xf)))) / 2.0
-                                                if Xf.size > 1 else float('inf'))
-                        self._cmap_raw_tol_y = (float(np.median(np.diff(np.unique(Yf)))) / 2.0
-                                                if Yf.size > 1 else float('inf'))
+                        self._cmap_raw_tol_x = (float(np.median(np.diff(np.unique(RX)))) / 2.0
+                                                if RX.size > 1 else float('inf'))
+                        self._cmap_raw_tol_y = (float(np.median(np.diff(np.unique(RY)))) / 2.0
+                                                if RY.size > 1 else float('inf'))
                     except Exception:
                         pass
-                    # nearest-point tolerance: one full data spacing beyond the line
                     self._cmap_raw_tol = 2.0 * max(self._cmap_raw_tol_x, self._cmap_raw_tol_y)
-                    try:
-                        from scipy.spatial import cKDTree
-                        self._cmap_kdtree = cKDTree(np.column_stack((Xf, Yf)))
-                    except Exception:
-                        self._cmap_kdtree = None
-                zi = self._cmap_cache_zi
-                # Derive the color range from the ACTUAL Z data (finite values only) when
-                # the user has not set Z Min/Max. Dividing X or Y only rescales the grid
-                # spacing; it must NOT change the Z (color) axis ticks or colors.
-                # Letting matplotlib auto-scale to the interpolated `zi` array would make
-                # the color range drift (cubic overshoot / NaN coverage change with the
-                # grid geometry), which is why dividing one axis appeared to affect the
-                # others. Anchoring vmin/vmax to the real Z data keeps the colormap
-                # completely stable and independent of any X/Y divide factor.
-                z_finite = Z[np.isfinite(Z)]
-                if z_finite.size > 0:
+                    self._cmap_kdtree = trees[0][0] if trees else None
+                    self._cmap_raw_step = nn_min  # true data spacing (jitter-proof)
+                    self._cmap_pitch = (pitch_x_min, pitch_y_min)  # per-axis robust pitch
+                    self._cmap_raw_key = raw_key
+                # Derive the color range from the ACTUAL Z data (finite values only,
+                # pooled across ALL selected files) when the user has not set
+                # Z Min/Max — keeps the coloring stable and independent of any
+                # X/Y divide factor (see note above).
+                if z_parts:
+                    z_finite = np.concatenate(z_parts)
                     z_auto_min = float(np.min(z_finite))
                     z_auto_max = float(np.max(z_finite))
                 else:
+                    z_finite = np.array([])
                     z_auto_min = z_auto_max = None
                 cmap_vmin = z_min_val if z_min_val is not None else z_auto_min
                 cmap_vmax = z_max_val if z_max_val is not None else z_auto_max
@@ -3260,21 +3386,30 @@ class InteractivePlotter:
                 # matplotlib doesn't allow passing both vmin/vmax and a Normalize instance.
                 im_vmin = None if norm is not None else cmap_vmin
                 im_vmax = None if norm is not None else cmap_vmax
-                if self._cmap_mesh is not None:
-                    # Non-uniform grid (sections with different step widths):
-                    # pcolormesh places every cell at its real measured coordinates.
-                    mesh_x, mesh_y = self._cmap_mesh
-                    im = self.ax.pcolormesh(mesh_x, mesh_y, zi, shading='nearest',
-                                            cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm)
-                else:
-                    # Display interpolation: Sharp = crisp pixels (can look pixelated
-                    # when zoomed), Bilinear/Bicubic = smooth upscale (recommended),
-                    # Auto = matplotlib default (nearest on upscale, antialiased on downscale).
-                    _disp_map = {"Sharp": "nearest", "Bilinear": "bilinear",
-                                 "Bicubic": "bicubic", "Auto": "auto"}
-                    im = self.ax.imshow(zi, extent=(cmap_x_min, cmap_x_max, cmap_y_min, cmap_y_max), origin='lower', aspect='auto',
-                                        cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm,
-                                        interpolation=_disp_map.get(self.cmap_display_interp.get(), "auto"))
+                # Display interpolation: Sharp = crisp pixels (can look pixelated
+                # when zoomed), Bilinear/Bicubic = smooth upscale (recommended),
+                # Auto = matplotlib default (nearest on upscale, antialiased on downscale).
+                _disp_map = {"Sharp": "nearest", "Bilinear": "bilinear",
+                             "Bicubic": "bicubic", "Auto": "auto"}
+                im = None
+                for zi, mesh, (c_x0, c_x1, c_y0, c_y1) in map_grids:
+                    if mesh is not None:
+                        # Non-uniform grid (sections with different step widths):
+                        # pcolormesh places every cell at its real measured coordinates.
+                        mesh_x, mesh_y = mesh
+                        im = self.ax.pcolormesh(mesh_x, mesh_y, zi, shading='nearest',
+                                                cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm)
+                    else:
+                        im = self.ax.imshow(zi, extent=(c_x0, c_x1, c_y0, c_y1), origin='lower', aspect='auto',
+                                            cmap=self.v_cmap_name.get(), vmin=im_vmin, vmax=im_vmax, norm=norm,
+                                            interpolation=_disp_map.get(self.cmap_display_interp.get(), "auto"))
+                # Each imshow call RESETS the axes autoscale limits to its own
+                # extent (last image would win) — apply the COMBINED extent
+                # explicitly so every map is visible. User X/Y ranges, if set,
+                # are applied later in the common formatting and override this.
+                if len(map_grids) > 1:
+                    self.ax.set_xlim(min(g[2][0] for g in map_grids), max(g[2][1] for g in map_grids))
+                    self.ax.set_ylim(min(g[2][2] for g in map_grids), max(g[2][3] for g in map_grids))
                 # Track ylabel_text for custom positioning
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=y_l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
@@ -3327,9 +3462,14 @@ class InteractivePlotter:
                         length=0 if min_z_dir == "none" else min_z_len,
                         labelcolor=self.z_tick_color, color=self.z_tick_color)
                 
-                # --- Store interpolated data for line drawing feature ---
-                self._cmap_zi_data = zi.copy()
-                self._cmap_extent = (X.min(), X.max(), Y.min(), Y.max())
+                # --- Store data for line drawing feature ---
+                # Single file: keep the interpolated grid (grid-based profiles work).
+                # Multi file: no single grid — line tools fall back to raw
+                # nearest-point sampling on the concatenated measured data.
+                self._cmap_zi_data = map_grids[0][0].copy() if len(sel_ds) == 1 else None
+                all_ext = [g[2] for g in map_grids]
+                self._cmap_extent = (min(e[0] for e in all_ext), max(e[1] for e in all_ext),
+                                     min(e[2] for e in all_ext), max(e[3] for e in all_ext))
                 # Re-draw any previously drawn lines on the new color map.
                 # Re-extract profiles ONLY when the interpolated grid was
                 # recomputed (cosmetic updates keep the cached profiles).
@@ -5037,7 +5177,7 @@ class InteractivePlotter:
         if ptype != "Color Map":
             messagebox.showinfo("Info", "Line drawing is only available for Color Map plots.")
             return
-        if self._cmap_zi_data is None:
+        if self._cmap_extent is None:
             messagebox.showinfo("Info", "Please create a Color Map first (load data & plot).")
             return
 
@@ -5193,32 +5333,52 @@ class InteractivePlotter:
         line_name = self._cmap_completed_lines[-1].get('name', 'Line') if self._cmap_completed_lines else 'Line'
         self.draw_line_status.set(f"{line_name} completed! Click to draw another, or stop drawing.")
     
-    def _profile_sample_positions(self, points):
+    def _profile_sample_positions(self, points, dense=False):
         """Dense sample positions along a polyline. Returns (X, Y, D) arrays
         where D is cumulative arc length along the drawn line.
 
-        Sampling density follows the measured data spacing when raw data is
-        available, so a high-resolution scan is NOT decimated to a fixed
-        500 samples per span (that was the old behavior — profiles came out
-        pixelated / aliased). The legacy density stays as a lower bound and
-        a hard cap bounds memory on huge scans.
+        dense=False (raw sampling): pace the sampling by the data pitch
+        ACROSS the line — a vertical line in a dense-x / sparse-y sweep map
+        gets one sample per row instead of hundreds of duplicates.
+        dense=True (grid sampling): keep the legacy density floor so the
+        interpolated grid is smoothly sampled.
         """
         xmin, xmax, ymin, ymax = self._cmap_extent
         span = max(xmax - xmin, ymax - ymin) or 1.0
-        step = span / 500.0  # legacy density (lower bound)
-        try:
-            # _cmap_raw_tol_x/y are HALF the median unique-spacing of the
-            # measured X/Y values -> full median nearest-point spacing:
+        base_step = span / 500.0  # legacy density (lower bound)
+        px_pitch, py_pitch = getattr(self, '_cmap_pitch', None) or (None, None)
+
+        def _seg_step(seg_len, dx, dy):
+            # Pitch-paced candidates (one sample per data row/column crossed)
+            cands = []
+            try:
+                ax = abs(dx) / seg_len  # |cos| of segment direction
+                ay = abs(dy) / seg_len
+                if px_pitch is not None and np.isfinite(px_pitch) and px_pitch > 0 and ax > 1e-12:
+                    cands.append(px_pitch / ax)
+                if py_pitch is not None and np.isfinite(py_pitch) and py_pitch > 0 and ay > 1e-12:
+                    cands.append(py_pitch / ay)
+            except Exception:
+                pass
+            if dense:
+                # Grid sampling: never coarser than the legacy density floor.
+                cands.append(base_step)
+            if cands:
+                return min(cands)
+            # No pitch info for this direction — fall back to true NN spacing,
+            # then coordinate diffs (which collapse on jittered scans).
+            nn = getattr(self, '_cmap_raw_step', None)
+            if nn is not None and np.isfinite(nn) and nn > 0:
+                return nn
             raw_step = 2.0 * min(self._cmap_raw_tol_x, self._cmap_raw_tol_y)
             if np.isfinite(raw_step) and raw_step > 0:
-                step = min(step, raw_step)
-        except Exception:
-            pass
+                return raw_step
+            return base_step
 
         # ponytail: hard sample cap (per segment) bounds memory/CPU on huge
         # scans; raise it if profiles of >100k-pt segments ever needed.
-        def _n_for(seg_len):
-            return min(max(int(np.ceil(seg_len / step)), 10), 100000)
+        def _n_for(seg_len, dx=0.0, dy=1.0):
+            return min(max(int(np.ceil(seg_len / _seg_step(seg_len, dx, dy))), 10), 100000)
 
         segs = []
         cumulative_distance = 0.0
@@ -5226,7 +5386,7 @@ class InteractivePlotter:
             x0, y0 = points[i]
             x1, y1 = points[i + 1]
             seg_len = float(np.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2))
-            n_samples = _n_for(seg_len)
+            n_samples = _n_for(seg_len, x1 - x0, y1 - y0)
             t = np.arange(n_samples) / n_samples
             sx = x0 + t * (x1 - x0)
             sy = y0 + t * (y1 - y0)
@@ -5243,7 +5403,24 @@ class InteractivePlotter:
     def _extract_profile_nearest(self, points):
         """Raw mode: sample the KD-tree-nearest measured data point at each
         position along the drawn line. No interpolation, no averaging.
-        Returns None when raw data / KD-tree is unavailable."""
+        Per-file KD-trees with PER-FILE tolerances — maps with different
+        resolutions each accept samples by their own point spacing, and the
+        closest accepted point wins. Returns None when no raw data exists."""
+        trees = getattr(self, '_cmap_raw_kdtrees', None)
+        if trees:
+            X, Y, D = self._profile_sample_positions(points)
+            z = np.full(X.shape, np.nan)
+            best = np.full(X.shape, np.inf)
+            for tree, tol_f, tx, ty, px, py, Xf, Yf, Zf in trees:
+                if tree is None:
+                    continue
+                dist, idx = tree.query(np.column_stack((X, Y)), k=1)
+                acc = (dist <= tol_f) & (dist < best)
+                if np.any(acc):
+                    z[acc] = Zf[idx[acc]]
+                    best[acc] = dist[acc]
+            return {'x': X, 'y': Y, 'z': z, 'distance': D}
+        # Legacy fallback: single pooled tree (old sessions)
         raw = self._cmap_raw_xyz
         tree = self._cmap_kdtree
         if raw is None or tree is None:
@@ -5254,34 +5431,80 @@ class InteractivePlotter:
         z = np.where(dist <= self._cmap_raw_tol, RZ[idx], np.nan)
         return {'x': X, 'y': Y, 'z': z, 'distance': D}
 
-    def _extract_profile_rowcol(self, points):
-        """Raw mode for Horizontal/Vertical lines: take the actual measured
-        sweep row/column nearest the line — bit-for-bit the single-line data.
-        Returns None for non-H/V lines or when no points lie near the line."""
-        raw = self._cmap_raw_xyz
-        if raw is None:
-            return None
-        RX, RY, RZ = raw
+    @staticmethod
+    def _rowcol_match(Xf, Yf, Zf, tol_x, tol_y, points):
+        """Match a horizontal/vertical line against ONE file's measured points.
+        Returns (coord, z, is_horizontal) sorted by coordinate, or None."""
         x0, y0 = points[0]
         x1, y1 = points[-1]
         dx, dy = abs(x1 - x0), abs(y1 - y0)
         horizontal = dy <= 1e-9 * max(dx, 1.0)
         vertical = dx <= 1e-9 * max(dy, 1.0)
         if horizontal:
-            m = np.abs(RY - y0) <= self._cmap_raw_tol_y
+            m = np.abs(Yf - y0) <= tol_y
         elif vertical:
-            m = np.abs(RX - x0) <= self._cmap_raw_tol_x
+            m = np.abs(Xf - x0) <= tol_x
         else:
             return None
         if not np.any(m):
             return None
-        xs, ys, zs = RX[m], RY[m], RZ[m]
+        xs, ys, zs = Xf[m], Yf[m], Zf[m]
         if horizontal:
             order = np.argsort(xs)
+            return xs[order], zs[order], True
+        order = np.argsort(ys)
+        return ys[order], zs[order], False
+
+    def _extract_profile_rowcol(self, points):
+        """Raw mode for Horizontal/Vertical lines: take the actual measured
+        sweep row/column nearest the line — bit-for-bit the single-line data.
+        Per-file matching with per-file tolerances (mixed-resolution maps each
+        match by their own spacing), results merged and sorted.
+        Returns None for non-H/V lines or when no points lie near the line."""
+        trees = getattr(self, '_cmap_raw_kdtrees', None)
+        if trees:
+            coord_parts, z_parts, horiz = [], [], None
+            for tree, tol_f, tx, ty, px, py, Xf, Yf, Zf in trees:
+                # Match tolerance: grid-based half spacing, widened to half the
+                # robust pitch when coordinates jitter (grid diff collapses).
+                mtx = tx if px is None or not np.isfinite(px) else max(tx, 0.5 * px)
+                mty = ty if py is None or not np.isfinite(py) else max(ty, 0.5 * py)
+                res = self._rowcol_match(Xf, Yf, Zf, mtx, mty, points)
+                if res is None:
+                    continue
+                c, z, h = res
+                horiz = h
+                coord_parts.append(c)
+                z_parts.append(z)
+            if not coord_parts:
+                return None
+            coord = np.concatenate(coord_parts)
+            zs = np.concatenate(z_parts)
+            order = np.argsort(coord)
+            coord, zs = coord[order], zs[order]
+            x0, y0 = points[0]
+            x1, y1 = points[-1]
+            if horiz:
+                xs, ys = coord, np.full(coord.shape, y0)
+            else:
+                xs, ys = np.full(coord.shape, x0), coord
+            dist = np.concatenate(([0.0], np.cumsum(np.abs(np.diff(coord)))))
+            return {'x': xs, 'y': ys, 'z': zs, 'distance': dist}
+        # Legacy fallback: single pooled dataset (old sessions)
+        raw = self._cmap_raw_xyz
+        if raw is None:
+            return None
+        RX, RY, RZ = raw
+        res = self._rowcol_match(RX, RY, RZ, self._cmap_raw_tol_x, self._cmap_raw_tol_y, points)
+        if res is None:
+            return None
+        coord, zs, horiz = res
+        x0, y0 = points[0]
+        x1, y1 = points[-1]
+        if horiz:
+            xs, ys = coord, np.full(coord.shape, y0)
         else:
-            order = np.argsort(ys)
-        xs, ys, zs = xs[order], ys[order], zs[order]
-        coord = xs if horizontal else ys
+            xs, ys = np.full(coord.shape, x0), coord
         dist = np.concatenate(([0.0], np.cumsum(np.abs(np.diff(coord)))))
         return {'x': xs, 'y': ys, 'z': zs, 'distance': dist}
 
@@ -5299,7 +5522,7 @@ class InteractivePlotter:
         """
         empty = {'x': np.array([]), 'y': np.array([]),
                  'z': np.array([]), 'distance': np.array([])}
-        if self._cmap_zi_data is None or self._cmap_extent is None:
+        if self._cmap_extent is None:
             return empty
         if len(points) < 2:
             return empty
@@ -5316,7 +5539,14 @@ class InteractivePlotter:
                 return res
             source = "Grid - bilinear"       # raw data unavailable
 
-        X, Y, D = self._profile_sample_positions(points)
+        if self._cmap_zi_data is None:
+            # Multi-file map: no single interpolated grid — grid-based
+            # sampling unavailable; raw nearest-point works on the
+            # concatenated measured data.
+            res = self._extract_profile_nearest(points)
+            return res if res is not None else empty
+
+        X, Y, D = self._profile_sample_positions(points, dense=True)
         zi = self._cmap_zi_data
         xmin, xmax, ymin, ymax = self._cmap_extent
         ny, nx = zi.shape
@@ -6430,7 +6660,7 @@ class InteractivePlotter:
                 self.legend_columns.set(legend_settings.get("columns", "1"))
                 self.legend_position.set(legend_settings.get("position", "Best"))
                 self.legend_draggable.set(legend_settings.get("draggable", True))
-                self.show_legend.set(legend_settings.get("show_legend", True))
+                self.show_legend.set(legend_settings.get("show_legend", False))
                 self.v_leg_size.set(legend_settings.get("legend_size", "10"))
                 self.v_legend.set(legend_settings.get("legend_csv", ""))
             
@@ -6622,6 +6852,8 @@ class InteractivePlotter:
             # Data changed — any cached color-map interpolation is stale
             self._cmap_cache_key = None
             self._cmap_cache_zi = None
+            self._cmap_multi_cache = {}
+            self._cmap_raw_key = None
             self.refresh_dataset_list(new_load=True)
             
             # === RESTORE AXIS SELECTIONS (after combos populated) ===
