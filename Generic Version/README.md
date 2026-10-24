@@ -26,9 +26,11 @@ python "Transport measurements.py"
 | Resistance two gate mapping measurement | 2D gate × gate map, Snake or Forward/Backward scan modes |
 | AC current sweep measurement | Sweep K6221 AC current amplitude, RMS in / peak sent (×1.4142) |
 | AC and DC current ramp measurement | Two K6221 units: one runs the AC waveform, the other ramps DC current (user assigns which unit is AC / DC). Only shown when both 6221s are connected |
-| Differential Resistance AUX Gate Map | 2D gate × AUX map with dV/dI readout (DC bias on a lock-in AUX output, AC from lock-in sine or K6221), Snake or Forward/Backward scan modes |
+| Differential Resistance 6221 Gate Map | 2D gate × DC-current map with dV/dI readout (DC bias swept on the K6221 current source, compliance/range set manually on the instrument, AC from a lock-in sine output pre-configured), Snake or Forward/Backward scan modes |
+| Differential Resistance 6221 (DC bias on K6221) | 1D dV/dI sweep: DC bias swept on the K6221 current source, AC from a lock-in sine output (pre-configured; the 6221 waveform is never set here) |
+| Differential Resistance AUX (DC on lock-in AUX) | 1D dV/dI sweep: DC bias swept on a lock-in AUX output (SRS830/SRS860/MFLI); AC accommodated but never configured (set the lock-in sine or the K6221 waveform on the instrument) |
 | Resistance AUX Gate Map | 2D gate × AUX map with resistance readout (AUX voltage swept on a chosen lock-in), Snake or Forward/Backward scan modes |
-| RV dV/dI sequencer measurement | Sequence RV gate sweeps and dV/dI AUX sweeps |
+| RV dV/dI sequencer measurement | Sequence RV gate sweeps and dV/dI sweeps (DC bias on the K6221 current source, no AUX) |
 | RV R_AUX sequencer measurement | Sequence RV gate sweeps and R_AUX output sweeps |
 
 ## Supported Instruments
@@ -66,6 +68,7 @@ Generic Version/
 
 ## Notes
 
+- **Home test (no hardware):** set `QLMG_SIMULATE=1` in the environment (or add `"simulate": true` to `instrument_overrides.json`) before launching. Every instrument is replaced by a fake — all readings 0.0, all calls no-ops, assigned levels (AUX dacs, 6221 current) stored and read back — so the full GUI, every procedure, gating, dropdowns and columns work as if everything were connected. Quick check: `python _simulate_test.py`.
 - **Data output:** `~/Desktop/Generic Measurements/` (change `save_dir` in `Transport measurements.py` and `procedures/base.py`).
 - **Dynamic columns:** only instruments connected in the pre-launch dialog produce CSV columns; connected-but-unticked instruments in a procedure's **Devices** group give NaN.
 - **Yokogawas as sweep SMUs:** `YokoGS200_1/2` and `Yoko7651_1/2` appear in every SMU dropdown (gate sweep, two-gate sweep/map). They are source-only — no leakage-current readback (`measure__current()` returns NaN) — and are configured to a fixed 10 V range with the instrument's own current limit when the output turns on. Set a larger range on the front panel if a sweep needs >10 V.

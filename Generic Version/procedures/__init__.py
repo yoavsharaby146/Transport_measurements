@@ -23,12 +23,14 @@ from .resistance_gate_sweep import Resistance_gate_sweep_measurement, proc_resis
 from .resistance_two_gate_sweep import Resistance_two_gate_scan_sweep_measurement, proc_resistance_two_gate_sweep
 from .resistance_two_gate_map import Resistance_two_gate_mapping_measurement, proc_resistance_two_gate_map
 from .ac_current_sweep import AC_current_sweep_measurement, proc_ac_current_sweep
-from .differential_resistance import (Differential_Resistance_AUX, proc_diff_resistance_AUX,
-                                      Differential_Resistance_6221DC, proc_diff_resistance_6221dc)
+from .differential_resistance_6221 import (Differential_Resistance_6221,
+                                           proc_diff_resistance_6221)
+from .differential_resistance_aux import (Differential_Resistance_AUX,
+                                          proc_diff_resistance_AUX)
 from .resistance_aux_sweep import Resistance_aux_voltage_measurement, proc_resistance_aux
 from .resistance_aux_gate_map import Resistance_aux_gate_map, proc_resistance_aux_gate_map
-from .differential_resistance_aux_map import (Differential_Resistance_AUX_map,
-                                              proc_diff_resistance_aux_map)
+from .differential_resistance_6221_map import (Differential_Resistance_6221_map,
+                                               proc_diff_resistance_6221_map)
 from .sequencer_rv_dvdi import RV_dV_dI_sequencer_measurement, proc_RV_dV_dI_sequencer
 from .sequencer_rv_r_aux import RV_R_AUX_sequencer_measurement, proc_RV_R_AUX_sequencer
 from .sequencer_rt_rv import Rt_RV_sequencer_measurement, proc_Rt_RV_sequencer
@@ -54,9 +56,9 @@ PROCEDURES.update(proc_ac_current_sweep)
 PROCEDURES.update(proc_resistance_aux)
 PROCEDURES.update(proc_Rt_RV_sequencer)
 PROCEDURES.update(proc_diff_resistance_AUX)
-PROCEDURES.update(proc_diff_resistance_6221dc)
+PROCEDURES.update(proc_diff_resistance_6221)
 PROCEDURES.update(proc_resistance_aux_gate_map)
-PROCEDURES.update(proc_diff_resistance_aux_map)
+PROCEDURES.update(proc_diff_resistance_6221_map)
 PROCEDURES.update(proc_RV_dV_dI_sequencer)
 PROCEDURES.update(proc_RV_R_AUX_sequencer)
 
@@ -77,11 +79,11 @@ __all__ = [
     'Resistance_two_gate_scan_sweep_measurement',
     'Resistance_two_gate_mapping_measurement',
     'AC_current_sweep_measurement',
+    'Differential_Resistance_6221',
     'Differential_Resistance_AUX',
-    'Differential_Resistance_6221DC',
     'Resistance_aux_voltage_measurement',
     'Rt_RV_sequencer_measurement',
-    'Differential_Resistance_AUX_map',
+    'Differential_Resistance_6221_map',
     'Resistance_aux_gate_map',
     'RV_dV_dI_sequencer_measurement',
     'RV_R_AUX_sequencer_measurement',
@@ -91,12 +93,12 @@ __all__ = [
     'proc_resistance_two_gate_sweep',
     'proc_resistance_two_gate_map',
     'proc_ac_current_sweep',
+    'proc_diff_resistance_6221',
     'proc_diff_resistance_AUX',
-    'proc_diff_resistance_6221dc',
     'proc_resistance_aux',
     'proc_Rt_RV_sequencer',
     'proc_resistance_aux_gate_map',
-    'proc_diff_resistance_aux_map',
+    'proc_diff_resistance_6221_map',
     'proc_RV_dV_dI_sequencer',
     'proc_RV_R_AUX_sequencer',
     # Aggregates

@@ -6,6 +6,7 @@
 #####################################################
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -188,6 +189,73 @@ def _maybe_mfli(n):
 MFLI_1 = _maybe_mfli(1)
 MFLI_2 = _maybe_mfli(2)
 MFLI_3 = _maybe_mfli(3)
+
+
+# === Simulate mode — home testing without hardware =====================
+# Enable either by setting QLMG_SIMULATE=1 in the environment or by adding
+# "simulate": true to instrument_overrides.json. Every instrument is then
+# replaced by a duck-typed fake: any reading returns 0.0, any call is a
+# no-op, settable levels (dac1, source_current, ...) store what you assign.
+# The whole stack (requires-gating, dropdowns, columns, procedures, GUI)
+# runs as if all instruments were connected.
+
+SIMULATE = bool(overrides.get("simulate")) or os.environ.get("QLMG_SIMULATE") == "1"
+
+
+class _FakeValue(float):
+    """0.0 that is also callable and whose attributes chain to more fakes."""
+    def __new__(cls):
+        return super().__new__(cls, 0.0)
+
+    def __call__(self, *args, **kwargs):
+        return _FakeValue()
+
+    def __getattr__(self, name):
+        if name.startswith('__'):
+            raise AttributeError(name)
+        return _FakeValue()
+
+
+class _FakeInstrument:
+    """Stand-in for any instrument. Returns [0.0, 0.0] for the lock-in
+    snapshot readers (list(reader()) must yield exactly 2 values), stores
+    assigned levels, everything else reads as 0.0 and calls are no-ops."""
+
+    def __init__(self, name):
+        object.__setattr__(self, '_name', name)
+
+    def snap(self, *args, **kwargs):
+        return [0.0, 0.0]
+
+    def read_demod(self, *args, **kwargs):
+        return [0.0, 0.0]
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        return _FakeValue()
+
+
+if SIMULATE:
+    print("[configuration] SIMULATE mode — all instruments faked (home test)")
+    Gate_1 = _FakeInstrument("Gate_1")
+    Gate_2 = _FakeInstrument("Gate_2")
+    Dual_gate = _FakeInstrument("Dual_gate")
+    YokoGS200_1 = _FakeInstrument("YokoGS200_1")
+    YokoGS200_2 = _FakeInstrument("YokoGS200_2")
+    Yoko7651_1 = _FakeInstrument("Yoko7651_1")
+    Yoko7651_2 = _FakeInstrument("Yoko7651_2")
+    K6221 = _FakeInstrument("K6221")
+    SRS860_1 = _FakeInstrument("SRS860_1")
+    SRS860_2 = _FakeInstrument("SRS860_2")
+    SRS860_3 = _FakeInstrument("SRS860_3")
+    SRS860_4 = _FakeInstrument("SRS860_4")
+    SRS830_1 = _FakeInstrument("SRS830_1")
+    SRS830_2 = _FakeInstrument("SRS830_2")
+    SRS830_3 = _FakeInstrument("SRS830_3")
+    MFLI_1 = _FakeInstrument("MFLI_1")
+    MFLI_2 = _FakeInstrument("MFLI_2")
+    MFLI_3 = _FakeInstrument("MFLI_3")
 
 
 def read_temperature():
