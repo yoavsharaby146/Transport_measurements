@@ -229,6 +229,13 @@ class InteractivePlotter:
         self.y_log = tk.BooleanVar()
         self.z_log = tk.BooleanVar()  # Log scale for Color Map Z (colormap/colorbar)
 
+        # --- COLORBAR PLACEMENT (Color Map) ---
+        self.v_cbar_location = tk.StringVar(value="Right")  # Right | Left | Top | Bottom
+        self.v_cbar_fraction = tk.StringVar()  # blank = 0.15 (fraction of axes reserved)
+        self.v_cbar_pad = tk.StringVar()        # blank = 0.02 (gap to the axes)
+        self.v_cbar_shrink = tk.StringVar()     # blank = 1.0 (scale down the bar)
+        self.v_cbar_aspect = tk.StringVar()     # blank = 20 (length/width ratio)
+
         # --- COLOR MAP INTERPOLATION (performance) ---
         self._cmap_interp_method = tk.StringVar(value="cubic")   # cubic | linear | nearest
         self._cmap_grid_res = tk.StringVar(value="300")
@@ -1523,7 +1530,32 @@ class InteractivePlotter:
         ttk.Label(f_min_y, text="(blank = auto)", font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=5)
 
         # ============================================
-        # TAB 8: Transparency
+        # TAB 8: Colorbar Placement
+        # ============================================
+        tab_cbar = ttk.Frame(notebook, padding=10)
+        notebook.add(tab_cbar, text="Colorbar")
+
+        ttk.Label(tab_cbar, text="Colorbar Placement (Color Map)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        loc_frame = ttk.Frame(tab_cbar)
+        loc_frame.pack(fill='x', pady=2)
+        ttk.Label(loc_frame, text="Location:", width=15).pack(side='left')
+        ttk.Combobox(loc_frame, textvariable=self.v_cbar_location,
+                     values=["Right", "Left", "Top", "Bottom"], width=10,
+                     state='readonly').pack(side='left', padx=4)
+        ttk.Label(tab_cbar, text="Top/Bottom = horizontal colorbar (Z ticks/label move to its long axis).\n"
+                                 "Fraction reserves part of the plot area for the bar; Shrink shortens it; "
+                                 "Aspect sets length/width.",
+                  font=('Arial', 8, 'italic'), foreground='gray', wraplength=400,
+                  justify='left').pack(anchor='w', pady=(2, 8))
+
+        ttk.Label(tab_cbar, text="Size (blank = matplotlib default)", font=('Arial', 10, 'bold')).pack(pady=5, anchor='w')
+        add_entry(tab_cbar, "Fraction (0.15):", self.v_cbar_fraction)
+        add_entry(tab_cbar, "Pad (0.02):", self.v_cbar_pad)
+        add_entry(tab_cbar, "Shrink (1.0):", self.v_cbar_shrink)
+        add_entry(tab_cbar, "Aspect (20):", self.v_cbar_aspect)
+
+        # ============================================
+        # TAB 9: Transparency
         # ============================================
         tab_transparency = ttk.Frame(notebook, padding=10)
         notebook.add(tab_transparency, text="Transparency")
@@ -3413,28 +3445,39 @@ class InteractivePlotter:
                 # Track ylabel_text for custom positioning
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=y_l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
-                cbar = self.fig.colorbar(im, ax=self.ax)
+                # Colorbar placement: location + size (blank fields = defaults)
+                _cb_loc_map = {"Right": "right", "Left": "left", "Top": "top", "Bottom": "bottom"}
+                cbar_loc = _cb_loc_map.get(self.v_cbar_location.get(), "right")
+                cbar_vert = cbar_loc in ("right", "left")
+                # Horizontal colorbars (Top/Bottom) carry Z ticks/label on their X axis
+                cbar_ax_char = 'y' if cbar_vert else 'x'
+                cbar = self.fig.colorbar(im, ax=self.ax, location=cbar_loc,
+                                         fraction=val(self.v_cbar_fraction, 0.15),
+                                         pad=val(self.v_cbar_pad, 0.02),
+                                         shrink=val(self.v_cbar_shrink, 1.0),
+                                         aspect=val(self.v_cbar_aspect, 20))
+                cbar_ax = cbar.ax.yaxis if cbar_vert else cbar.ax.xaxis
                 # Set colorbar label and get the text object for custom positioning
                 cbar.set_label(self.v_zlabel.get() or self.z_combo.get(), fontsize=z_l_sz, labelpad=z_lab_pad,
                                fontname=font, color=self.zlabel_color, rotation=zlabel_rot)
                 # Get the actual label text object from the colorbar
-                zlabel_text = cbar.ax.yaxis.label
+                zlabel_text = cbar.ax.yaxis.label if cbar_vert else cbar.ax.xaxis.label
                 # Tick locators for the colorbar.
                 # Linear: MultipleLocator / AutoMinorLocator (Z Maj Step / Z Min Divs).
                 # Log: LogLocator with user-controlled base (Z Maj Step, e.g. 2 or 10)
                 # and minor subs (Z Min Divs = 1 -> decades only, else auto sub-ticks).
                 if not self.z_log.get():
-                    if z_maj: cbar.ax.yaxis.set_major_locator(ticker.MultipleLocator(z_maj))
-                    if z_min > 1: cbar.ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(z_min))
+                    if z_maj: cbar_ax.set_major_locator(ticker.MultipleLocator(z_maj))
+                    if z_min > 1: cbar_ax.set_minor_locator(ticker.AutoMinorLocator(z_min))
                     # Z notation (Scientific / Plain / Engineering) on linear colorbars
                     z_not = self.v_z_not.get()
                     try:
                         if z_not == "Scientific":
-                            cbar.ax.ticklabel_format(axis='y', style='sci', scilimits=(-2, 2), useMathText=True)
+                            cbar.ax.ticklabel_format(axis=cbar_ax_char, style='sci', scilimits=(-2, 2), useMathText=True)
                         elif z_not == "Plain":
-                            cbar.ax.ticklabel_format(axis='y', style='plain', useOffset=False)
+                            cbar.ax.ticklabel_format(axis=cbar_ax_char, style='plain', useOffset=False)
                         elif z_not == "Engineering":
-                            cbar.ax.yaxis.set_major_formatter(ticker.EngFormatter())
+                            cbar_ax.set_major_formatter(ticker.EngFormatter())
                     except Exception:
                         pass
                 else:
@@ -3445,19 +3488,19 @@ class InteractivePlotter:
                     if z_base <= 1.0:
                         z_base = 10.0
                     z_subs = None if z_min == 1 else 'auto'
-                    cbar.ax.yaxis.set_major_locator(ticker.LogLocator(base=z_base))
-                    cbar.ax.yaxis.set_minor_locator(ticker.LogLocator(base=z_base, subs=z_subs))
+                    cbar_ax.set_major_locator(ticker.LogLocator(base=z_base))
+                    cbar_ax.set_minor_locator(ticker.LogLocator(base=z_base, subs=z_subs))
                     # 'Plain' notation on log colorbars: plain numbers instead of 10^k
                     # (applies to minor ticks too — they default to 10^k style labels)
                     if self.v_z_not.get() == "Plain":
                         z_plain_fmt = ticker.FuncFormatter(lambda v, p: f'{v:g}')
-                        cbar.ax.yaxis.set_major_formatter(z_plain_fmt)
-                        cbar.ax.yaxis.set_minor_formatter(z_plain_fmt)
+                        cbar_ax.set_major_formatter(z_plain_fmt)
+                        cbar_ax.set_minor_formatter(z_plain_fmt)
                 cbar.ax.tick_params(labelsize=zt_sz, pad=z_pad_val, labelcolor=self.z_tick_color, color=self.z_tick_color)
                 if not self.z_log.get() and z_min > 1:
                     min_z_dir = self.v_minor_tick_dir_z.get()
                     min_z_len = val(self.v_minor_tick_length, 2.0)
-                    cbar.ax.tick_params(axis='y', which='minor',
+                    cbar.ax.tick_params(axis=cbar_ax_char, which='minor',
                         direction=min_z_dir if min_z_dir != "none" else "out",
                         length=0 if min_z_dir == "none" else min_z_len,
                         labelcolor=self.z_tick_color, color=self.z_tick_color)
@@ -3684,9 +3727,10 @@ class InteractivePlotter:
                     if y_dec is not None and not has_y_breaks:
                         ax_curr.yaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{y_dec}f'))
 
-            # Z axis (colorbar) decimals
+            # Z axis (colorbar) decimals (cbar_ax_char/cbar set in the Color Map branch)
             if ptype == "Color Map" and z_dec is not None:
-                cbar.ax.yaxis.set_major_formatter(ticker.FormatStrFormatter(f'%.{z_dec}f'))
+                (cbar.ax.yaxis if cbar_vert else cbar.ax.xaxis).set_major_formatter(
+                    ticker.FormatStrFormatter(f'%.{z_dec}f'))
 
             target_ax = self.ax
             # (log scales were already applied BEFORE the tick-formatting loop;
@@ -4538,6 +4582,15 @@ class InteractivePlotter:
                 "major_step": self.v_sec_y_maj.get(),
                 "minor_divisions": self.v_sec_y_min_div.get(),
                 "label_color": self.sec_y_label_color,
+            }
+
+            # === COLORBAR PLACEMENT ===
+            session_data["colorbar"] = {
+                "location": self.v_cbar_location.get(),
+                "fraction": self.v_cbar_fraction.get(),
+                "pad": self.v_cbar_pad.get(),
+                "shrink": self.v_cbar_shrink.get(),
+                "aspect": self.v_cbar_aspect.get(),
             }
 
             # === PLOT SETTINGS ===
@@ -6826,6 +6879,15 @@ class InteractivePlotter:
                 self.v_sec_y_maj.set(sec_y_settings.get("major_step", ""))
                 self.v_sec_y_min_div.set(sec_y_settings.get("minor_divisions", ""))
                 self.sec_y_label_color = sec_y_settings.get("label_color", "black")
+
+            # === RESTORE COLORBAR PLACEMENT ===
+            cbar_settings = session_data.get("colorbar", {})
+            if cbar_settings:
+                self.v_cbar_location.set(cbar_settings.get("location", "Right"))
+                self.v_cbar_fraction.set(cbar_settings.get("fraction", ""))
+                self.v_cbar_pad.set(cbar_settings.get("pad", ""))
+                self.v_cbar_shrink.set(cbar_settings.get("shrink", ""))
+                self.v_cbar_aspect.set(cbar_settings.get("aspect", ""))
 
             # === RESTORE PLOT SETTINGS ===
             plot_settings = session_data.get("plot_settings", {})
