@@ -4438,12 +4438,40 @@ class InteractivePlotter:
                 "ylabel": self.v_ylabel.get(),
                 "y2label": self.v_y2label.get(),
                 "zlabel": self.v_zlabel.get(),
+                "x2label": self.v_x2label.get(),
                 "title_color": self.title_color,
                 "xlabel_color": self.xlabel_color,
                 "ylabel_color": self.ylabel_color,
+                "y2label_color": self.y2label_color,
                 "zlabel_color": self.zlabel_color,
+                "x2label_color": self.x2label_color,
                 "xtick_color": self.xtick_color,
                 "ytick_color": self.ytick_color,
+                "y2tick_color": self.y2tick_color,
+                "x2tick_color": self.x2tick_color,
+                "z_tick_color": self.z_tick_color,
+            }
+
+            # === LABEL POSITIONS (figure coordinates) ===
+            session_data["label_positions"] = {
+                "use_custom_positions": self.use_custom_label_positions.get(),
+                "title_x": self.title_x.get(), "title_y": self.title_y.get(),
+                "xlabel_x": self.xlabel_x.get(), "xlabel_y": self.xlabel_y.get(),
+                "ylabel_x": self.ylabel_x.get(), "ylabel_y": self.ylabel_y.get(),
+                "y2label_x": self.y2label_x.get(), "y2label_y": self.y2label_y.get(),
+                "x2label_x": self.x2label_x.get(), "x2label_y": self.x2label_y.get(),
+                "zlabel_x": self.zlabel_x.get(), "zlabel_y": self.zlabel_y.get(),
+            }
+
+            # === LABEL ROTATIONS (degrees) ===
+            session_data["label_rotations"] = {
+                "use_custom_rotation": self.use_custom_rotation.get(),
+                "title": self.title_rotation.get(),
+                "xlabel": self.xlabel_rotation.get(),
+                "ylabel": self.ylabel_rotation.get(),
+                "y2label": self.y2label_rotation.get(),
+                "x2label": self.x2label_rotation.get(),
+                "zlabel": self.zlabel_rotation.get(),
             }
             
             # === DATA TRANSFORMATION ===
@@ -6725,12 +6753,46 @@ class InteractivePlotter:
                 self.v_ylabel.set(titles_labels.get("ylabel", ""))
                 self.v_y2label.set(titles_labels.get("y2label", ""))
                 self.v_zlabel.set(titles_labels.get("zlabel", ""))
+                self.v_x2label.set(titles_labels.get("x2label", ""))
                 self.title_color = titles_labels.get("title_color", "black")
                 self.xlabel_color = titles_labels.get("xlabel_color", "black")
                 self.ylabel_color = titles_labels.get("ylabel_color", "black")
+                self.y2label_color = titles_labels.get("y2label_color", "black")
                 self.zlabel_color = titles_labels.get("zlabel_color", "black")
+                self.x2label_color = titles_labels.get("x2label_color", "black")
                 self.xtick_color = titles_labels.get("xtick_color", "black")
                 self.ytick_color = titles_labels.get("ytick_color", "black")
+                self.y2tick_color = titles_labels.get("y2tick_color", "black")
+                self.x2tick_color = titles_labels.get("x2tick_color", "black")
+                self.z_tick_color = titles_labels.get("z_tick_color", "black")
+
+            # === RESTORE LABEL POSITIONS ===
+            label_positions = session_data.get("label_positions", {})
+            if label_positions:
+                self.use_custom_label_positions.set(label_positions.get("use_custom_positions", False))
+                self.title_x.set(label_positions.get("title_x", "0.5"))
+                self.title_y.set(label_positions.get("title_y", "0.98"))
+                self.xlabel_x.set(label_positions.get("xlabel_x", "0.5"))
+                self.xlabel_y.set(label_positions.get("xlabel_y", "0.04"))
+                self.ylabel_x.set(label_positions.get("ylabel_x", "0.04"))
+                self.ylabel_y.set(label_positions.get("ylabel_y", "0.5"))
+                self.y2label_x.set(label_positions.get("y2label_x", "0.96"))
+                self.y2label_y.set(label_positions.get("y2label_y", "0.5"))
+                self.x2label_x.set(label_positions.get("x2label_x", "0.5"))
+                self.x2label_y.set(label_positions.get("x2label_y", "0.98"))
+                self.zlabel_x.set(label_positions.get("zlabel_x", "0.96"))
+                self.zlabel_y.set(label_positions.get("zlabel_y", "0.5"))
+
+            # === RESTORE LABEL ROTATIONS ===
+            label_rotations = session_data.get("label_rotations", {})
+            if label_rotations:
+                self.use_custom_rotation.set(label_rotations.get("use_custom_rotation", False))
+                self.title_rotation.set(label_rotations.get("title", "0"))
+                self.xlabel_rotation.set(label_rotations.get("xlabel", "0"))
+                self.ylabel_rotation.set(label_rotations.get("ylabel", "90"))
+                self.y2label_rotation.set(label_rotations.get("y2label", "90"))
+                self.x2label_rotation.set(label_rotations.get("x2label", "0"))
+                self.zlabel_rotation.set(label_rotations.get("zlabel", "90"))
             
             # === RESTORE DATA TRANSFORMATION ===
             data_transformation = session_data.get("data_transformation", {})
