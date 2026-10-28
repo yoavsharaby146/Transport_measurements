@@ -8,7 +8,7 @@ These helpers skip the preamble so callers only see titled data columns.
 import polars as pl
 
 
-def detect_header_row(filepath, max_lines=50):
+def detect_header_row(filepath, max_lines=100):
     """Return index of the column-title row; 0 if the file has no preamble.
 
     Scans the first `max_lines` lines for one containing 'time(s)'
