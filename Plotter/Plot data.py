@@ -88,8 +88,8 @@ class InteractivePlotter:
         self.file_divs = {}
         self.merge_cols_var = tk.BooleanVar(value=False)
         self.use_ref_x_var = tk.BooleanVar(value=False)
-        # 3D Line: fixed X values for perpendicular (Y-direction) sweeps
-        self.v_3d_cross_x = tk.StringVar(value="")
+        # 3D Line: perpendicular sweeps enabled + view angle (elev θ / azim φ)
+        self.v_3d_cross_on = tk.BooleanVar(value=False)
         # 3D Line: view angle controls (elevation θ / azimuth φ, degrees)
         self.v_3d_elev = tk.StringVar(value="22")
         self.v_3d_azim = tk.StringVar(value="-60")
@@ -634,10 +634,23 @@ class InteractivePlotter:
 
         # --- 3D Line options (perpendicular cross-sweeps) ---
         self.frame_3d = ttk.Frame(self.y_container_frame)
-        cf3 = ttk.Frame(self.frame_3d)
-        cf3.pack(fill='x', pady=2)
-        ttk.Label(cf3, text="Perp. sweeps at X:").pack(side='left')
-        ttk.Entry(cf3, textvariable=self.v_3d_cross_x).pack(side='left', fill='x', expand=True, padx=4)
+        ttk.Checkbutton(self.frame_3d, text="Perpendicular sweeps — trace Y at fixed X",
+                        variable=self.v_3d_cross_on).pack(anchor='w', pady=(4, 1))
+        ttk.Label(self.frame_3d, text="Fixed X values (each snaps to its nearest measured step):",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(anchor='w')
+        lf3 = ttk.Frame(self.frame_3d)
+        lf3.pack(fill='x')
+        sb3 = ttk.Scrollbar(lf3, orient='vertical')
+        self.x3_listbox = tk.Listbox(lf3, selectmode='multiple', height=5,
+                                     yscrollcommand=sb3.set, exportselection=False)
+        sb3.config(command=self.x3_listbox.yview)
+        self.x3_listbox.pack(side='left', fill='both', expand=True)
+        sb3.pack(side='right', fill='y')
+        bf3 = ttk.Frame(self.frame_3d)
+        bf3.pack(fill='x', pady=2)
+        ttk.Button(bf3, text="Select All", command=lambda: self.x3_listbox.select_set(0, tk.END)).pack(side='left', padx=2)
+        ttk.Button(bf3, text="Clear", command=lambda: self.x3_listbox.selection_clear(0, tk.END)).pack(side='left', padx=2)
+        ttk.Button(bf3, text="↻ Refresh List", command=self._refresh_3d_cross_list).pack(side='left', padx=2)
         vf3 = ttk.Frame(self.frame_3d)
         vf3.pack(fill='x', pady=2)
         ttk.Label(vf3, text="Elev (θ°):").pack(side='left')
@@ -2166,6 +2179,7 @@ class InteractivePlotter:
         self.y_list_frame.pack_forget()
         if ptype == "3D Line":
             self.frame_3d.pack(fill='both', expand=True)
+            self._refresh_3d_cross_list()
         if ptype == "Dual Y-Axis":
             self.y_dual_frame.pack(fill='both', expand=True)
         elif ptype == "XXY (Dual X)":
@@ -3595,27 +3609,18 @@ class InteractivePlotter:
                         sweeps.append((fk, float(yv[gi]), X[m][order], Z[m][order]))
 
                 # Family 2 (perpendicular): sweep along Y — one line per FIXED X
-                # value. CSV list snaps each requested value to the nearest
-                # measured X step; 'all' takes every step.
+                # value chosen in the "Fixed X values" list (checkbox enables it;
+                # each selected value snaps to the nearest measured X step).
                 cross_sweeps = []  # (file_key, x_value, ys, zs)
-                cross_txt = self.v_3d_cross_x.get().strip()
-                if cross_txt:
-                    use_all = cross_txt.lower() in ("all", "*")
-                    wanted = []
-                    if not use_all:
-                        for tok in cross_txt.split(','):
-                            try:
-                                wanted.append(float(tok))
-                            except ValueError:
-                                pass
+                if self.v_3d_cross_on.get():
+                    self._refresh_3d_cross_list()  # keep the list in sync with data/divisors
+                    wanted = self._get_3d_cross_values()
                     for fk, X, Y, Z in file_data:
                         xv_all = np.unique(X)
-                        if use_all:
-                            chosen = xv_all
-                        else:
-                            picked = sorted({int(np.argmin(np.abs(xv_all - w))) for w in wanted})
-                            chosen = xv_all[picked]
-                        for xv in chosen:
+                        if xv_all.size == 0:
+                            continue
+                        picked = sorted({int(np.argmin(np.abs(xv_all - w))) for w in wanted})
+                        for xv in xv_all[picked]:
                             m = np.isclose(X, xv)
                             order = np.argsort(Y[m])
                             cross_sweeps.append((fk, float(xv), Y[m][order], Z[m][order]))
@@ -4996,6 +5001,44 @@ class InteractivePlotter:
         menu.tk_popup(screen_x, screen_y)
     
     # --- 3D LINE: DRAG-TO-ROTATE ---
+
+    def _refresh_3d_cross_list(self):
+        """Fill the 'Fixed X values' listbox with the unique X steps of the
+        selected datasets (Divide X applied). Selection survives a refresh."""
+        lb = getattr(self, "x3_listbox", None)
+        if lb is None:
+            return
+        old = {lb.get(i) for i in lb.curselection()}
+        lb.delete(0, tk.END)
+        xcol = self.x_combo.get()
+        xf_s = self.v_x_div.get()
+        vals = set()
+        for i in self.dataset_listbox.curselection():
+            df = self.datasets.get(self.dataset_listbox.get(i))
+            if df is None or xcol not in df.columns:
+                continue
+            X = self._axis_transform(df[xcol].to_numpy(), xf_s)
+            X = X[np.isfinite(X)]
+            if X.size:
+                vals.update(float(v) for v in np.unique(X))
+        for v in sorted(vals):
+            s = f"{v:.6g}"
+            lb.insert(tk.END, s)
+            if s in old:
+                lb.selection_set(tk.END)
+
+    def _get_3d_cross_values(self):
+        """Selected fixed-X values from the 3D cross-sweep listbox (as floats)."""
+        vals = []
+        lb = getattr(self, "x3_listbox", None)
+        if lb is None:
+            return vals
+        for i in lb.curselection():
+            try:
+                vals.append(float(lb.get(i)))
+            except ValueError:
+                pass
+        return vals
 
     def _on_3d_view_entry(self, *_args):
         """Elev/Azim entry changed: apply the view live (no replot)."""
