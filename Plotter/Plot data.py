@@ -20,6 +20,8 @@ import matplotlib.ticker as ticker
 from matplotlib import cm
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import mpl_toolkits.mplot3d  # noqa: F401  (registers the '3d' projection)
+from mpl_toolkits.mplot3d import Axes3D
 
 # --- Third-Party: Tkinter GUI ---
 import tkinter as tk
@@ -86,6 +88,14 @@ class InteractivePlotter:
         self.file_divs = {}
         self.merge_cols_var = tk.BooleanVar(value=False)
         self.use_ref_x_var = tk.BooleanVar(value=False)
+        # 3D Line: fixed X values for perpendicular (Y-direction) sweeps
+        self.v_3d_cross_x = tk.StringVar(value="")
+        # 3D Line: view angle controls (elevation θ / azimuth φ, degrees)
+        self.v_3d_elev = tk.StringVar(value="22")
+        self.v_3d_azim = tk.StringVar(value="-60")
+        self._3d_syncing = False  # guard: entry<->drag sync loops
+        self.v_3d_elev.trace("w", self._on_3d_view_entry)
+        self.v_3d_azim.trace("w", self._on_3d_view_entry)
 
         # --- COLOR SETTINGS ---
         self.v_color_mode = tk.StringVar(value="Cycle")  # "Cycle" or "Gradient"
@@ -321,6 +331,8 @@ class InteractivePlotter:
         self._cmap_zi_data = None     # Stored interpolated Z data (2D array)
         self._cmap_extent = None      # Stored extent (xmin, xmax, ymin, ymax)
         self._cmap_mouse_press_cid = None  # Event connection ID
+        self._rot3d_last = None            # last mouse pos while dragging a 3D view
+        self._3d_view = None               # (elev, azim) persisted across Update Plot
         self._cmap_mouse_move_cid = None   # Event connection ID for preview line
         self._cmap_preview_line = None     # Preview line artist
         self._cmap_completed_lines = []    # List of completed line dicts with color, name, points, profile_data
@@ -472,7 +484,7 @@ class InteractivePlotter:
         row += 1
         ttk.Label(control_frame, text="Plot Type:").grid(row=row, column=0, columnspan=2, sticky='w')
         self.plot_type = ttk.Combobox(control_frame,
-                                      values=["Line", "Scatter", "Color Map", "Dual Y-Axis", "XXY (Dual X)", "XYXY (Dual X+Y)"],
+                                      values=["Line", "Scatter", "Color Map", "Dual Y-Axis", "XXY (Dual X)", "XYXY (Dual X+Y)", "3D Line"],
                                       state='readonly', width=20)
         self.plot_type.current(0)
         self.plot_type.grid(row=row, column=2, columnspan=2, sticky='ew', pady=5)
@@ -620,6 +632,24 @@ class InteractivePlotter:
         self.xyxy_y2_col = ttk.Combobox(xy2y, state='readonly')
         self.xyxy_y2_col.pack(side='left', fill='x', expand=True)
 
+        # --- 3D Line options (perpendicular cross-sweeps) ---
+        self.frame_3d = ttk.Frame(self.y_container_frame)
+        cf3 = ttk.Frame(self.frame_3d)
+        cf3.pack(fill='x', pady=2)
+        ttk.Label(cf3, text="Perp. sweeps at X:").pack(side='left')
+        ttk.Entry(cf3, textvariable=self.v_3d_cross_x).pack(side='left', fill='x', expand=True, padx=4)
+        vf3 = ttk.Frame(self.frame_3d)
+        vf3.pack(fill='x', pady=2)
+        ttk.Label(vf3, text="Elev (θ°):").pack(side='left')
+        ttk.Entry(vf3, textvariable=self.v_3d_elev, width=7).pack(side='left', padx=3)
+        ttk.Label(vf3, text="Azim (φ°):").pack(side='left', padx=(8, 0))
+        ttk.Entry(vf3, textvariable=self.v_3d_azim, width=7).pack(side='left', padx=3)
+        ttk.Label(vf3, text="(live)", font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=4)
+        ttk.Label(self.frame_3d,
+                  text="CSV of fixed X values for perpendicular Y-sweeps, or 'all' = every X step.\n"
+                       "Blank = X-sweeps only (one line per stepped Y value).",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(anchor='w')
+
         ttk.Label(control_frame, text="Z Axis (Color):").grid(row=row, column=0, sticky='w')
         self.z_combo = ttk.Combobox(control_frame, state='readonly', width=20)
         self.z_combo.grid(row=row, column=2, columnspan=2, sticky='ew', pady=5)
@@ -725,6 +755,7 @@ class InteractivePlotter:
         # Create and pack toolbar FIRST at the bottom so it's always visible
         toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
         toolbar.update()
+        self.toolbar = toolbar  # 3D rotate handler checks toolbar.mode
         
         # Then pack canvas with expand - this ensures toolbar stays visible
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -736,6 +767,11 @@ class InteractivePlotter:
         
         # Bind right-click on canvas for context menu (works even when no legend is visible)
         self.canvas.mpl_connect('button_press_event', self._on_canvas_right_click)
+
+        # 3D Line: drag-to-rotate (NavigationToolbar2Tk has no 3D orbit)
+        self._rot3d_press_cid = self.canvas.mpl_connect('button_press_event', self._on_3d_rotate_press)
+        self._rot3d_drag_cid = self.canvas.mpl_connect('motion_notify_event', self._on_3d_rotate_drag)
+        self._rot3d_release_cid = self.canvas.mpl_connect('button_release_event', self._on_3d_rotate_release)
         
         # Draw initial colormap preview
         self.root.after(100, self._draw_cmap_preview)
@@ -2126,7 +2162,10 @@ class InteractivePlotter:
         self.y_dual_frame.pack_forget()
         self.xxy_frame.pack_forget()
         self.xyxy_frame.pack_forget()
+        self.frame_3d.pack_forget()
         self.y_list_frame.pack_forget()
+        if ptype == "3D Line":
+            self.frame_3d.pack(fill='both', expand=True)
         if ptype == "Dual Y-Axis":
             self.y_dual_frame.pack(fill='both', expand=True)
         elif ptype == "XXY (Dual X)":
@@ -2998,6 +3037,7 @@ class InteractivePlotter:
 
         try:
             ptype = self.plot_type.get()
+            is_3d = (ptype == "3D Line")
             xcol = self.x_combo.get()
             ycols = []
             if ptype == "Dual Y-Axis":
@@ -3076,8 +3116,8 @@ class InteractivePlotter:
             # --- PARSE AXIS BREAKS (universal — works with Line, Scatter, and Dual Y-Axis) ---
             y_breaks_orig = self._parse_breaks(self.v_y_breaks)
             x_breaks_orig = self._parse_breaks(self.v_x_breaks)
-            has_y_breaks = len(y_breaks_orig) > 0 and ptype != "Color Map"
-            has_x_breaks = len(x_breaks_orig) > 0 and ptype != "Color Map"
+            has_y_breaks = len(y_breaks_orig) > 0 and ptype not in ("Color Map", "3D Line")
+            has_x_breaks = len(x_breaks_orig) > 0 and ptype not in ("Color Map", "3D Line")
 
             # Build series for XXY/XYXY (uses its own file lists, not selected datasets)
             if ptype == "XXY (Dual X)":
@@ -3140,6 +3180,9 @@ class InteractivePlotter:
                 ax2.yaxis.tick_right()
                 ax2.xaxis.tick_top()
                 axes_list = [self.ax, ax2]
+            elif ptype == "3D Line":
+                self.ax = self.fig.add_subplot(111, projection="3d")
+                axes_list = [self.ax]
             else:
                 self.ax = self.fig.add_subplot(111);
                 axes_list = [self.ax]
@@ -3518,6 +3561,135 @@ class InteractivePlotter:
                 # recomputed (cosmetic updates keep the cached profiles).
                 self._redraw_cmap_lines(reextract=zi_recomputed)
 
+            elif ptype == "3D Line":
+                # 3D waterfall of sweep traces: X = swept SMU column, the single
+                # selected Y column = stepped SMU (depth of each sweep), Z column
+                # = measured lock-in voltage. One 3D line per unique stepped value.
+                if len(ycols) != 1 or not sel_ds:
+                    raise ValueError("3D Line: select exactly 1 Y column (stepped values) and at least 1 file.")
+                zcol_name = self.z_combo.get()
+                if not zcol_name:
+                    raise ValueError("3D Line: select a Z Axis (Color) column (measured voltage).")
+
+                # Gather transformed finite (X, Y, Z) per file first (both sweep
+                # families share it; Gradient colors span every line).
+                file_data = []  # (file_key, X, Y, Z)
+                for fk, df in sel_ds:
+                    if xcol not in df.columns or ycols[0] not in df.columns or zcol_name not in df.columns:
+                        continue
+                    X = self._axis_transform(df[xcol].to_numpy(), xf_s)
+                    Y = self._axis_transform(df[ycols[0]].to_numpy(), yf_s)
+                    Z = self._axis_transform(df[zcol_name].to_numpy(), zf_s)
+                    fin = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
+                    file_data.append((fk, X[fin], Y[fin], Z[fin]))
+
+                # Family 1 (default): sweep along X — one line per unique stepped
+                # Y value (instrument set values repeat exactly).
+                sweeps = []  # (file_key, y_value, xs, zs)
+                for fk, X, Y, Z in file_data:
+                    # Group rows by stepped value — np.unique grouping is sufficient.
+                    yv, y_inv = np.unique(Y, return_inverse=True)
+                    for gi in range(len(yv)):
+                        m = y_inv == gi
+                        order = np.argsort(X[m])
+                        sweeps.append((fk, float(yv[gi]), X[m][order], Z[m][order]))
+
+                # Family 2 (perpendicular): sweep along Y — one line per FIXED X
+                # value. CSV list snaps each requested value to the nearest
+                # measured X step; 'all' takes every step.
+                cross_sweeps = []  # (file_key, x_value, ys, zs)
+                cross_txt = self.v_3d_cross_x.get().strip()
+                if cross_txt:
+                    use_all = cross_txt.lower() in ("all", "*")
+                    wanted = []
+                    if not use_all:
+                        for tok in cross_txt.split(','):
+                            try:
+                                wanted.append(float(tok))
+                            except ValueError:
+                                pass
+                    for fk, X, Y, Z in file_data:
+                        xv_all = np.unique(X)
+                        if use_all:
+                            chosen = xv_all
+                        else:
+                            picked = sorted({int(np.argmin(np.abs(xv_all - w))) for w in wanted})
+                            chosen = xv_all[picked]
+                        for xv in chosen:
+                            m = np.isclose(X, xv)
+                            order = np.argsort(Y[m])
+                            cross_sweeps.append((fk, float(xv), Y[m][order], Z[m][order]))
+
+                total_3d = len(sweeps) + len(cross_sweeps)
+                if total_3d == 0:
+                    raise ValueError("3D Line: no finite data for the selected X/Y/Z columns.")
+
+                # Colors: Gradient = selected colormap across ALL lines, Cycle = default cycle
+                if self.v_color_mode.get() == "Gradient" and total_3d > 1:
+                    cmap3d = plt.get_cmap(self.v_cmap_name.get())
+                    colors3d = [cmap3d(t) for t in np.linspace(0.0, 1.0, total_3d)]
+                elif self.v_color_mode.get() == "Gradient":
+                    colors3d = [plt.get_cmap(self.v_cmap_name.get())(0.5)]
+                else:
+                    cyc = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                    colors3d = [cyc[i % len(cyc)] for i in range(total_3d)]
+
+                def _plot_3d_series(sk, c_idx, xs_p, ys_p, zs_p, lbl):
+                    st = self.styles.get(sk, {})
+                    c = st.get('color', colors3d[c_idx])
+                    w = st.get('width', 2.0)
+                    ls = st.get('linestyle', '-')
+                    style_leg = st.get('legend', '').strip()
+                    lbl = style_leg if style_leg else lbl
+                    ln3, = self.ax.plot(xs_p, ys_p, zs_p,
+                                        color=c, linewidth=w, linestyle=ls, label=lbl)
+                    lines.append(ln3)
+                    labels.append(lbl)
+                    # All sweeps of one file share the series key (legend/context
+                    # menu toggles hide the whole file's set of traces)
+                    self._series_line_groups.setdefault(sk, []).append(ln3)
+
+                si = 0
+                for fk, yval, xs3, zs3 in sweeps:
+                    _plot_3d_series((fk, ycols[0]), si, xs3,
+                                    np.full_like(xs3, yval), zs3,
+                                    f"{fk}: Y={yval:.6g}")
+                    si += 1
+                for fk, xval, ys3, zs3 in cross_sweeps:
+                    _plot_3d_series((fk, ycols[0]), si,
+                                    np.full_like(ys3, xval), ys3, zs3,
+                                    f"{fk}: X={xval:.6g}")
+                    si += 1
+
+                # Y / Z labels (X label is set by the common formatting below)
+                self.ax.set_ylabel(self.v_ylabel.get() or ycols[0], fontsize=y_l_sz,
+                                   labelpad=y_lab_pad, fontname=font,
+                                   color=self.ylabel_color, rotation=ylabel_rot)
+                zlabel_text = self.ax.set_zlabel(self.v_zlabel.get() or zcol_name, fontsize=z_l_sz,
+                                                 labelpad=z_lab_pad, fontname=font,
+                                                 color=self.zlabel_color, rotation=zlabel_rot)
+                # Tick label sizes / colors (3D axes: no side/tick-direction control)
+                self.ax.tick_params(labelsize=yt_sz)
+                self.ax.tick_params(axis='x', labelcolor=self.xtick_color, color=self.xtick_color)
+                self.ax.tick_params(axis='y', labelcolor=self.ytick_color, color=self.ytick_color)
+                self.ax.tick_params(axis='z', labelcolor=self.z_tick_color, color=self.z_tick_color)
+                # Ranges
+                if val(self.v_x_min): self.ax.set_xlim(left=val(self.v_x_min))
+                if val(self.v_x_max): self.ax.set_xlim(right=val(self.v_x_max))
+                if val(self.v_y_min): self.ax.set_ylim(bottom=val(self.v_y_min))
+                if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
+                if z_min_val is not None: self.ax.set_zlim(bottom=z_min_val)
+                if z_max_val is not None: self.ax.set_zlim(top=z_max_val)
+                # Apply the view angle from the Elev/Azim controls (drag-to-rotate
+                # keeps them in sync, so they are the single source of truth)
+                try:
+                    elev0 = float(self.v_3d_elev.get())
+                    azim0 = float(self.v_3d_azim.get())
+                except (TypeError, ValueError):
+                    elev0, azim0 = 22.0, -60.0
+                self.ax.view_init(elev=max(-90.0, min(90.0, elev0)), azim=azim0)
+                self._3d_view = (self.ax.elev, self.ax.azim)
+
             # --- COMMON FORMATTING ---
             def apply_format(ax_obj, char, mode):
                 if mode == "Scientific":
@@ -3573,9 +3745,9 @@ class InteractivePlotter:
             # --- LOG SCALES: set BEFORE the tick-formatting loop ---
             # (set_xscale/set_yscale reset locators+formatters to defaults, so the
             #  user-controlled LogLocator applied inside the loop must come after.)
-            if self.x_log.get() and ptype != "Color Map":
+            if self.x_log.get() and ptype not in ("Color Map", "3D Line"):
                 self.ax.set_xscale('log')
-            if self.y_log.get() and ptype != "Color Map":
+            if self.y_log.get() and ptype not in ("Color Map", "3D Line"):
                 for a in axes_list:
                     a.set_yscale('log')
 
@@ -3590,6 +3762,11 @@ class InteractivePlotter:
                 # Apply background color with alpha
                 ax_curr.set_facecolor(self.plot_bg_color)
                 ax_curr.patch.set_alpha(plot_alpha)
+
+                if is_3d:
+                    # 3D axes: side/tick-direction/locator control from the 2D
+                    # loop does not apply; labels & colors set in the 3D branch.
+                    continue
 
                 # Tick direction, length, and side visibility
                 x_dir = self.v_tick_dir_x.get()
@@ -3709,7 +3886,7 @@ class InteractivePlotter:
             x2_dec = val(self.v_x2_dec, None, type_fn=int)
             z_dec = val(self.v_z_dec, None, type_fn=int)
             
-            for ax_curr in axes_list:
+            for ax_curr in ([] if is_3d else axes_list):
                 is_top = id(ax_curr) in is_top_x_axis
                 # X axis decimals
                 if is_top and x2_dec is not None and not has_x_breaks:
@@ -3865,6 +4042,9 @@ class InteractivePlotter:
                 if val(self.v_y_max): self.ax.set_ylim(top=val(self.v_y_max))
                 if val(self.v_y2_min): axes_list[1].set_ylim(bottom=val(self.v_y2_min))
                 if val(self.v_y2_max): axes_list[1].set_ylim(top=val(self.v_y2_max))
+            elif ptype == "3D Line":
+                # Labels + ranges were already applied inside the 3D branch above
+                pass
             elif ptype != "Color Map":
                 ylabel_text = self.ax.set_ylabel(self.v_ylabel.get() or "Values", fontsize=y_l_sz, labelpad=y_lab_pad, fontname=font,
                                    color=self.ylabel_color, rotation=ylabel_rot)
@@ -4031,8 +4211,8 @@ class InteractivePlotter:
                 else:
                     a.grid(False, which='minor')
 
-            # --- SECONDARY TOP X-AXIS ---
-            if self.enable_secondary_x.get():
+            # --- SECONDARY TOP X-AXIS --- (not supported on 3D axes)
+            if self.enable_secondary_x.get() and not is_3d:
                 try:
                     fwd_formula = self.v_sec_x_forward.get().strip()
                     
@@ -4102,8 +4282,8 @@ class InteractivePlotter:
                 except Exception as sec_e:
                     print(f"Secondary X-Axis error: {sec_e}")
 
-            # --- SECONDARY RIGHT Y-AXIS ---
-            if self.enable_secondary_y.get():
+            # --- SECONDARY RIGHT Y-AXIS --- (not supported on 3D axes)
+            if self.enable_secondary_y.get() and not is_3d:
                 try:
                     fwd_y_formula = self.v_sec_y_forward.get().strip()
 
@@ -4182,7 +4362,7 @@ class InteractivePlotter:
             
             # Restore saved subplot margins (preserves user toolbar adjustments across Update Plot)
             # Only restore if the plot has been initialized at least once (first call uses default layout)
-            if self._plot_initialized and saved_margins is not None:
+            if self._plot_initialized and saved_margins is not None and not is_3d:
                 try:
                     self.fig.subplots_adjust(
                         left=saved_margins['left'],
@@ -4815,6 +4995,70 @@ class InteractivePlotter:
         # Show menu at given position
         menu.tk_popup(screen_x, screen_y)
     
+    # --- 3D LINE: DRAG-TO-ROTATE ---
+
+    def _on_3d_view_entry(self, *_args):
+        """Elev/Azim entry changed: apply the view live (no replot)."""
+        if self._3d_syncing:
+            return
+        if self.plot_type.get() != "3D Line":
+            return
+        if not isinstance(getattr(self, "ax", None), Axes3D):
+            return
+        try:
+            elev = float(self.v_3d_elev.get())
+            azim = float(self.v_3d_azim.get())
+        except (TypeError, ValueError):
+            return  # mid-edit / blank: keep the current view
+        elev = max(-90.0, min(90.0, elev))
+        self.ax.view_init(elev=elev, azim=azim)
+        self._3d_view = (elev, azim)
+        self.canvas.draw_idle()
+
+    def _3d_rotate_active(self, event):
+        """True when a left-drag should orbit the 3D view."""
+        if self.plot_type.get() != "3D Line":
+            return False
+        if not isinstance(getattr(self, "ax", None), Axes3D):
+            return False
+        tb = getattr(self, "toolbar", None)
+        if tb is not None and tb.mode:
+            return False  # toolbar zoom/pan active
+        if self.canvas.widgetlock.locked():
+            return False
+        return event.inaxes is not None or self._rot3d_last is not None
+
+    def _on_3d_rotate_press(self, event):
+        if event.button != 1 or event.dblclick:
+            return
+        if self._3d_rotate_active(event):
+            self._rot3d_last = (event.x, event.y)
+
+    def _on_3d_rotate_drag(self, event):
+        if self._rot3d_last is None:
+            return
+        if not self._3d_rotate_active(event):
+            return
+        x0, y0 = self._rot3d_last
+        dx, dy = event.x - x0, event.y - y0
+        self._rot3d_last = (event.x, event.y)
+        elev = max(-90.0, min(90.0, self.ax.elev - dy * 0.3))
+        azim = self.ax.azim - dx * 0.3
+        self.ax.view_init(elev=elev, azim=azim)
+        self._3d_view = (elev, azim)  # persisted across Update Plot
+        # Mirror the new angle into the Elev/Azim entries (guard blocks the
+        # write-trace from re-applying the view we just set)
+        self._3d_syncing = True
+        try:
+            self.v_3d_elev.set(f"{elev:.1f}")
+            self.v_3d_azim.set(f"{azim:.1f}")
+        finally:
+            self._3d_syncing = False
+        self.canvas.draw_idle()
+
+    def _on_3d_rotate_release(self, event):
+        self._rot3d_last = None
+
     def _on_canvas_right_click(self, event):
         """Handle right-click on canvas to show context menu with all series toggle (works even with no legend)."""
         if event.button != 3:  # Only handle right-click
@@ -6955,7 +7199,7 @@ class InteractivePlotter:
             plot_settings = session_data.get("plot_settings", {})
             if plot_settings:
                 plot_type = plot_settings.get("plot_type", "Line")
-                if plot_type in ["Line", "Scatter", "Color Map", "Dual Y-Axis", "XXY (Dual X)", "XYXY (Dual X+Y)"]:
+                if plot_type in ["Line", "Scatter", "Color Map", "Dual Y-Axis", "XXY (Dual X)", "XYXY (Dual X+Y)", "3D Line"]:
                     self.plot_type.set(plot_type)
                 self.v_color_mode.set(plot_settings.get("color_mode", "Cycle"))
                 self.v_cmap_name.set(plot_settings.get("colormap", "viridis"))
