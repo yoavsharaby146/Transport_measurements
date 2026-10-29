@@ -88,8 +88,8 @@ class InteractivePlotter:
         self.file_divs = {}
         self.merge_cols_var = tk.BooleanVar(value=False)
         self.use_ref_x_var = tk.BooleanVar(value=False)
-        # 3D Line: perpendicular sweeps enabled + view angle (elev θ / azim φ)
-        self.v_3d_cross_on = tk.BooleanVar(value=False)
+        # 3D Line: sweep direction + view angle (elev θ / azim φ)
+        self.v_3d_sweep_dir = tk.StringVar(value="Along X (per Y step)")
         # 3D Line: view angle controls (elevation θ / azimuth φ, degrees)
         self.v_3d_elev = tk.StringVar(value="22")
         self.v_3d_azim = tk.StringVar(value="-60")
@@ -632,25 +632,22 @@ class InteractivePlotter:
         self.xyxy_y2_col = ttk.Combobox(xy2y, state='readonly')
         self.xyxy_y2_col.pack(side='left', fill='x', expand=True)
 
-        # --- 3D Line options (perpendicular cross-sweeps) ---
+        # --- 3D Line options (sweep direction + view angle) ---
         self.frame_3d = ttk.Frame(self.y_container_frame)
-        ttk.Checkbutton(self.frame_3d, text="Perpendicular sweeps — trace Y at fixed X",
-                        variable=self.v_3d_cross_on).pack(anchor='w', pady=(4, 1))
-        ttk.Label(self.frame_3d, text="Fixed X values (each snaps to its nearest measured step):",
+        sf3 = ttk.Frame(self.frame_3d)
+        sf3.pack(fill='x', pady=(4, 1))
+        ttk.Label(sf3, text="Sweep lines:").pack(side='left')
+        self.sweep_dir_combo = ttk.Combobox(sf3, textvariable=self.v_3d_sweep_dir,
+                                            values=["Along X (per Y step)",
+                                                    "Along Y (per X step)",
+                                                    "Both directions"],
+                                            state='readonly', width=20)
+        self.sweep_dir_combo.pack(side='left', fill='x', expand=True, padx=4)
+        self.sweep_dir_combo.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
+        ttk.Label(self.frame_3d,
+                  text="Along X: one line per stepped Y value (X swept, runs along X).\n"
+                       "Along Y: perpendicular — one line per X step (Y swept).",
                   font=('Arial', 8, 'italic'), foreground='gray').pack(anchor='w')
-        lf3 = ttk.Frame(self.frame_3d)
-        lf3.pack(fill='x')
-        sb3 = ttk.Scrollbar(lf3, orient='vertical')
-        self.x3_listbox = tk.Listbox(lf3, selectmode='multiple', height=5,
-                                     yscrollcommand=sb3.set, exportselection=False)
-        sb3.config(command=self.x3_listbox.yview)
-        self.x3_listbox.pack(side='left', fill='both', expand=True)
-        sb3.pack(side='right', fill='y')
-        bf3 = ttk.Frame(self.frame_3d)
-        bf3.pack(fill='x', pady=2)
-        ttk.Button(bf3, text="Select All", command=lambda: self.x3_listbox.select_set(0, tk.END)).pack(side='left', padx=2)
-        ttk.Button(bf3, text="Clear", command=lambda: self.x3_listbox.selection_clear(0, tk.END)).pack(side='left', padx=2)
-        ttk.Button(bf3, text="↻ Refresh List", command=self._refresh_3d_cross_list).pack(side='left', padx=2)
         vf3 = ttk.Frame(self.frame_3d)
         vf3.pack(fill='x', pady=2)
         ttk.Label(vf3, text="Elev (θ°):").pack(side='left')
@@ -2171,7 +2168,17 @@ class InteractivePlotter:
         if ptype != "Color Map" and self._cmap_draw_mode:
             self.toggle_draw_line_mode(force_disconnect=True)
             self._clear_cmap_lines()
-        # Hide all frames first
+        self._apply_plot_type_layout()
+        self.update_plot()
+
+    def _apply_plot_type_layout(self):
+        """Show the axis-selector panel matching the current Plot Type.
+
+        Called from on_plot_type_change AND load_session: plot_type.set()
+        fires no <<ComboboxSelected>> event, so the panel would otherwise
+        stay stale after a session load.
+        """
+        ptype = self.plot_type.get()
         self.y_dual_frame.pack_forget()
         self.xxy_frame.pack_forget()
         self.xyxy_frame.pack_forget()
@@ -2179,8 +2186,7 @@ class InteractivePlotter:
         self.y_list_frame.pack_forget()
         if ptype == "3D Line":
             self.frame_3d.pack(fill='both', expand=True)
-            self._refresh_3d_cross_list()
-        if ptype == "Dual Y-Axis":
+        elif ptype == "Dual Y-Axis":
             self.y_dual_frame.pack(fill='both', expand=True)
         elif ptype == "XXY (Dual X)":
             self.xxy_frame.pack(fill='both', expand=True)
@@ -2188,7 +2194,6 @@ class InteractivePlotter:
             self.xyxy_frame.pack(fill='both', expand=True)
         else:
             self.y_list_frame.pack(fill='both', expand=True)
-        self.update_plot()
 
     def _sync_file_listbox(self, listbox):
         """Sync a file listbox with current datasets, preserving selection."""
@@ -3597,33 +3602,36 @@ class InteractivePlotter:
                     fin = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
                     file_data.append((fk, X[fin], Y[fin], Z[fin]))
 
-                # Family 1 (default): sweep along X — one line per unique stepped
-                # Y value (instrument set values repeat exactly).
-                sweeps = []  # (file_key, y_value, xs, zs)
-                for fk, X, Y, Z in file_data:
-                    # Group rows by stepped value — np.unique grouping is sufficient.
-                    yv, y_inv = np.unique(Y, return_inverse=True)
-                    for gi in range(len(yv)):
-                        m = y_inv == gi
-                        order = np.argsort(X[m])
-                        sweeps.append((fk, float(yv[gi]), X[m][order], Z[m][order]))
+                # Sweep direction:
+                #   "Along X (per Y step)" — one 3D line per stepped Y value
+                #   "Along Y (per X step)" — perpendicular: one line per X step
+                #   "Both directions"      — both families (grid of lines)
+                sweep_dir = self.v_3d_sweep_dir.get()
+                if sweep_dir not in ("Along X (per Y step)", "Along Y (per X step)", "Both directions"):
+                    sweep_dir = "Along X (per Y step)"
+                show_x_sweeps = sweep_dir in ("Along X (per Y step)", "Both directions")
+                show_y_sweeps = sweep_dir in ("Along Y (per X step)", "Both directions")
 
-                # Family 2 (perpendicular): sweep along Y — one line per FIXED X
-                # value chosen in the "Fixed X values" list (checkbox enables it;
-                # each selected value snaps to the nearest measured X step).
-                cross_sweeps = []  # (file_key, x_value, ys, zs)
-                if self.v_3d_cross_on.get():
-                    self._refresh_3d_cross_list()  # keep the list in sync with data/divisors
-                    wanted = self._get_3d_cross_values()
+                # Family 1: sweep along X — one line per unique stepped Y value
+                sweeps = []  # (file_key, y_value, xs, zs)
+                if show_x_sweeps:
                     for fk, X, Y, Z in file_data:
-                        xv_all = np.unique(X)
-                        if xv_all.size == 0:
-                            continue
-                        picked = sorted({int(np.argmin(np.abs(xv_all - w))) for w in wanted})
-                        for xv in xv_all[picked]:
-                            m = np.isclose(X, xv)
+                        # Group rows by stepped value — np.unique grouping is sufficient.
+                        yv, y_inv = np.unique(Y, return_inverse=True)
+                        for gi in range(len(yv)):
+                            m = y_inv == gi
+                            order = np.argsort(X[m])
+                            sweeps.append((fk, float(yv[gi]), X[m][order], Z[m][order]))
+
+                # Family 2: sweep along Y (perpendicular) — one line per unique X step
+                cross_sweeps = []  # (file_key, x_value, ys, zs)
+                if show_y_sweeps:
+                    for fk, X, Y, Z in file_data:
+                        xv, x_inv = np.unique(X, return_inverse=True)
+                        for gi in range(len(xv)):
+                            m = x_inv == gi
                             order = np.argsort(Y[m])
-                            cross_sweeps.append((fk, float(xv), Y[m][order], Z[m][order]))
+                            cross_sweeps.append((fk, float(xv[gi]), Y[m][order], Z[m][order]))
 
                 total_3d = len(sweeps) + len(cross_sweeps)
                 if total_3d == 0:
@@ -4814,6 +4822,9 @@ class InteractivePlotter:
                 "show_grid": self.show_major_grid.get(),
                 "x_log": self.x_log.get(),
                 "y_log": self.y_log.get(),
+                "sweep_dir_3d": self.v_3d_sweep_dir.get(),
+                "elev_3d": self.v_3d_elev.get(),
+                "azim_3d": self.v_3d_azim.get(),
             }
             
             # === AXIS SELECTIONS ===
@@ -5001,44 +5012,6 @@ class InteractivePlotter:
         menu.tk_popup(screen_x, screen_y)
     
     # --- 3D LINE: DRAG-TO-ROTATE ---
-
-    def _refresh_3d_cross_list(self):
-        """Fill the 'Fixed X values' listbox with the unique X steps of the
-        selected datasets (Divide X applied). Selection survives a refresh."""
-        lb = getattr(self, "x3_listbox", None)
-        if lb is None:
-            return
-        old = {lb.get(i) for i in lb.curselection()}
-        lb.delete(0, tk.END)
-        xcol = self.x_combo.get()
-        xf_s = self.v_x_div.get()
-        vals = set()
-        for i in self.dataset_listbox.curselection():
-            df = self.datasets.get(self.dataset_listbox.get(i))
-            if df is None or xcol not in df.columns:
-                continue
-            X = self._axis_transform(df[xcol].to_numpy(), xf_s)
-            X = X[np.isfinite(X)]
-            if X.size:
-                vals.update(float(v) for v in np.unique(X))
-        for v in sorted(vals):
-            s = f"{v:.6g}"
-            lb.insert(tk.END, s)
-            if s in old:
-                lb.selection_set(tk.END)
-
-    def _get_3d_cross_values(self):
-        """Selected fixed-X values from the 3D cross-sweep listbox (as floats)."""
-        vals = []
-        lb = getattr(self, "x3_listbox", None)
-        if lb is None:
-            return vals
-        for i in lb.curselection():
-            try:
-                vals.append(float(lb.get(i)))
-            except ValueError:
-                pass
-        return vals
 
     def _on_3d_view_entry(self, *_args):
         """Elev/Azim entry changed: apply the view live (no replot)."""
@@ -7250,6 +7223,11 @@ class InteractivePlotter:
                 self.x_log.set(plot_settings.get("x_log", False))
                 self.y_log.set(plot_settings.get("y_log", False))
                 self.z_log.set(plot_settings.get("z_log", False))
+                _sd = plot_settings.get("sweep_dir_3d", "Along X (per Y step)")
+                if _sd in ("Along X (per Y step)", "Along Y (per X step)", "Both directions"):
+                    self.v_3d_sweep_dir.set(_sd)
+                self.v_3d_elev.set(plot_settings.get("elev_3d", "22"))
+                self.v_3d_azim.set(plot_settings.get("azim_3d", "-60"))
             
             # === RESTORE AXIS SELECTIONS ===
             axis_selections = session_data.get("axis_selections", {})
@@ -7332,6 +7310,10 @@ class InteractivePlotter:
                 f"Styles: {len(self.styles)}\n\n"
                 f"Restored: {', '.join(restored_items)}")
             
+            # Restore the axis-selector panel for the (programmatically set)
+            # plot type — plot_type.set() fires no combobox event
+            self._apply_plot_type_layout()
+
             # Update plot with restored settings
             self.update_plot()
             
