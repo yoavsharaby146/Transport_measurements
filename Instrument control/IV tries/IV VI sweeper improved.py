@@ -868,8 +868,13 @@ class IVVISweeperImproved:
                     header, x, y = "Current(A),Voltage(V),Time(s)", sourced, measured
 
                 csv_path = os.path.join(p['save_dir'], name + ".csv")
-                np.savetxt(csv_path, np.vstack((x, y, times)).T, delimiter=',',
-                           header=header)
+                if gv is not None:
+                    # gate voltage recorded as 4th column so each row is self-describing
+                    header += ",GateVoltage(V)"
+                    cols = np.vstack((x, y, times, np.full(x.size, gv)))
+                else:
+                    cols = np.vstack((x, y, times))
+                np.savetxt(csv_path, cols.T, delimiter=',', header=header)
                 self.log(f"Saved: {name}.csv")
 
             # always return gate to 0 V slowly after the measurement
