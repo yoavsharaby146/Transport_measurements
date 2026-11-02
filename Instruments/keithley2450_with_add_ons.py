@@ -791,10 +791,12 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
         # Creates a voltage source configuration list for full hysteresis measurements. Minimum step size is 1 mV and VALUES ARE In mV!!!
         terminal = self.ask(":ROUT:TERM?")
         self.reset()
-        if terminal != "REAR":
-            self.write(":ROUT:TERM FRON")
-        else:
-            self.write(":ROUT:TERM REAR")
+        # Only re-assert the terminal if *RST changed it. Re-writing the same
+        # value (e.g. ":ROUT:TERM REAR" when already REAR) silently breaks the
+        # next clist sweep on the 2470: INIT never enables the output and the
+        # buffer read times out (no error queued).
+        if self.ask(":ROUT:TERM?") != terminal:
+            self.write(f":ROUT:TERM {terminal}")
         # Delete and recreate configuration list
         #self.write(':SOUR:CONF:LIST:DEL "sourceVclist"')
         self.write(':SOUR:CONF:LIST:CRE "sourceVclist"')
@@ -844,10 +846,12 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
         # Creates a current source configuration list for full hysteresis measurements. Values are in Amps.
         terminal = self.ask(":ROUT:TERM?")
         self.reset()
-        if terminal != "REAR":
-            self.write(":ROUT:TERM FRON")
-        else:
-            self.write(":ROUT:TERM REAR")
+        # Only re-assert the terminal if *RST changed it. Re-writing the same
+        # value (e.g. ":ROUT:TERM REAR" when already REAR) silently breaks the
+        # next clist sweep on the 2470: INIT never enables the output and the
+        # buffer read times out (no error queued).
+        if self.ask(":ROUT:TERM?") != terminal:
+            self.write(f":ROUT:TERM {terminal}")
         # Delete and recreate configuration list
         #self.write(':SOUR:CONF:LIST:DEL "sourceIclist"')
         self.write(':SOUR:CONF:LIST:CRE "sourceIclist"')
