@@ -213,13 +213,16 @@ class IVVISweeperImproved:
         # === 5. GATE LOOP CONFIG ===
         loop = ttk.LabelFrame(self.main_frame, text="5. Gate Sweep Loop (optional)", padding=10)
         loop.pack(fill="x", pady=5)
+        loop.columnconfigure(1, weight=1)
+
         self.gate_loop_var = tk.BooleanVar(value=False)
         self.chk_loop = ttk.Checkbutton(loop, text="Run bias sweep at multiple gate voltages",
                                         variable=self.gate_loop_var,
                                         command=self._toggle_loop_entries)
-        self.chk_loop.pack(side="left", padx=10)
+        self.chk_loop.grid(row=0, column=0, padx=10, sticky="w")
+
         lf = ttk.Frame(loop)
-        lf.pack(side="left", padx=10)
+        lf.grid(row=0, column=1, sticky="w")
         ttk.Label(lf, text="Start (V):").pack(side="left")
         self.ent_gate_start = ttk.Entry(lf, width=8)
         self.ent_gate_start.insert(0, self.saved_params['gate_start'])
@@ -232,18 +235,20 @@ class IVVISweeperImproved:
         self.ent_gate_loop_step = ttk.Entry(lf, width=8)
         self.ent_gate_loop_step.insert(0, self.saved_params['gate_loop_step'])
         self.ent_gate_loop_step.pack(side="left", padx=3)
-        ttk.Label(loop, text="Settle (s):").pack(side="left", padx=(20, 0))
-        self.ent_gate_settle = ttk.Entry(loop, width=6)
+
+        # row 1: settle + dedicated ramp parameters for gate movement in the loop
+        rf = ttk.Frame(loop)
+        rf.grid(row=1, column=0, columnspan=2, sticky="w", padx=10, pady=(4, 0))
+        ttk.Label(rf, text="Settle (s):").pack(side="left")
+        self.ent_gate_settle = ttk.Entry(rf, width=6)
         self.ent_gate_settle.insert(0, self.saved_params['gate_settle'])
         self.ent_gate_settle.pack(side="left", padx=3)
-
-        # dedicated ramp parameters for gate movement inside the loop
-        ttk.Label(loop, text="Ramp Step (mV):").pack(side="left", padx=(20, 0))
-        self.ent_gate_loop_ramp_step = ttk.Entry(loop, width=7)
+        ttk.Label(rf, text="Ramp Step (mV):").pack(side="left", padx=(20, 0))
+        self.ent_gate_loop_ramp_step = ttk.Entry(rf, width=7)
         self.ent_gate_loop_ramp_step.insert(0, self.saved_params['gate_loop_ramp_step'])
         self.ent_gate_loop_ramp_step.pack(side="left", padx=3)
-        ttk.Label(loop, text="Ramp Delay (s):").pack(side="left", padx=(15, 0))
-        self.ent_gate_loop_ramp_delay = ttk.Entry(loop, width=7)
+        ttk.Label(rf, text="Ramp Delay (s):").pack(side="left", padx=(20, 0))
+        self.ent_gate_loop_ramp_delay = ttk.Entry(rf, width=7)
         self.ent_gate_loop_ramp_delay.insert(0, self.saved_params['gate_loop_ramp_delay'])
         self.ent_gate_loop_ramp_delay.pack(side="left", padx=3)
 
