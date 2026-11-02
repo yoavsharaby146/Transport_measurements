@@ -789,7 +789,12 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
 
     def create_hysteresis_voltage_sweep_config_list(self, Sp1 = 1000, Sp2 = -1000, step = 10, curr_range = 1e-6):
         # Creates a voltage source configuration list for full hysteresis measurements. Minimum step size is 1 mV and VALUES ARE In mV!!!
+        terminal = self.ask(":ROUT:TERM?")
         self.reset()
+        if terminal != "REAR":
+            self.write(":ROUT:TERM FRON")
+        else:
+            self.write(":ROUT:TERM REAR")
         # Delete and recreate configuration list
         #self.write(':SOUR:CONF:LIST:DEL "sourceVclist"')
         self.write(':SOUR:CONF:LIST:CRE "sourceVclist"')
@@ -837,7 +842,12 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
 
     def create_hysteresis_current_sweep_config_list(self, Sp1=1e-6, Sp2=-1e-6, step=1e-7, volt_range=20e-3):
         # Creates a current source configuration list for full hysteresis measurements. Values are in Amps.
+        terminal = self.ask(":ROUT:TERM?")
         self.reset()
+        if terminal != "REAR":
+            self.write(":ROUT:TERM FRON")
+        else:
+            self.write(":ROUT:TERM REAR")
         # Delete and recreate configuration list
         #self.write(':SOUR:CONF:LIST:DEL "sourceIclist"')
         self.write(':SOUR:CONF:LIST:CRE "sourceIclist"')
