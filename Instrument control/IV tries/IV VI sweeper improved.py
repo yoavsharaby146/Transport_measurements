@@ -799,16 +799,22 @@ class IVVISweeperImproved:
         """Configure + run one hysteresis sweep on the Keithley bias. Returns arrays."""
         if p['sweep_type'] == "iv":
             self.log(f"Bias sweep: 0 -> {p['sp1']} mV -> {p['sp2']} mV -> 0")
+            self.log("Step 1/3: configuring instrument (reset + clist)...")
             self.bias_inst.create_hysteresis_voltage_sweep_config_list(
                 Sp1=p['sp1'], Sp2=p['sp2'], step=p['step'],
                 curr_range=p['compliance'])
+            self.log("Step 2/3: running sweep + reading buffer (blocking)...")
             output = self.bias_inst.run_clist_sweep(delay=p['delay'], sweep_type='voltage')
+            self.log("Sweep data received.")
         else:
             self.log(f"Bias sweep: 0 -> {p['sp1']} A -> {p['sp2']} A -> 0")
+            self.log("Step 1/3: configuring instrument (reset + clist)...")
             self.bias_inst.create_hysteresis_current_sweep_config_list(
                 Sp1=p['sp1'], Sp2=p['sp2'], step=p['step'],
                 volt_range=p['compliance'])
+            self.log("Step 2/3: running sweep + reading buffer (blocking)...")
             output = self.bias_inst.run_clist_sweep(delay=p['delay'], sweep_type='current')
+            self.log("Sweep data received.")
 
         data = [float(x) for x in output.split(',')]
         measured = np.array(data[0::3])
