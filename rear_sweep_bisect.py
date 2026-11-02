@@ -11,13 +11,13 @@ k.adapter.connection.write_termination = "\n"
 
 front = "front" in sys.argv[2:]
 print("IDN:", k.ask("*IDN?"))
-if not front:
-    k.use_rear_terminals()
+if not front and k.check_terminals() != "REAR":
+    k.use_rear_terminals()   # only if actually needed - redundant write poisons 2470 sweeps
 print("terminals now:", k.check_terminals())
 
 # replicate the real GUI sweep config: >=10 points (21 pts, 100mV step)
 k.reset()
-if not front:
+if not front and k.check_terminals() != "REAR":
     k.use_rear_terminals()
 k.write(':SOUR:CONF:LIST:CRE "sourceVclist"')
 k.source_mode = "voltage"
