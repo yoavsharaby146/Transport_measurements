@@ -894,6 +894,30 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
         self.write(sweep_run_cmd)
         self.timeout = 20000
         self.write('INIT')
+        # Wait for the output to come ON (sweep actually starting).
+        # If it never does, the sweep aborted instantly (e.g. output/interlock/
+        # config error): the buffer is empty and the TRAC:DATA? read below
+        # would hang until the VISA timeout. Fail fast with the instrument's
+        # own error message instead.
+        start_wait = 0.0
+        while start_wait < 10.0:
+            try:
+                if self.source_enabled:
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+            start_wait += 0.5
+        else:
+            err = ""
+            try:
+                err = self.ask(":SYST:ERR?")
+            except Exception:
+                pass
+            raise IOError(
+                "Sweep did not start: output never turned ON after INIT. "
+                f"Instrument error queue: {err!r}"
+            )
         counter = 0
         while counter < 3:
             if self.source_enabled == False:
