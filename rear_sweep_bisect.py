@@ -1,4 +1,6 @@
-# Rear-terminal sweep bisect round 2 - Keithley 2470.
+# Rear-terminal sweep bisect round 3 - Keithley 2470.
+# Runs the SAME sweep twice in one session, polling the error queue
+# continuously, to catch a silent abort at the moment it happens.
 # Run from repo root:  python rear_sweep_bisect.py <VISA_ADDRESS> [front]
 import sys, time
 sys.path.insert(0, ".")
@@ -12,41 +14,67 @@ k.adapter.connection.write_termination = "\n"
 front = "front" in sys.argv[2:]
 print("IDN:", k.ask("*IDN?"))
 if not front and k.check_terminals() != "REAR":
-    k.use_rear_terminals()   # only if actually needed - redundant write poisons 2470 sweeps
+    k.use_rear_terminals()   # only if actually needed - see driver note
 print("terminals now:", k.check_terminals())
 
-# replicate the real GUI sweep config: >=10 points (21 pts, 100mV step)
-k.reset()
-if not front and k.check_terminals() != "REAR":
-    k.use_rear_terminals()
-k.write(':SOUR:CONF:LIST:CRE "sourceVclist"')
-k.source_mode = "voltage"
-k.measure_current(1, 1e-6, False)
-k.disable_source()
-for v in [i * 0.1 for i in range(21)]:         # 0.0 .. 2.0 V, 21 points
-    k.source_voltage = v
-    k.write(':SOUR:CONF:LIST:STORE "sourceVclist";')
-k.write('TRAC:MAKE "sweepBuffer", 21;')
-print("clist stored. errors:", k.ask(":SYST:ERR?"))
-k.write(':SOUR:SWE:VOLT:LIST 1, 0.1, 1, ON, "sweepBuffer", "sourceVclist"')
-print("sweep armed, sending INIT...")
-k.write("INIT")
 
-on_seen = False
-for i in range(75):                            # 15 s, poll every 0.2 s
+def drain_errors():
+    errs = []
+    while True:
+        e = k.ask(":SYST:ERR?").strip()
+        if e.startswith("0,"):
+            break
+        errs.append(e)
+    return errs
+
+
+def run_sweep(tag):
+    print(f"--- sweep {tag} ---")
+    k.reset()
+    if k.check_terminals() != "REAR":
+        k.use_rear_terminals()
+    k.write(':SOUR:CONF:LIST:CRE "sourceVclist"')
+    k.source_mode = "voltage"
+    k.measure_current(1, 1e-6, False)
+    k.disable_source()
+    for v in [i * 0.1 for i in range(21)]:         # 0.0 .. 2.0 V, 21 points
+        k.source_voltage = v
+        k.write(':SOUR:CONF:LIST:STORE "sourceVclist";')
+    k.write('TRAC:MAKE "sweepBuffer", 21;')
+    e = drain_errors()
+    if e:
+        print(f"{tag} config errors: {e}")
+    k.write(':SOUR:SWE:VOLT:LIST 1, 0.1, 1, ON, "sweepBuffer", "sourceVclist"')
+    k.write("INIT")
+
+    prev = None
+    on_seen = False
+    for i in range(75):                            # 15 s, poll every 0.2 s
+        try:
+            on = k.source_enabled
+        except Exception as ex:
+            on = f"qerr:{ex}"
+        errs = drain_errors()
+        stamp = f"t={i*0.2:.1f}s"
+        if on != prev:
+            print(f"{stamp} {tag} output: {on}")
+            prev = on
+        if on is True:
+            on_seen = True
+        if errs:
+            print(f"{stamp} {tag} errors: {errs}")
+        time.sleep(0.2)
+    print(f"{tag}: output EVER on: {on_seen}")
     try:
-        on = k.source_enabled
-    except Exception as e:
-        on = f"query-error: {e}"
-    if on is True:
-        on_seen = True
-    if i % 5 == 0:                             # print every 1 s
-        print(f"t={i*0.2:.1f}s output:", on)
-    time.sleep(0.2)
-print("output EVER turned on:", on_seen)
-print("errors:", k.ask(":SYST:ERR?"))
-try:
-    print("buffer:", k.ask('TRAC:DATA? 1, 21, "sweepBuffer", READ, SOUR, REL;'))
-except Exception as e:
-    print("buffer read failed:", e)
+        data = k.ask('TRAC:DATA? 1, 21, "sweepBuffer", READ, SOUR, REL;')
+        print(f"{tag}: buffer OK ({len(data.split(','))} values)")
+    except Exception as ex:
+        print(f"{tag}: buffer read failed: {ex}")
+    e = drain_errors()
+    if e:
+        print(f"{tag} end errors: {e}")
+
+
+run_sweep("A")
+run_sweep("B")
 print("done")
