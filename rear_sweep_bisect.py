@@ -65,11 +65,18 @@ def run_sweep(tag):
             print(f"{stamp} {tag} errors: {errs}")
         time.sleep(0.2)
     print(f"{tag}: output EVER on: {on_seen}")
-    try:
-        data = k.ask('TRAC:DATA? 1, 21, "sweepBuffer", READ, SOUR, REL;')
-        print(f"{tag}: buffer OK ({len(data.split(','))} values)")
-    except Exception as ex:
-        print(f"{tag}: buffer read failed: {ex}")
+    # probe actual buffer count (read past actual data -> TMO, so step up)
+    actual = None
+    for n in (1, 2, 5, 10, 15, 18, 20, 21):
+        try:
+            data = k.ask(f'TRAC:DATA? 1, {n}, "sweepBuffer", READ, SOUR, REL;')
+            actual = n
+            last = data.split(',')[-1]
+            print(f"{tag}: buffer read {n} OK (last REL={last})")
+        except Exception:
+            print(f"{tag}: buffer read {n} FAILED -> actual count < {n}")
+            break
+    print(f"{tag}: actual buffer count ~= {actual}")
     e = drain_errors()
     if e:
         print(f"{tag} end errors: {e}")
