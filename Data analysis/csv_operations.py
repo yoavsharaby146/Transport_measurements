@@ -21,6 +21,42 @@ import numpy as np
 import polars as pl
 
 from csv_utils import read_data_csv
+from csv_integrator import auto_compute_tolerance
+
+
+def _segmented_gradient(y, x, s):
+    """Segmented numerical derivative for map files: np.gradient that resets
+    wherever the slow-axis (setpoint) column s changes, so the derivative never
+    straddles a gate/field setpoint jump. Rows on either side of a jump (and
+    rows with NaN inputs) get NaN.
+
+    Usage in a formula:  sgradient(f1.Voltage, f1.Current, f1.Gate_Voltage)
+    """
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    s = np.asarray(s, dtype=float)
+    n = min(len(y), len(x), len(s))
+    y, x, s = y[:n], x[:n], s[:n]
+    out = np.full(n, np.nan)
+    if n < 2:
+        return out
+
+    # segment boundary wherever setpoint jumps beyond tolerance (same
+    # auto-tolerance logic as csv_integrator / map_splitter), or either
+    # neighbouring setpoint cell is NaN
+    jump = np.zeros(n, dtype=bool)
+    finite = np.isfinite(s)
+    tol = auto_compute_tolerance(s[finite]) if finite.any() else np.inf
+    jump[1:] = np.abs(np.diff(s)) > tol
+    jump[1:] |= ~(finite[1:] & finite[:-1])
+
+    seg_ids = np.cumsum(jump)
+    valid = np.isfinite(y) & np.isfinite(x)
+    for seg in np.unique(seg_ids[valid]):
+        idx = np.flatnonzero(valid & (seg_ids == seg))
+        if len(idx) > 1:
+            out[idx] = np.gradient(y[idx], x[idx])
+    return out
 
 
 # ── palette ──────────────────────────────────────────────────────────────────
@@ -117,6 +153,8 @@ class AppState:
         allowed = {k: getattr(np, k, getattr(math, k))
                    for k in dir(math) if not k.startswith("_")}
         allowed["abs"] = abs
+        allowed["gradient"] = np.gradient   # numerical derivative: gradient(y, x)
+        allowed["sgradient"] = _segmented_gradient   # map-safe: sgradient(y, x, setpoint_col)
         # slice every column to n_rows so cross-file length mismatches
         # align (old code used min row count across files)
         var_ns = {k: (v[:n_rows] if isinstance(v, np.ndarray) else v)
