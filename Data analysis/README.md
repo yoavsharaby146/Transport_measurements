@@ -156,7 +156,7 @@ Load multiple CSV files, reference their columns in math expressions, and export
 **Features:**
 - **Multi-file support (up to 5)** — each file is color-coded and aliased (`f1`, `f2`, …). Row counts are shown per file; a warning appears if they differ (the minimum count is used)
 - **Column references** — click a reference chip (e.g. `f1.Voltage`) to insert it into the focused formula. Bare names like `a+b` resolve against file 1
-- **Formula columns** — define computed columns with arbitrary math expressions (supports the `math` module, e.g. `sqrt(f1.x**2 + f1.y**2)`). Live preview updates as you type
+- **Formula columns** — define computed columns with arbitrary math expressions (supports the `math` module, e.g. `sqrt(f1.x**2 + f1.y**2)`), plus `gradient(y, x)` for numerical derivatives (uses `np.gradient`, handles non-uniform x) and `sgradient(y, x, s)` for map files — the derivative resets at every slow-axis setpoint change so it never straddles a gate/field jump. Live preview updates as you type
 - **Copy columns** — pass raw columns through to the output unchanged via checkboxes, grouped by file in scrollable columns
 - **Formula I/O** — load/save formula definitions from a `.txt` file (format: `name<TAB>expression`, one per line; supports append or replace)
 - **Preview & export** — on-screen table preview (first 20 rows) before exporting to CSV
