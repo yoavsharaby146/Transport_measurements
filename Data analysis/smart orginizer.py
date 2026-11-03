@@ -4,7 +4,34 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 
-from csv_utils import read_data_csv
+from csv_utils import read_data_csv, show_help
+
+
+HELP_TEXT = (
+    "HOW TO USE — Scan Organizer\n"
+    "\n"
+    "Splits a measurement CSV into Forward / Backward (and fast / slow)\n"
+    "sweep files. Pick a mode, then select the CSV — every mode\n"
+    "auto-detects the sweeps from one chosen axis column.\n"
+    "\n"
+    "Modes:\n"
+    "1. Smart Split (Fast & Slow Axis - Auto Detect)\n"
+    "   Two-axis scans (e.g. bias fast + gate slow): fast Fwd/Bwd sweeps\n"
+    "   and slow-axis move regions are separated automatically\n"
+    "2. Forward/Backward Organizer (Direction Split)\n"
+    "   One-axis sweep loops: rows split into forward and backward files\n"
+    "   by sweep direction\n"
+    "3. Hysteresis - Auto Detect (0 -> SP1 -> SP2 -> 0)\n"
+    "   Hysteresis loops: segments identified and merged per loop\n"
+    "4. Standard Loop - Auto Detect (0 -> Max -> 0)\n"
+    "   Standard up/down loops around zero\n"
+    "5. Snake - Auto Detect (Alternating)\n"
+    "   Snake scans: alternating sweep direction, no return sweeps\n"
+    "\n"
+    "For every mode: select the file, pick the axis column, and review\n"
+    "the auto-detected change threshold (steps smaller than it count as\n"
+    "noise/pauses). Outputs are saved beside the source file."
+)
 
 
 def split_by_activity(df, fast_col, slow_col, fast_threshold, slow_threshold,
@@ -134,6 +161,10 @@ class ScanOrganizer:
                  font=("Arial", 8), fg="gray").pack(pady=0)
 
         tk.Button(self.root, text="Select File & Run", command=self.process_selection, height=2, width=20).pack(pady=20)
+        tk.Button(self.root, text="How to Use",
+                  command=lambda: show_help(
+                      self.root, "Scan Organizer — Help", HELP_TEXT)
+                  ).pack()
 
     def process_selection(self):
         mode = self.mode_var.get()

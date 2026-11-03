@@ -4,7 +4,30 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 
-from csv_utils import read_data_csv
+from csv_utils import read_data_csv, show_help
+
+
+HELP_TEXT = (
+    "HOW TO USE — Map Splitter\n"
+    "\n"
+    "Splits a map measurement CSV (fast axis swept at many slow-axis\n"
+    "setpoints, e.g. gate map) into one CSV file per setpoint, so each\n"
+    "individual sweep can be examined on its own.\n"
+    "\n"
+    "1. Click 'Select File & Run' and pick the map measurement CSV\n"
+    "2. Pick the slow axis column (the setpoint axis: gate voltage,\n"
+    "   field, ...) — NOT the fast swept axis\n"
+    "3. Review the setpoint tolerance (auto-detected): setpoint values\n"
+    "   closer than this are grouped into one setpoint (handles read\n"
+    "   jitter around each setpoint)\n"
+    "4. Pick the fast axis column (used only for naming the output)\n"
+    "5. Every setpoint becomes its own file:\n"
+    "   <slow>_at_<setpoint>_<fast>.csv saved beside the source\n"
+    "\n"
+    "Notes: the metadata preamble is skipped automatically; sweeps must\n"
+    "be grouped contiguously per setpoint (the standard map measurement\n"
+    "order)."
+)
 
 
 class MapSplitter:
@@ -34,6 +57,10 @@ class MapSplitter:
                  font=("Arial", 9), fg="gray").pack(pady=(0, 10))
         tk.Button(self.root, text="Select File & Run",
                   command=self.run, height=2, width=22).pack(pady=10)
+        tk.Button(self.root, text="How to Use",
+                  command=lambda: show_help(
+                      self.root, "Map Splitter — Help", HELP_TEXT)
+                  ).pack()
 
     # ═══════════════════════════════════════════════════════════
     #  UI HELPERS

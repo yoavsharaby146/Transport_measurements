@@ -31,6 +31,49 @@ def read_data_csv(filepath, **kwargs):
     return pl.read_csv(filepath, skip_rows=detect_header_row(filepath), **kwargs)
 
 
+def show_help(parent, title, text, modal=False):
+    """Show a how-to-use instructions window (shared by the analysis GUIs).
+
+    parent: the parent Tk window, or None to create a standalone window
+    (used by dialog-flow scripts with no persistent main window; a
+    standalone window is always modal so the flow resumes on close).
+    modal=True blocks (wait_window) until the user closes it.
+    """
+    import tkinter as tk
+
+    standalone = parent is None
+    if standalone:
+        parent = tk.Tk()
+        parent.withdraw()
+    win = tk.Toplevel(parent)
+    win.title(title)
+    win.geometry("+%d+%d" % (parent.winfo_rootx() + 60, parent.winfo_rooty() + 60))
+    win.lift()
+    win.attributes('-topmost', True)
+    win.after_idle(win.attributes, '-topmost', False)
+
+    body = tk.Frame(win, bg="#FFFFFF")
+    body.pack(fill="both", expand=True)
+    tk.Label(body, text=text, font=("Consolas", 9), bg="#FFFFFF",
+             justify="left", anchor="w", padx=16, pady=14).pack(
+        fill="both", expand=True)
+    tk.Button(win, text="Close", command=win.destroy,
+              width=12).pack(pady=(0, 12))
+    win.update_idletasks()
+    w = max(560, win.winfo_reqwidth())
+    h = min(win.winfo_reqheight() + 20, parent.winfo_screenheight() - 120)
+    win.geometry(f"{w}x{h}")
+
+    if modal or standalone:
+        parent.wait_window(win)
+        if standalone:
+            try:
+                parent.destroy()
+            except tk.TclError:
+                pass
+    return win
+
+
 if __name__ == "__main__":
     # self-check: preamble before titles must be skipped, data intact
     import tempfile, os

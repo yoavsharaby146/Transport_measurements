@@ -26,7 +26,35 @@ import sys
 import numpy as np
 import polars as pl
 
-from csv_utils import read_data_csv
+from csv_utils import read_data_csv, show_help
+
+
+HELP_TEXT = (
+    "HOW TO USE — CSV Integrator\n"
+    "\n"
+    "Adds a cumulative trapezoid integral of a Y column over an X\n"
+    "column (e.g. V over I) to a measurement CSV, one new column per\n"
+    "selected Y: integ_<Ycolumn>.\n"
+    "\n"
+    "1. Click 'Select File & Run' and pick one or more measurement CSVs\n"
+    "2. X column: integrate over it (e.g. bias current)\n"
+    "3. Y column(s): tick every integrand (e.g. several lock-in channels)\n"
+    "4. Slow axis: setpoint column for maps (gate / field), or 'None'\n"
+    "5. Reset mode: where the running integral restarts — never / at\n"
+    "   each slow-axis setpoint / at each direction reversal / both /\n"
+    "   at each zero crossing of X\n"
+    "6. X scale / Y divide: constant conversions (e.g. 1/R for V->I,\n"
+    "   or divide by lock-in I_ac to recover dV/dI) — default 1.0\n"
+    "7. If a slow axis is used, review the auto-detected tolerance\n"
+    "\n"
+    "Output: single file -> save dialog; multiple files -> each saved\n"
+    "as <name>_integrated.csv beside its source (same settings for all).\n"
+    "Start point and sweep direction are handled automatically (dx\n"
+    "carries the sign); hysteresis turnaround points are shared between\n"
+    "runs so nothing is lost.\n"
+    "\n"
+    "Self-check: python csv_integrator.py --selfcheck"
+)
 
 
 # reset modes for cumulative integration
@@ -261,6 +289,10 @@ class IntegratorApp:
                  font=("Arial", 9), fg="gray").pack(pady=(0, 10))
         tk.Button(self.root, text="Select File & Run",
                   command=self.run, height=2, width=22).pack(pady=10)
+        tk.Button(self.root, text="How to Use",
+                  command=lambda: show_help(
+                      self.root, "CSV Integrator — Help", HELP_TEXT)
+                  ).pack()
 
     def _ask_settings(self, df):
         """One dialog: X column, Y column(s), slow axis, reset mode, scales."""

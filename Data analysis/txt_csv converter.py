@@ -3,6 +3,26 @@ import os
 import tkinter as tk
 from tkinter import filedialog
 
+from csv_utils import show_help
+
+
+HELP_TEXT = (
+    "HOW TO USE — TXT to CSV Converter\n"
+    "\n"
+    "Converts a text file with space- or tab-separated columns (e.g.\n"
+    "LabView logs from the dilution setup) into a proper comma-separated\n"
+    "CSV file.\n"
+    "\n"
+    "1. Close this window, then select the .txt file to convert\n"
+    "2. The output name is auto-generated (same name, .csv extension,\n"
+    "   same folder); answer 'y' in the console to pick a custom name\n"
+    "3. Every non-empty line is split on whitespace and written as one\n"
+    "   CSV row\n"
+    "\n"
+    "Note: all whitespace (spaces/tabs) counts as a separator, so\n"
+    "columns must not contain spaces inside values."
+)
+
 def convert_txt_to_csv(input_file, output_file):
     """
     Converts a text file separated by spaces or tabs into a CSV.
@@ -24,6 +44,9 @@ def convert_txt_to_csv(input_file, output_file):
         print(f"\n❌ An unexpected error occurred: {e}")
 
 def main():
+    # 0. Show instructions; flow continues when the window is closed
+    show_help(None, "TXT to CSV Converter — Help", HELP_TEXT)
+
     # 1. Set up the file picker and hide the empty background window
     root = tk.Tk()
     root.withdraw()

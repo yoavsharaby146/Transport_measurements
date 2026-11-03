@@ -3,7 +3,29 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 import polars as pl
 
-from csv_utils import detect_header_row
+from csv_utils import detect_header_row, show_help
+
+
+HELP_TEXT = (
+    "HOW TO USE — CSV Merger\n"
+    "\n"
+    "Combines several measurement CSV files into one sorted file.\n"
+    "\n"
+    "1. Close this window, then select 2 or more CSV files in the\n"
+    "   file dialog (hold Ctrl/Shift to select multiple)\n"
+    "2. Each file's metadata preamble (lines before the column titles)\n"
+    "   is skipped automatically; the preamble of the FIRST file is\n"
+    "   copied to the output\n"
+    "3. Files must share columns: if a file's columns differ, only the\n"
+    "   columns common to all files are kept (reported in the console);\n"
+    "   a file with no common columns is skipped\n"
+    "4. Pick the column to sort the merged data by (e.g. time)\n"
+    "5. Choose the output location — suggested name: merged_<first\n"
+    "   file's name>\n"
+    "\n"
+    "Typical use: merging consecutive measurement runs of the same\n"
+    "sweep into one file for plotting or further processing."
+)
 
 
 def pick_files():
@@ -64,6 +86,9 @@ def pick_sort_column(columns):
 
 
 def main():
+    # Step 0: show instructions; flow continues when the window is closed
+    show_help(None, "CSV Merger — Help", HELP_TEXT)
+
     # Step 1: Pick the CSV files to merge
     files, root = pick_files()
     if not files:

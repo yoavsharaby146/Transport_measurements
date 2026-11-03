@@ -7,6 +7,10 @@ All tools that read measurement CSVs automatically skip any metadata preamble be
 column-title row (via the shared `csv_utils` helper, described below), so they operate only
 on the titled data columns — for files both with and without a preamble.
 
+Every GUI tool includes built-in usage instructions: a "How to Use" button on the main
+window (`csv_interpolator.py` shows them directly in the window; `csv_merger.py` and
+`txt_csv converter.py` show them in a window on start).
+
 ---
 
 ## Dependencies

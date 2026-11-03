@@ -20,8 +20,35 @@ import re
 import numpy as np
 import polars as pl
 
-from csv_utils import read_data_csv
+from csv_utils import read_data_csv, show_help
 from csv_integrator import auto_compute_tolerance
+
+
+HELP_TEXT = (
+    "HOW TO USE — CSV Column Math\n"
+    "\n"
+    "Load up to 5 CSV files, compute new columns with math formulas,\n"
+    "copy raw columns, and export the result to a new CSV.\n"
+    "\n"
+    "1. 'Add CSV files' (up to 5; a warning shows if row counts differ —\n"
+    "   the minimum count is used)\n"
+    "2. 'Column references': click a chip (e.g. f1.Voltage) to insert it\n"
+    "   into the focused formula; bare names resolve against file 1\n"
+    "3. 'Copy columns': tick raw columns to pass through unchanged\n"
+    "4. 'Computed columns': add formula columns, e.g.\n"
+    "       R = V/I\n"
+    "       dVdI = gradient(f1.V, f1.I)          (numerical derivative)\n"
+    "       dVdI_map = sgradient(V, I, Vg)       (map-safe derivative:\n"
+    "                                             resets at each Vg jump)\n"
+    "   Available: the math module (sqrt, sin, exp, ...), abs, and\n"
+    "   gradient / sgradient. Live preview updates as you type\n"
+    "5. 'Load/Save formulas' uses a .txt file: name<TAB>expression,\n"
+    "   one per line\n"
+    "6. 'Export CSV' saves the previewed table\n"
+    "\n"
+    "Notes: the metadata preamble is skipped automatically; failed\n"
+    "formula cells export as 'error'."
+)
 
 
 def _segmented_gradient(y, x, s):
@@ -230,6 +257,15 @@ class App(tk.Tk):
         style.configure("Section.TLabel", background="#FFFFFF", foreground="#6B6B68",
                         font=("", 9, "bold"))
         style.configure("TButton", padding=(8, 4))
+
+        top = tk.Frame(self, bg="#F8F8F7")
+        top.pack(fill="x", padx=16, pady=(12, 0))
+        tk.Label(top, text="CSV Column Math", bg="#F8F8F7", fg="#6B6B68",
+                 font=("", 9, "bold")).pack(side="left")
+        tk.Button(top, text="How to Use",
+                  command=lambda: show_help(
+                      self, "CSV Column Math — Help", HELP_TEXT)
+                  ).pack(side="right")
 
         main = tk.Frame(self, bg="#F8F8F7")
         main.pack(fill="both", expand=True, padx=16, pady=12)

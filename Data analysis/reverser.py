@@ -5,7 +5,31 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 from itertools import permutations
 
-from csv_utils import read_data_csv
+from csv_utils import read_data_csv, show_help
+
+
+HELP_TEXT = (
+    "HOW TO USE — Block Reverser\n"
+    "\n"
+    "Flips the order of measurement blocks in a CSV (last row becomes\n"
+    "first), so a sweep that was recorded up now reads down.\n"
+    "\n"
+    "1. Click 'Select File & Run' and pick a measurement CSV\n"
+    "2. Pick the sweep axis column (the fast axis that was swept)\n"
+    "3. Review the jump threshold (auto-detected): any step in the sweep\n"
+    "   column larger than this marks a segment/block boundary\n"
+    "4. The tool detects the structure automatically:\n"
+    "   - Simple (Fwd/Bwd, Snake): one continuous sweep per block — each\n"
+    "     block is reversed as-is\n"
+    "   - Hysteresis: several segments per block (e.g. 0->3 and -3->0) —\n"
+    "     segments are reordered into -3->0->3, deduplicated at junctions,\n"
+    "     then the whole block is reversed\n"
+    "5. Output saved beside the source as <name>_reversed.csv\n"
+    "\n"
+    "Notes: works on files produced by 'smart orginizer.py'; the metadata\n"
+    "preamble is skipped automatically; trailing segments that do not\n"
+    "form a complete block are processed anyway and reported."
+)
 
 
 class BlockReverser:
@@ -36,7 +60,11 @@ class BlockReverser:
                  text="Auto-detects blocks, merges segments, and reverses",
                  font=("Arial", 9), fg="gray").pack()
         tk.Button(self.root, text="Select File & Run",
-                  command=self.run, height=2, width=20).pack(pady=20)
+                  command=self.run, height=2, width=20).pack(pady=10)
+        tk.Button(self.root, text="How to Use",
+                  command=lambda: show_help(
+                      self.root, "Block Reverser — Help", HELP_TEXT)
+                  ).pack()
 
     # ═══════════════════════════════════════════════════════════
     #  UI HELPERS
