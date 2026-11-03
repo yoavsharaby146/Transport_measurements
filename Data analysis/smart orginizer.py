@@ -729,7 +729,7 @@ class ScanOrganizer:
         s2 = simpledialog.askinteger(
             "Config",
             "Split 2 (sweep index where forward resumes):\n"
-            f"(Sweeps {s1}..{s2-1} are Backward, sweeps {s1}..end are Forward part 2)",
+            f"(Sweeps {s1}..(Split 2 - 1) are Backward, sweeps Split 2..end are Forward part 2)",
             initialvalue=2, parent=self.root)
         if s2 is None:
             return
