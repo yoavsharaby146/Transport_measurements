@@ -176,7 +176,7 @@ class InterpolatorApp:
 
         self.root.lift()
         self.root.attributes('-topmost', True)
-        self.root.after_idle(self.root.attributes, 'topmost', False)
+        self.root.after_idle(self.root.attributes, '-topmost', False)
 
         tk.Label(self.root, text="CSV Interpolator",
                  font=("Arial", 14, "bold")).pack(pady=(15, 2))
