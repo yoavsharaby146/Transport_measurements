@@ -193,6 +193,8 @@ A suite of GUI tools for post-measurement CSV processing:
 | `reverser.py` | Reverse measurement blocks in a CSV |
 | `map_splitter.py` | Split a map CSV into one file per slow-axis setpoint |
 | `csv_operations.py` | Cross-file column math with formula expressions |
+| `csv_integrator.py` | Map-aware cumulative trapezoid integral of Y over X |
+| `csv_interpolator.py` | Map-aware regrid of non-uniform fast axis onto uniform grid (FFT-ready) |
 | `txt_csv converter.py` | Convert space/tab-separated text files (e.g., LabView logs) to CSV |
 
 → See [`Data analysis/README.md`](Data%20analysis/README.md)

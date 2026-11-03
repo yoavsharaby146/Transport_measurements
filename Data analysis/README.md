@@ -224,6 +224,37 @@ python csv_integrator.py --selfcheck
 
 ---
 
+### 8. `csv_interpolator.py` — Fast-Axis Interpolator
+
+Regrids measurement data from a non-uniformly sampled fast axis (e.g. magnetic-field sweeps with varying step size) onto a uniform grid, per sweep segment — ready for FFT, plotting, binning.
+
+**Features:**
+- **Non-uniform & descending steps** — the fast axis may be sampled at varying steps and swept up or down (output is always an ascending uniform grid)
+- **Map aware** — each slow-axis setpoint (gate / field) is regridded separately (same clustering logic as `map_splitter.py` / `csv_integrator.py`), so interpolation never runs across a setpoint jump. Auto-detected tolerance with manual override
+- **Hysteresis aware** — sweeps are split at every direction reversal; each monotonic run is regridded on its own (interpolation needs monotonic x)
+- **Keep columns** — user picks which columns to interpolate onto the new grid; the X column and slow axis are always kept
+- **Two grid modes** — "Number of points" (`linspace`) or "Step size" (`arange`; use this for later FFT — the step sets the sampling rate, must be smaller than half the fastest feature period of interest)
+- **Common grid** — one identical fast-axis grid for all segments (intersection of X ranges; NaN where a segment does not reach), or per-segment grids (each segment spans its own full range, NaN-free)
+- **NaN handling** — NaN cells are skipped per column (independent masks); segments with fewer than 2 valid points are dropped and reported
+- **Batch mode** — select multiple CSVs: same settings for all, each saved as `<name>_interpolated.csv` beside its source
+- **Preamble-safe loading** via shared `csv_utils` helper
+
+**Usage:**
+```bash
+python csv_interpolator.py
+```
+
+The main window shows step-by-step usage instructions.
+
+**Self-check** (linear exactness, points/step grids, descending sweeps, map common grid, overlap error, hysteresis split, NaN holes):
+```bash
+python csv_interpolator.py --selfcheck
+```
+
+**Output:** `<name>_interpolated.csv` with columns `[X, slow axis?, kept columns...]` — slow column = mean setpoint per segment.
+
+---
+
 ## Typical Workflow
 
 ```
