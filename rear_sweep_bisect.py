@@ -12,6 +12,14 @@ k.adapter.connection.read_termination = "\n"
 k.adapter.connection.write_termination = "\n"
 
 front = "front" in sys.argv[2:]
+MAX_V = 0.1  # hard sample limit - every source write below must respect this
+
+# verify no sweep/probe voltage exceeds the limit before touching the instrument
+_clist = [i * 0.005 for i in range(21)]
+_probe = [0.01, 0.05, 0.1]
+assert max(_clist) <= MAX_V and max(_probe) <= MAX_V, "unsafe voltage in test plan"
+print(f"test plan: clist 0..{max(_clist)} V ({len(_clist)} pts), probe {_probe} V - MAX {MAX_V} V")
+
 print("IDN:", k.ask("*IDN?"))
 if not front and k.check_terminals() != "REAR":
     k.use_rear_terminals()   # only if actually needed - see driver note
@@ -37,7 +45,7 @@ def run_sweep(tag):
     k.source_mode = "voltage"
     k.measure_current(1, 1e-6, False)
     k.disable_source()
-    for v in [i * 0.1 for i in range(21)]:         # 0.0 .. 2.0 V, 21 points
+    for v in [i * 0.005 for i in range(21)]:       # 0.000 .. 0.100 V, 5 mV steps
         k.source_voltage = v
         k.write(':SOUR:CONF:LIST:STORE "sourceVclist";')
     k.write('TRAC:MAKE "sweepBuffer", 21;')
@@ -84,4 +92,24 @@ def run_sweep(tag):
 
 run_sweep("A")
 run_sweep("B")
+
+# Direct current probe at sweep voltages - does the sample trip the 1uA range?
+print("--- current probe (rear path) ---")
+k.reset()
+if k.check_terminals() != "REAR":
+    k.use_rear_terminals()
+k.source_mode = "voltage"
+k.measure_current(1, 1e-6, False)
+k.write(":SYST:RSEN OFF")
+k.enable_source()
+for v in (0.01, 0.05, 0.1):
+    k.source_voltage = v
+    time.sleep(0.5)
+    try:
+        i = k.ask(":MEAS:CURR?")
+        print(f"V={v} V -> I={i} A")
+    except Exception as ex:
+        print(f"V={v} V -> measure failed: {ex}")
+k.disable_source()
 print("done")
+
