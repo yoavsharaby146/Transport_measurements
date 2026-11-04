@@ -108,6 +108,7 @@ from procedures import (
     filter_inputs_by_connection,
     # Procedure classes
     Resistance_time_measurement,
+    Resistance_temperature_measurement,
     Resistance_gate_sweep_measurement,
     Resistance_magnet_sweep_measurement,
     Resistance_two_gate_scan_sweep_measurement,
@@ -116,11 +117,11 @@ from procedures import (
     Resistance_magnet_and_2gate_mapping_measurement,
     Differential_conductance_SRS860,
     Differential_conductance_Zurich,
-    Differential_Resistance_SRS860,
-    Differential_Resistance_Zurich,
+    Differential_Resistance_AUX,
     Differential_Resistance_Zurich_AUX_map,
     Rt_RV_RH_sequencer_measurement,
     RV_dV_dI_sequencer_measurement,
+    AC_current_sweep_measurement,
     # Registration dicts
     proc_resistance_time,
     proc_resistance_gate,
@@ -131,9 +132,10 @@ from procedures import (
     proc_resistance_magnet_2gate_map,
     proc_differential_conductance_SRS860,
     proc_differential_conductance_Zurich,
-    proc_differential_resistance_SRS860,
-    proc_differential_resistance_Zurich,
+    proc_resistance_temperature,
+    proc_differential_resistance_AUX,
     proc_differential_resistance_Zurich_AUX_map,
+    proc_ac_current_sweep,
     proc_Rt_RV_RH_sequencer,
     proc_RV_dV_dI_sequencer,
     # Aggregates
@@ -187,11 +189,7 @@ class GenericWindow(ManagedDockWindow):
                 pf.timer.setInterval(1000)
                 pf.plot.setDownsampling(auto=True, method='peak')
                 pf.plot.setClipToView(True)
-        except Exception:
-            pass
-
-        try:
-            self.plot_widget.plot.showGrid(x=True, y=True)
+                pf.plot.showGrid(x=True, y=True)
         except Exception:
             pass
 
