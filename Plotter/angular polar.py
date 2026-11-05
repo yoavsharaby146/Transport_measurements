@@ -99,6 +99,7 @@ class AngularPolarPlotter:
         self.v_angle_labels = tk.BooleanVar(value=True)
         self.v_title = tk.StringVar(value="Angular Dependence")
 
+        self._syncing_slider = False
         self._build_ui()
 
     # ==================== UI ====================
@@ -172,6 +173,13 @@ class AngularPolarPlotter:
         self.y_col_combo.pack(side='left', fill='x', expand=True)
         ttk.Label(left, text="X value(s) to slice at\n(comma-separated for several):").pack(anchor='w')
         ttk.Entry(left, textvariable=self.v_x_val).pack(fill='x')
+        # smooth x slider: drag or focus + arrow keys
+        self.x_slider = tk.Scale(left, from_=0, to=1, orient='horizontal',
+                                 showvalue=False, resolution=0.001,
+                                 command=self._on_slider)
+        self.x_slider.pack(fill='x')
+        ttk.Label(left, text="slider: drag it, or click it then use Left/Right arrows",
+                  foreground='gray', font=('Arial', 8)).pack(anchor='w')
         self.x_range_label = ttk.Label(left, text="x range: (no files loaded)",
                                        foreground='gray', font=('Arial', 8))
         self.x_range_label.pack(anchor='w')
@@ -392,8 +400,37 @@ class AngularPolarPlotter:
                     lo, hi = min(lo, xs.min()), max(hi, xs.max())
             if np.isfinite(lo):
                 self.x_range_label.config(text=f"x range in files: {lo:g} to {hi:g}")
+                self._config_slider(lo, hi)
         except Exception:
             pass
+
+    def _config_slider(self, lo, hi):
+        self.x_lo, self.x_hi = lo, hi
+        span = hi - lo
+        step = span / 400.0 if span > 0 else 1.0
+        self.x_slider.configure(from_=lo, to=hi, resolution=step)
+        # keep the slider on the current typed value if it is inside the range
+        try:
+            val = float(self.v_x_val.get())
+            if lo <= val <= hi:
+                self._sync_slider(val)
+        except ValueError:
+            pass
+
+    def _sync_slider(self, val):
+        self._syncing_slider = True
+        try:
+            self.x_slider.set(round(val / self.x_slider.cget('resolution'))
+                              * float(self.x_slider.cget('resolution')))
+        finally:
+            self._syncing_slider = False
+
+    def _on_slider(self, value):
+        if self._syncing_slider:
+            return
+        val = float(value)
+        self.v_x_val.set(f"{val:g}")
+        self.update_plot()
         if self.files and not self.v_x_val.get():
             try:
                 xs = self.files[0]["df"][self.v_x_col.get()].to_numpy()
@@ -403,6 +440,14 @@ class AngularPolarPlotter:
 
     # ==================== PLOTTING ====================
     def update_plot(self):
+        # typed value(s): move the slider to the first one if it is in range
+        try:
+            first = float(self.v_x_val.get().split(',')[0])
+            if getattr(self, 'x_lo', None) is not None and self.x_lo <= first <= self.x_hi:
+                self._sync_slider(first)
+        except ValueError:
+            pass
+
         self.fig.clear()
         self.ax = self.fig.add_subplot(111, projection='polar')
         self.ax.set_theta_zero_location(POLAR_THETA_ZERO_MAP.get(self.v_theta_zero.get(), "N"))
