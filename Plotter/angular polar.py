@@ -90,6 +90,9 @@ class AngularPolarPlotter:
         self.root.minsize(950, 600)
 
         self.files = []  # list of dicts: path, df, widgets
+        # Name of the loaded/saved session file (shown in the window title
+        # and on the plot, so you always know which session you are viewing)
+        self.session_name = None
 
         # --- settings variables ---
         self.v_x_col = tk.StringVar()
@@ -311,6 +314,9 @@ class AngularPolarPlotter:
             out = {"settings": self._session_settings(), "files": files}
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(out, f)
+            # the on-screen state now IS this session file
+            self.session_name = os.path.basename(path)
+            self.root.title(f"Angular Polar Slicer — {self.session_name}")
             messagebox.showinfo("Session Saved", f"Saved {len(files)} file(s) to:\n{path}")
         except Exception as e:
             messagebox.showerror("Save Error", str(e))
@@ -323,6 +329,9 @@ class AngularPolarPlotter:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+            # remember which session is loaded (shown in title + on the plot)
+            self.session_name = os.path.basename(path)
+            self.root.title(f"Angular Polar Slicer — {self.session_name}")
             import polars as pl
             self.files = []
             for rec in data.get("files", []):
@@ -553,6 +562,12 @@ class AngularPolarPlotter:
         if any_clamped:
             title += "\nWARNING: x outside range for some file(s), clamped to end value"
         self.ax.set_title(title, fontsize=11, fontweight='bold', pad=20)
+        # session badge: which session file the data came from (small gray
+        # caption, bottom-right; fig was cleared above so it never duplicates)
+        if self.session_name:
+            self.fig.text(0.99, 0.005, f"session: {self.session_name}",
+                          ha="right", va="bottom", fontsize=8, color="gray",
+                          style="italic")
         self.canvas.draw()
 
 

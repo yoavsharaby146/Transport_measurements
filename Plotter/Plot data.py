@@ -83,6 +83,9 @@ class InteractivePlotter:
         self.datasets = {}
         self.current_dataset_key = None
         self.styles = {}
+        # Name of the loaded/saved session file (shown in the window title
+        # and on the plot, so you always know which session you are viewing)
+        self.session_name = None
         # Per-file divide overrides: {filename: {"x": str, "y": str}}
         # Blank entries fall back to the global Divide X / Divide Y.
         self.file_divs = {}
@@ -4433,7 +4436,15 @@ class InteractivePlotter:
                     self.fig.text(custom_zlabel_pos[0], custom_zlabel_pos[1],
                                   self.v_zlabel.get() or self.z_combo.get(), fontsize=z_l_sz,
                                   fontname=font, color=self.zlabel_color, ha='left', va='center', rotation=zlabel_rot)
-            
+
+            # --- SESSION BADGE: which session file the data came from ---
+            # small gray caption, bottom-right of the figure (fig was cleared
+            # at the top of update_plot, so it never duplicates)
+            if getattr(self, "session_name", None):
+                self.fig.text(0.995, 0.004, f"session: {self.session_name}",
+                              ha="right", va="bottom", fontsize=8, color="gray",
+                              fontname=font, style="italic")
+
             self.canvas.draw()
 
         except Exception as e:
@@ -4893,7 +4904,11 @@ class InteractivePlotter:
             # Save to file
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(session_data, f, indent=2)
-            
+
+            # the on-screen state now IS this session file
+            self.session_name = os.path.basename(filepath)
+            self.root.title(f"Interactive Plotter — {self.session_name}")
+
             # Count saved items for info message
             saved_items = [
                 "Datasets", "Styles", "Legend Order", "Legend Settings",
@@ -7006,6 +7021,10 @@ class InteractivePlotter:
         
         # Update cache folder to the directory of the loaded file
         self.cache_folder = os.path.dirname(filepath)
+
+        # remember which session is loaded (shown in title + on the plot)
+        self.session_name = os.path.basename(filepath)
+        self.root.title(f"Interactive Plotter — {self.session_name}")
         
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
