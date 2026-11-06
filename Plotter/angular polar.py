@@ -16,7 +16,14 @@ from tkinter import ttk, filedialog, messagebox
 
 # reuse the shared CSV loader from the Data analysis folder
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Data analysis"))
-from csv_utils import read_data_csv  # noqa: E402
+try:
+    from csv_utils import read_data_csv  # noqa: E402
+except ImportError as e:
+    raise ImportError(
+        "Could not import 'csv_utils' from the 'Data analysis' folder.\n"
+        "Make sure 'Data analysis/csv_utils.py' exists next to the "
+        "'Plotter' folder in the repository."
+    ) from e
 
 POLAR_THETA_ZERO = ["N (top)", "E (0 deg, standard)", "W", "S"]
 POLAR_THETA_ZERO_MAP = {"E (0 deg, standard)": "E", "N (top)": "N", "W": "W", "S": "S"}
