@@ -108,6 +108,13 @@ class InteractivePlotter:
         # its own colorbar label and Z color range; switching Z swaps them.
         self.z_prefs = {}
         self._z_col_current = None
+        # Per-X / per-Y-column sticky settings: every column remembers its
+        # own axis label and axis range; switching columns swaps them (the
+        # same memory as the Z axis feature).
+        self.x_prefs = {}
+        self.y_prefs = {}
+        self._x_col_current = None
+        self._y_col_current = None
 
         # --- DATA VARIABLES ---
         self.v_x_div = tk.StringVar(value="1")
@@ -750,13 +757,18 @@ class InteractivePlotter:
         # --- Arrow-key instant cycling on axis selectors ---
         # Comboboxes: Down/Up steps to the adjacent value and commits
         # immediately (fires <<ComboboxSelected>> -> update_plot).
-        for _cb in (self.x_combo, self.y1_combo, self.y2_combo,
+        for _cb in (self.y1_combo, self.y2_combo,
                     self.xxy_y_combo, self.xxy_x1_col, self.xxy_x2_col,
                     self.xyxy_x1_col, self.xyxy_y1_col,
                     self.xyxy_x2_col, self.xyxy_y2_col):
             _cb.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
             _cb.bind('<Down>', self._combo_arrow_step)
             _cb.bind('<Up>', self._combo_arrow_step)
+        # X axis: swap in the column's remembered label / X range, then replot
+        # (arrow-key cycling goes through the same handler)
+        self.x_combo.bind('<<ComboboxSelected>>', self._on_x_col_change)
+        self.x_combo.bind('<Down>', self._combo_arrow_step)
+        self.x_combo.bind('<Up>', self._combo_arrow_step)
         # Z axis: swap in the column's remembered label / Z range, then replot
         # (arrow-key cycling goes through the same handler)
         self.z_combo.bind('<<ComboboxSelected>>', self._on_z_col_change)
@@ -2970,6 +2982,20 @@ class InteractivePlotter:
     def update_plot(self):
         sel_ds = self.get_selected_datasets()
         if not sel_ds or self.current_dataset_key is None: return
+
+        # --- Y-axis sticky label/range memory (Line / Scatter / Color Map) ---
+        # Keyed on the FIRST selected Y column: when the selection changes,
+        # swap in that column's remembered Y label / Y Min / Y Max before
+        # anything is read (same behaviour as the X / Z column memory).
+        try:
+            if self.plot_type.get() not in ("Dual Y-Axis", "XXY (Dual X)",
+                                            "XYXY (Dual X+Y)", "3D Line"):
+                _ys = self.y_listbox.curselection()
+                _yfirst = self.y_listbox.get(_ys[0]) if _ys else None
+                if _yfirst and _yfirst != self._y_col_current:
+                    self._swap_y_column_prefs(_yfirst)
+        except Exception:
+            pass
         
         # Save current subplot margins before clearing (preserves user toolbar adjustments)
         saved_margins = None
@@ -4473,6 +4499,42 @@ class InteractivePlotter:
             self._z_col_current = new
         self.update_plot()
 
+    def _on_x_col_change(self, event=None):
+        """X Axis column changed: swap in that column's remembered axis label
+        and X range, then replot (same memory as the Z axis feature)."""
+        new = self.x_combo.get()
+        old = self._x_col_current
+        if old and old != new:
+            self.x_prefs[old] = {"xlabel": self.v_xlabel.get(),
+                                 "x_min": self.v_x_min.get(),
+                                 "x_max": self.v_x_max.get()}
+        if new != old:
+            p = self.x_prefs.get(new)
+            self.v_xlabel.set(p.get("xlabel", "") if p else "")
+            self.v_x_min.set(p.get("x_min", "") if p else "")
+            self.v_x_max.set(p.get("x_max", "") if p else "")
+            self._x_col_current = new
+        self.update_plot()
+
+    def _swap_y_column_prefs(self, new):
+        """Swap in the Y column's remembered axis label and Y range.
+
+        Called from update_plot when the FIRST selected Y column changes
+        (Line / Scatter / Color Map modes): the previous column's label /
+        Y Min / Y Max are stored, the new column's remembered values (or
+        blanks = column-name label + auto range) are loaded.
+        """
+        old = self._y_col_current
+        if old:
+            self.y_prefs[old] = {"ylabel": self.v_ylabel.get(),
+                                 "y_min": self.v_y_min.get(),
+                                 "y_max": self.v_y_max.get()}
+        p = self.y_prefs.get(new)
+        self.v_ylabel.set(p.get("ylabel", "") if p else "")
+        self.v_y_min.set(p.get("y_min", "") if p else "")
+        self.v_y_max.set(p.get("y_max", "") if p else "")
+        self._y_col_current = new
+
     def _combo_arrow_step(self, event):
         """Down/Up on a readonly combobox: step to adjacent value and commit
         immediately (fires <<ComboboxSelected>>) without opening the popdown.
@@ -4893,6 +4955,24 @@ class InteractivePlotter:
                                        "z_min": self.v_z_min.get(),
                                        "z_max": self.v_z_max.get()}
             session_data["z_column_prefs"] = self.z_prefs
+
+            # === PER-X / PER-Y-COLUMN SETTINGS (label / range memory) ===
+            # sync the CURRENT columns into the memories before saving
+            cur_x = self.x_combo.get()
+            if cur_x:
+                self.x_prefs[cur_x] = {"xlabel": self.v_xlabel.get(),
+                                       "x_min": self.v_x_min.get(),
+                                       "x_max": self.v_x_max.get()}
+            session_data["x_column_prefs"] = self.x_prefs
+            if self.plot_type.get() not in ("Dual Y-Axis", "XXY (Dual X)",
+                                            "XYXY (Dual X+Y)", "3D Line"):
+                _ys = self.y_listbox.curselection()
+                _yfirst = self.y_listbox.get(_ys[0]) if _ys else None
+                if _yfirst:
+                    self.y_prefs[_yfirst] = {"ylabel": self.v_ylabel.get(),
+                                             "y_min": self.v_y_min.get(),
+                                             "y_max": self.v_y_max.get()}
+            session_data["y_column_prefs"] = self.y_prefs
 
             # === UI STATE ===
             # Save selected datasets
@@ -7050,6 +7130,9 @@ class InteractivePlotter:
             
             # === RESTORE PER-Z-COLUMN SETTINGS (Color Map label/range memory) ===
             self.z_prefs = session_data.get("z_column_prefs", {}) or {}
+            # === RESTORE PER-X / PER-Y-COLUMN SETTINGS (label/range memory) ===
+            self.x_prefs = session_data.get("x_column_prefs", {}) or {}
+            self.y_prefs = session_data.get("y_column_prefs", {}) or {}
 
             # === RESTORE LEGEND ORDER ===
             self.legend_order = []
@@ -7318,6 +7401,8 @@ class InteractivePlotter:
                 x_col = axis_selections.get("x_column", "")
                 if x_col and x_col in self.x_combo['values']:
                     self.x_combo.set(x_col)
+                # track the restored X column for the label/range memory
+                self._x_col_current = self.x_combo.get()
                 
                 z_col = axis_selections.get("z_column", "")
                 if z_col and z_col in self.z_combo['values']:
@@ -7332,6 +7417,9 @@ class InteractivePlotter:
                     for i in range(self.y_listbox.size()):
                         if self.y_listbox.get(i) in y_columns:
                             self.y_listbox.selection_set(i)
+                    # track the restored Y column for the label/range memory
+                    _ys2 = self.y_listbox.curselection()
+                    self._y_col_current = self.y_listbox.get(_ys2[0]) if _ys2 else None
                 
                 y1_col = axis_selections.get("y1_column", "")
                 if y1_col and y1_col in self.y1_combo['values']:
