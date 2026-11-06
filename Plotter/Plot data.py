@@ -101,6 +101,11 @@ class InteractivePlotter:
         self.v_color_mode = tk.StringVar(value="Cycle")  # "Cycle" or "Gradient"
         self.v_cmap_name = tk.StringVar(value="viridis")
 
+        # Per-Z-column sticky settings (Color Map): every Z column remembers
+        # its own colorbar label and Z color range; switching Z swaps them.
+        self.z_prefs = {}
+        self._z_col_current = None
+
         # --- DATA VARIABLES ---
         self.v_x_div = tk.StringVar(value="1")
         self.v_y_div = tk.StringVar(value="1")
@@ -742,13 +747,18 @@ class InteractivePlotter:
         # --- Arrow-key instant cycling on axis selectors ---
         # Comboboxes: Down/Up steps to the adjacent value and commits
         # immediately (fires <<ComboboxSelected>> -> update_plot).
-        for _cb in (self.x_combo, self.z_combo, self.y1_combo, self.y2_combo,
+        for _cb in (self.x_combo, self.y1_combo, self.y2_combo,
                     self.xxy_y_combo, self.xxy_x1_col, self.xxy_x2_col,
                     self.xyxy_x1_col, self.xyxy_y1_col,
                     self.xyxy_x2_col, self.xyxy_y2_col):
             _cb.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
             _cb.bind('<Down>', self._combo_arrow_step)
             _cb.bind('<Up>', self._combo_arrow_step)
+        # Z axis: swap in the column's remembered label / Z range, then replot
+        # (arrow-key cycling goes through the same handler)
+        self.z_combo.bind('<<ComboboxSelected>>', self._on_z_col_change)
+        self.z_combo.bind('<Down>', self._combo_arrow_step)
+        self.z_combo.bind('<Up>', self._combo_arrow_step)
         # Y listbox (multi-select): arrows replace the selection with the
         # adjacent column; mouse click still toggles multi-select.
         self.y_listbox.bind('<Down>', self._ylist_arrow_step)
@@ -4430,6 +4440,28 @@ class InteractivePlotter:
             print(f"Error plotting: {e}")
             messagebox.showerror("Plot Error", str(e))
 
+    def _on_z_col_change(self, event=None):
+        """Z Axis column changed (Color Map / 3D): swap in that column's
+        remembered colorbar label and Z color range, then replot.
+
+        The OLD column's current label / Z Min / Z Max are stored first, so
+        switching back and forth never loses a setting. A fresh column gets
+        blanks (label falls back to the column name, Z range = auto).
+        """
+        new = self.z_combo.get()
+        old = self._z_col_current
+        if old and old != new:
+            self.z_prefs[old] = {"zlabel": self.v_zlabel.get(),
+                                 "z_min": self.v_z_min.get(),
+                                 "z_max": self.v_z_max.get()}
+        if new != old:
+            p = self.z_prefs.get(new)
+            self.v_zlabel.set(p.get("zlabel", "") if p else "")
+            self.v_z_min.set(p.get("z_min", "") if p else "")
+            self.v_z_max.set(p.get("z_max", "") if p else "")
+            self._z_col_current = new
+        self.update_plot()
+
     def _combo_arrow_step(self, event):
         """Down/Up on a readonly combobox: step to adjacent value and commit
         immediately (fires <<ComboboxSelected>>) without opening the popdown.
@@ -4842,6 +4874,15 @@ class InteractivePlotter:
                 "use_ref_x": self.use_ref_x_var.get(),
             }
             
+            # === PER-Z-COLUMN SETTINGS (Color Map label / range memory) ===
+            # sync the CURRENT Z column into the memory before saving
+            cur_z = self.z_combo.get()
+            if cur_z:
+                self.z_prefs[cur_z] = {"zlabel": self.v_zlabel.get(),
+                                       "z_min": self.v_z_min.get(),
+                                       "z_max": self.v_z_max.get()}
+            session_data["z_column_prefs"] = self.z_prefs
+
             # === UI STATE ===
             # Save selected datasets
             selected_indices = list(self.dataset_listbox.curselection())
@@ -6988,6 +7029,9 @@ class InteractivePlotter:
                     tuple_key = (parts[0], parts[1])
                     self.styles[tuple_key] = style_val
             
+            # === RESTORE PER-Z-COLUMN SETTINGS (Color Map label/range memory) ===
+            self.z_prefs = session_data.get("z_column_prefs", {}) or {}
+
             # === RESTORE LEGEND ORDER ===
             self.legend_order = []
             for str_key in session_data.get("legend_order", []):
@@ -7259,6 +7303,8 @@ class InteractivePlotter:
                 z_col = axis_selections.get("z_column", "")
                 if z_col and z_col in self.z_combo['values']:
                     self.z_combo.set(z_col)
+                # track the restored Z column for the label/range memory
+                self._z_col_current = self.z_combo.get()
                 
                 # Restore Y listbox selections
                 y_columns = axis_selections.get("y_column", [])
