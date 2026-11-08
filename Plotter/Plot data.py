@@ -101,8 +101,16 @@ class InteractivePlotter:
         self.v_3d_azim.trace("w", self._on_3d_view_entry)
 
         # --- COLOR SETTINGS ---
-        self.v_color_mode = tk.StringVar(value="Cycle")  # "Cycle" or "Gradient"
+        # "Cycle" | "Gradient" | "Group" (group base hue + member shade/style)
+        self.v_color_mode = tk.StringVar(value="Cycle")
         self.v_cmap_name = tk.StringVar(value="viridis")
+
+        # --- GROUPS (Group color mode) ---
+        # (file_key, y_col) -> group name. group_order fixes each group's
+        # base color so it stays stable across selections / plot updates.
+        self.series_groups = {}
+        self.group_order = []
+        self.v_group_style = tk.StringVar(value="Shade + Line Style")
 
         # Per-Z-column sticky settings (Color Map): every Z column remembers
         # its own colorbar label and Z color range; switching Z swaps them.
@@ -508,7 +516,7 @@ class InteractivePlotter:
 
         # --- Color Controls ---
         ttk.Label(control_frame, text="Color Mode:").grid(row=row, column=0, sticky='w')
-        c_mode = ttk.Combobox(control_frame, textvariable=self.v_color_mode, values=["Cycle", "Gradient"],
+        c_mode = ttk.Combobox(control_frame, textvariable=self.v_color_mode, values=["Cycle", "Gradient", "Group"],
                               state='readonly', width=10)
         c_mode.grid(row=row, column=1, sticky='ew', padx=2)
         c_mode.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
@@ -733,6 +741,9 @@ class InteractivePlotter:
         
         # Legend Order button
         ttk.Button(btn_frame, text="Legend Order", command=self.open_legend_order_dialog).grid(row=2, column=0, columnspan=2, padx=2, pady=2, sticky='ew')
+
+        # Groups button (Group color mode: assign series to color groups)
+        ttk.Button(btn_frame, text="Groups", command=self.open_groups_dialog).grid(row=3, column=0, columnspan=2, padx=2, pady=2, sticky='ew')
 
         ttk.Separator(control_frame, orient='horizontal').grid(row=row, column=0, columnspan=4, sticky='ew', pady=10)
         row += 1
@@ -2121,6 +2132,9 @@ class InteractivePlotter:
             self.file_divs.pop(k, None)
             for key in [key for key in self.file_divs if isinstance(key, tuple) and key[0] == k]:
                 del self.file_divs[key]
+            # Drop group assignments of unloaded files (Group color mode)
+            for key in [key for key in self.series_groups if isinstance(key, tuple) and key[0] == k]:
+                del self.series_groups[key]
         # Data changed — any cached color-map interpolation is stale
         self._cmap_cache_key = None
         self._cmap_cache_zi = None
@@ -2979,6 +2993,296 @@ class InteractivePlotter:
             zi[r] = np.interp(sgrid, ss[a:b], zz[a:b], left=np.nan, right=np.nan)
         return zi, sgrid, gvals
 
+    # --- GROUPS: per-series group assignment + Group color mode ---
+
+    _GROUP_LINESTYLES = ['-', '--', '-.', ':']
+
+    def _group_series_keys(self):
+        """{(file, col): group} for non-empty assignments only."""
+        return {k: g.strip() for k, g in self.series_groups.items() if g and g.strip()}
+
+    def _ordered_groups(self):
+        """Group names in stable color order.
+
+        self.group_order entries come first (they fix each group's base
+        color across selections), then any newer groups in arbitrary order.
+        Groups with no members left are dropped automatically."""
+        valid = set(self._group_series_keys().values())
+        ordered = [g for g in self.group_order if g in valid]
+        ordered += [g for g in valid if g not in ordered]
+        return ordered
+
+    @staticmethod
+    def _group_member_colors(base_rgb, n_members, use_shade=True):
+        """Member colors from one base hue.
+
+        use_shade: members get a lightness ramp (dark -> light) of the
+        group's base hue, so 'same family, different member' is instantly
+        visible. Without shade, all members share the base color exactly
+        (line style then carries the distinction)."""
+        import colorsys
+        base = tuple(base_rgb[:3])
+        if n_members <= 1 or not use_shade:
+            return [base] * max(n_members, 1)
+        h, l, s = colorsys.rgb_to_hls(*base)
+        out = []
+        for i in range(n_members):
+            li = 0.32 + (0.78 - 0.32) * (i / (n_members - 1))
+            out.append(colorsys.hls_to_rgb(h, li, s))
+        return out
+
+    @staticmethod
+    def _nat_key(s):
+        """Natural-sort key: 'V2' < 'V10' (numeric chunks compared as ints)."""
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', str(s))]
+
+    def _group_member_sortkey(self, key):
+        """Deterministic member order inside a group: column name, then file."""
+        fk, yc = key
+        return (self._nat_key(yc), self._nat_key(fk))
+
+    def _group_member_defaults(self, entries, fallback_color=None, fallback_ls='-', per_occurrence=False):
+        """Group-based (color, linestyle) defaults for plotting entries.
+
+        entries: list of (key, group_name) in PLOTTING order; group_name may
+        be None (unassigned -> fallback values, usually the Cycle color).
+
+        Member index (which shade / line style a series gets):
+        - per_occurrence=False (default): position of the series in its
+          group's FULL member list, naturally sorted by (column, file).
+          This is stable and selection-independent — plotting only a subset
+          of a group keeps every member's shade, so 'V=1 at 0°' and 'V=1 at
+          30°' always share the same shade and line style.
+        - per_occurrence=True (3D sweeps): every occurrence in `entries`
+          counts as a separate member and gets its own shade.
+
+        Returns a list of (color, linestyle) tuples aligned with `entries`.
+        """
+        members = {}
+        for k, g in self._group_series_keys().items():
+            members.setdefault(g, []).append(k)
+        for g in members:
+            members[g].sort(key=self._group_member_sortkey)
+        counts = {g: len(m) for g, m in members.items()}
+        if per_occurrence:
+            occ = {}
+            for _k, g in entries:
+                if g:
+                    occ[g] = occ.get(g, 0) + 1
+            for g, n in occ.items():
+                counts[g] = max(counts.get(g, 0), n)
+        if not counts:
+            return [(fallback_color, fallback_ls)] * len(entries)
+        base_cmap = plt.get_cmap('tab10')
+        ordered = [g for g in self._ordered_groups() if g in counts]
+        mode = self.v_group_style.get()
+        use_shade = mode in ("Shade", "Shade + Line Style")
+        use_ls = mode in ("Line Style", "Shade + Line Style")
+        colors_by_group = {g: self._group_member_colors(base_cmap(i % 10)[:3], counts[g], use_shade)
+                           for i, g in enumerate(ordered)}
+        pos = {g: {k: i for i, k in enumerate(mems)} for g, mems in members.items()}
+        idx = {g: 0 for g in counts}
+        out = []
+        for key, g in entries:
+            if not g:
+                out.append((fallback_color, fallback_ls))
+                continue
+            if per_occurrence:
+                i = idx[g]
+                idx[g] = i + 1
+            else:
+                i = pos.get(g, {}).get(key, 0)
+            ls = self._GROUP_LINESTYLES[i % len(self._GROUP_LINESTYLES)] if use_ls else '-'
+            out.append((colors_by_group[g][i], ls))
+        return out
+
+    def _group_base_colors_hex(self):
+        """{group_name: hex base color} using the same tab10 mapping as plotting."""
+        from matplotlib.colors import to_hex
+        cmap = plt.get_cmap('tab10')
+        return {g: to_hex(cmap(i % 10)) for i, g in enumerate(self._ordered_groups())}
+
+    def open_groups_dialog(self):
+        """Groups Manager: assign displayed series (file + Y column) to named
+        color groups for the 'Group' color mode."""
+        pairs = self._display_series_pairs()
+        if not pairs:
+            return messagebox.showinfo("Info", "Select data / Y axes first (pick files and Y columns in the main panel).")
+
+        d = tk.Toplevel(self.root)
+        d.title("Groups — Series Color Groups")
+        w, h = self.get_dialog_size(0.55, 0.75, max_width=800, max_height=620,
+                                    min_width=540, min_height=400)
+        self._set_dialog_geometry(d, w, h, parent=self.root)
+        d.transient(self.root)
+
+        top = ttk.Frame(d, padding=10)
+        top.pack(fill='both', expand=True)
+
+        ttk.Label(top, text="Assign each displayed series to a group. In 'Group' color mode every group "
+                            "gets one base color; members inside a group are distinguished by shade and/or "
+                            "line style. Type a new name in a row's Group box to create a group.",
+                  font=('Arial', 9, 'italic'), foreground='gray', wraplength=560,
+                  justify='left').pack(anchor='w', pady=(0, 6))
+
+        # How members within a group are told apart
+        mf = ttk.Frame(top)
+        mf.pack(fill='x', pady=(0, 2))
+        ttk.Label(mf, text="Distinguish members by:").pack(side='left')
+        ttk.Combobox(mf, textvariable=self.v_group_style,
+                     values=["Shade + Line Style", "Shade", "Line Style"],
+                     state='readonly', width=18).pack(side='left', padx=4)
+
+        # Auto-assign by filename/column pattern
+        af = ttk.Frame(top)
+        af.pack(fill='x', pady=2)
+        pat_var = tk.StringVar()
+        ttk.Label(af, text="Auto pattern:").pack(side='left')
+        ttk.Entry(af, textvariable=pat_var, width=26).pack(side='left', padx=4)
+        ttk.Button(af, text="⚡ Auto-Assign", command=lambda: auto_assign()).pack(side='left', padx=4)
+        ttk.Label(af, text="regex, 1st capture group = group name (e.g. angle_(\\d+))",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=4)
+
+        # Scrollable series rows
+        wrap = ttk.Frame(top)
+        wrap.pack(fill='both', expand=True, pady=4)
+        cv = tk.Canvas(wrap, highlightthickness=0)
+        sb = ttk.Scrollbar(wrap, orient='vertical', command=cv.yview)
+        inner = ttk.Frame(cv)
+        inner.bind('<Configure>', lambda e: cv.configure(scrollregion=cv.bbox('all')))
+        _win = cv.create_window((0, 0), window=inner, anchor='nw')
+        cv.configure(yscrollcommand=sb.set)
+        sb.pack(side='right', fill='y')
+        cv.pack(side='left', fill='both', expand=True)
+        cv.bind('<Configure>', lambda e: cv.itemconfigure(_win, width=cv.winfo_width()))
+
+        def _wheel(e):
+            cv.yview_scroll(int(-e.delta / 120), 'units')
+        cv.bind('<MouseWheel>', _wheel)
+        inner.bind('<MouseWheel>', _wheel)
+
+        # Group management row
+        gf = ttk.Frame(top)
+        gf.pack(fill='x', pady=(6, 0))
+        sel_group = tk.StringVar()
+        grp_combo = ttk.Combobox(gf, textvariable=sel_group, state='readonly', width=16)
+        ttk.Label(gf, text="Group:").pack(side='left')
+        grp_combo.pack(side='left', padx=4)
+        ttk.Button(gf, text="Rename", command=lambda: rename_group()).pack(side='left', padx=3)
+        ttk.Button(gf, text="Remove", command=lambda: remove_group()).pack(side='left', padx=3)
+        ttk.Button(gf, text="Clear All", command=lambda: clear_all()).pack(side='left', padx=3)
+        ttk.Label(gf, text="(Remove unassigns the group's series)", font=('Arial', 8, 'italic'),
+                  foreground='gray').pack(side='left', padx=6)
+
+        def refresh_groups_ui():
+            names = self._ordered_groups()
+            grp_combo['values'] = names
+            if names and sel_group.get() not in names:
+                sel_group.set(names[0])
+
+        def build_rows():
+            for c in inner.winfo_children():
+                c.destroy()
+            names = self._ordered_groups()
+            bases = self._group_base_colors_hex()
+            hdr = ttk.Frame(inner)
+            hdr.pack(fill='x', pady=2)
+            ttk.Label(hdr, text="Series (file : column)", width=44, anchor='w',
+                      font=('Arial', 9, 'bold')).pack(side='left')
+            ttk.Label(hdr, text="Group", width=18, font=('Arial', 9, 'bold')).pack(side='left', padx=6)
+            ttk.Label(hdr, text="Base color", font=('Arial', 9, 'bold')).pack(side='left', padx=6)
+            for key in pairs:
+                r = ttk.Frame(inner)
+                r.pack(fill='x', pady=1)
+                ttk.Label(r, text=f"{key[0]} : {key[1]}", width=44, anchor='w').pack(side='left')
+                var = tk.StringVar(value=self.series_groups.get(key, ''))
+                ttk.Combobox(r, textvariable=var, values=names, width=16).pack(side='left', padx=6)
+                sw = tk.Label(r, text="        ")
+                sw.pack(side='left', padx=6)
+
+                def _update(k=key, v=var, s=sw):
+                    val = v.get().strip()
+                    if val:
+                        self.series_groups[k] = val
+                        if val not in self.group_order:
+                            self.group_order.append(val)
+                    else:
+                        self.series_groups.pop(k, None)
+                    new_bases = self._group_base_colors_hex()
+                    s.config(bg=new_bases.get(val, '#d3d3d3'))
+                    refresh_groups_ui()
+
+                var.trace('w', lambda *_a, f=_update: f())
+                g0 = self.series_groups.get(key, '').strip()
+                sw.config(bg=bases.get(g0, '#d3d3d3'))
+            refresh_groups_ui()
+
+        def auto_assign():
+            pat = pat_var.get().strip()
+            if not pat:
+                messagebox.showinfo("Info", "Enter a regex pattern first, e.g.  angle_(\\d+)", parent=d)
+                return
+            try:
+                rx = re.compile(pat)
+            except re.error as e:
+                messagebox.showerror("Bad Pattern", str(e), parent=d)
+                return
+            matched = 0
+            for key in pairs:
+                m = rx.search(key[0]) or rx.search(key[1])
+                if m:
+                    gname = (m.group(1) if m.groups() else m.group(0)).strip()
+                    if gname:
+                        self.series_groups[key] = gname
+                        if gname not in self.group_order:
+                            self.group_order.append(gname)
+                        matched += 1
+            build_rows()
+            messagebox.showinfo("Auto-Assign", f"{matched} series assigned to groups.", parent=d)
+
+        def rename_group():
+            old = sel_group.get()
+            if not old:
+                return messagebox.showinfo("Info", "No group selected.", parent=d)
+            from tkinter import simpledialog
+            new = simpledialog.askstring("Rename Group", f"New name for group '{old}':",
+                                         parent=d, initialvalue=old)
+            if not new:
+                return
+            new = new.strip()
+            if not new or new == old:
+                return
+            for k, g in list(self.series_groups.items()):
+                if g == old:
+                    self.series_groups[k] = new
+            self.group_order = [new if g == old else g for g in self.group_order]
+            build_rows()
+
+        def remove_group():
+            g = sel_group.get()
+            if not g:
+                return messagebox.showinfo("Info", "No group selected.", parent=d)
+            for k in [k for k, v in self.series_groups.items() if v == g]:
+                del self.series_groups[k]
+            self.group_order = [x for x in self.group_order if x != g]
+            build_rows()
+
+        def clear_all():
+            self.series_groups.clear()
+            build_rows()
+
+        build_rows()
+
+        bf = ttk.Frame(top)
+        bf.pack(fill='x', pady=(10, 0))
+        btn_width = 12
+        ttk.Button(bf, text="Update Plot", command=self.update_plot, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(bf, text="OK", command=lambda: [self.update_plot(), d.destroy()], width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+        ttk.Button(bf, text="Cancel", command=d.destroy, width=btn_width).pack(
+            side='left', expand=True, fill='x', padx=2)
+
     def update_plot(self):
         sel_ds = self.get_selected_datasets()
         if not sel_ds or self.current_dataset_key is None: return
@@ -3220,6 +3524,20 @@ class InteractivePlotter:
                 cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
                 generated_colors = [cycle[i % len(cycle)] for i in range(total_lines)]
 
+            # --- GROUP MODE: per-series (color, linestyle) defaults ---
+            # Base hue per group (tab10, order = group_order), members get a
+            # shade / line-style variation inside their group. Ungrouped series
+            # fall back to the Cycle color above. Manual per-series styles set
+            # in the Style dialog still override these defaults.
+            group_defaults = {}
+            group_mode = self.v_color_mode.get() == "Group"
+            if group_mode and total_lines > 0:
+                _grps = self._group_series_keys()
+                _entries = [((fk, yc), _grps.get((fk, yc))) for (fk, yc, _axi) in series_to_plot]
+                _defs = self._group_member_defaults(_entries, fallback_color=generated_colors[0] if generated_colors else None)
+                for _e, _d in zip(_entries, _defs):
+                    group_defaults.setdefault(_e[0], _d)
+
             axes_list = []
             if ptype == "Dual Y-Axis":
                 self.ax = self.fig.add_subplot(111);
@@ -3320,15 +3638,19 @@ class InteractivePlotter:
 
                     sk = (fk, yc);
                     st = self.styles.get(sk, {})
-                    c = st.get('color', generated_colors[c_idx])
+                    _gc, _gls = group_defaults.get(sk, (generated_colors[c_idx], '-'))
+                    c = st.get('color', _gc)
                     w = st.get('width', 2.0 if "Scatter" not in ptype else 20.0)
-                    ls = st.get('linestyle', '-')
+                    ls = st.get('linestyle', _gls)
                     # Use per-series legend from styles, fallback to csv legend, then default
                     style_leg = st.get('legend', '').strip()
                     if style_leg:
                         lbl = style_leg
                     elif c_idx < len(cust_legs) and cust_legs[c_idx]:
                         lbl = cust_legs[c_idx]
+                    elif group_mode:
+                        _gname = (self.series_groups.get(sk) or '').strip()
+                        lbl = f"{_gname} — {fk}: {yc}" if _gname else f"{fk}: {yc}"
                     else:
                         lbl = f"{fk}: {yc}"
 
@@ -3676,8 +3998,19 @@ class InteractivePlotter:
                 if total_3d == 0:
                     raise ValueError("3D Line: no finite data for the selected X/Y/Z columns.")
 
-                # Colors: Gradient = selected colormap across ALL lines, Cycle = default cycle
-                if self.v_color_mode.get() == "Gradient" and total_3d > 1:
+                # Colors: Gradient = selected colormap across ALL lines, Cycle = default
+                # cycle, Group = group base hue with one shade per sweep (member)
+                if self.v_color_mode.get() == "Group":
+                    _grps3d = self._group_series_keys()
+                    _entries3d = [((fk, ycols[0]), _grps3d.get((fk, ycols[0])))
+                                  for fk, *_rest in sweeps] + \
+                                 [((fk, ycols[0]), _grps3d.get((fk, ycols[0])))
+                                  for fk, *_rest in cross_sweeps]
+                    _cyc0 = plt.rcParams['axes.prop_cycle'].by_key()['color']
+                    colors3d = [col for col, _ls in
+                                self._group_member_defaults(_entries3d, fallback_color=_cyc0[0],
+                                                            per_occurrence=True)]
+                elif self.v_color_mode.get() == "Gradient" and total_3d > 1:
                     cmap3d = plt.get_cmap(self.v_cmap_name.get())
                     colors3d = [cmap3d(t) for t in np.linspace(0.0, 1.0, total_3d)]
                 elif self.v_color_mode.get() == "Gradient":
@@ -4718,6 +5051,14 @@ class InteractivePlotter:
             
             # === LEGEND ORDER ===
             session_data["legend_order"] = [f"{k[0]}|||{k[1]}" for k in self.legend_order]
+
+            # === SERIES GROUPS (Group color mode) ===
+            # Tuple keys serialize as "file|||column" (same scheme as styles).
+            session_data["series_groups"] = {f"{k[0]}|||{k[1]}": g for k, g in self.series_groups.items()}
+            session_data["group_settings"] = {
+                "group_order": list(self.group_order),
+                "member_style": self.v_group_style.get(),
+            }
             
             # === LEGEND SETTINGS ===
             session_data["legend_settings"] = {
@@ -7127,6 +7468,17 @@ class InteractivePlotter:
                 if len(parts) == 2:
                     tuple_key = (parts[0], parts[1])
                     self.styles[tuple_key] = style_val
+
+            # === RESTORE SERIES GROUPS (Group color mode) ===
+            self.series_groups = {}
+            for str_key, gname in session_data.get("series_groups", {}).items():
+                parts = str_key.split("|||")
+                if len(parts) == 2 and gname and gname.strip():
+                    self.series_groups[(parts[0], parts[1])] = gname.strip()
+            _gs = session_data.get("group_settings", {})
+            self.group_order = list(_gs.get("group_order", []))
+            if _gs.get("member_style") in ("Shade + Line Style", "Shade", "Line Style"):
+                self.v_group_style.set(_gs["member_style"])
             
             # === RESTORE PER-Z-COLUMN SETTINGS (Color Map label/range memory) ===
             self.z_prefs = session_data.get("z_column_prefs", {}) or {}
