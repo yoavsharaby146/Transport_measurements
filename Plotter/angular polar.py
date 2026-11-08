@@ -80,6 +80,25 @@ def value_at_x(xs, ys, x_target, mode="Linear interpolation"):
     return float(np.interp(x_target, xs, ys))
 
 
+def parse_r_range(r_min_text, r_max_text):
+    """Manual polar R range from two text fields ('' = that side autoscales).
+    Returns (r_min, r_max) with None for blank sides; raises ValueError on
+    non-numeric input or min >= max."""
+    def _num(text, what):
+        text = (text or "").strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            raise ValueError(f"{what} must be a number or blank")
+    r_min = _num(r_min_text, "R min")
+    r_max = _num(r_max_text, "R max")
+    if r_min is not None and r_max is not None and r_min >= r_max:
+        raise ValueError("R min must be smaller than R max")
+    return r_min, r_max
+
+
 class AngularPolarPlotter:
     """Polar slice plotter: one CSV per angle, radius = value at chosen x."""
 
@@ -107,6 +126,8 @@ class AngularPolarPlotter:
         self.v_close = tk.BooleanVar(value=False)
         self.v_r_offset = tk.BooleanVar(value=False)
         self.v_angle_labels = tk.BooleanVar(value=True)
+        self.v_r_min = tk.StringVar()  # blank = autoscale that side
+        self.v_r_max = tk.StringVar()
         self.v_title = tk.StringVar(value="Angular Dependence")
 
         self._syncing_slider = False
@@ -205,6 +226,14 @@ class AngularPolarPlotter:
         ttk.Checkbutton(left, text="Close circle (append first point)", variable=self.v_close).pack(anchor='w')
         ttk.Checkbutton(left, text="Offset R (subtract min value)", variable=self.v_r_offset).pack(anchor='w')
         ttk.Checkbutton(left, text="Show angle labels", variable=self.v_angle_labels).pack(anchor='w')
+        rf = ttk.Frame(left)
+        rf.pack(fill='x', pady=1)
+        ttk.Label(rf, text="R min:", width=6).pack(side='left')
+        ttk.Entry(rf, textvariable=self.v_r_min, width=7).pack(side='left', padx=(0, 4))
+        ttk.Label(rf, text="R max:", width=6).pack(side='left')
+        ttk.Entry(rf, textvariable=self.v_r_max, width=7).pack(side='left')
+        ttk.Label(rf, text="(blank = auto)", foreground='gray',
+                  font=('Arial', 8)).pack(side='left', padx=2)
         ttk.Label(left, text="Title:").pack(anchor='w')
         ttk.Entry(left, textvariable=self.v_title).pack(fill='x')
 
@@ -292,6 +321,7 @@ class AngularPolarPlotter:
             "connect": self.v_connect.get(),
             "close": self.v_close.get(), "r_offset": self.v_r_offset.get(),
             "angle_labels": self.v_angle_labels.get(), "title": self.v_title.get(),
+            "r_min": self.v_r_min.get(), "r_max": self.v_r_max.get(),
         }
 
     def save_session(self):
@@ -348,6 +378,7 @@ class AngularPolarPlotter:
                 ("marker", self.v_marker), ("title", self.v_title),
                 ("angle_display", self.v_angle_display),
                 ("x_col", self.v_x_col), ("y_col", self.v_y_col),
+                ("r_min", self.v_r_min), ("r_max", self.v_r_max),
             ]:
                 if s.get(key):
                     var.set(s[key])
@@ -487,6 +518,14 @@ class AngularPolarPlotter:
             self.canvas.draw()
             return
 
+        # manual R range: blank side(s) stay autoscaled
+        try:
+            r_min, r_max = parse_r_range(self.v_r_min.get(), self.v_r_max.get())
+        except ValueError as e:
+            self.ax.set_title(str(e), fontsize=10)
+            self.canvas.draw()
+            return
+
         x_col = self.v_x_col.get()
         y_col = self.v_y_col.get()
         colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -556,6 +595,9 @@ class AngularPolarPlotter:
         if len(x_targets) > 1:
             self.ax.legend(loc='upper right', bbox_to_anchor=(1.25, 1.1), fontsize=9)
 
+        if r_min is not None or r_max is not None:
+            self.ax.set_rlim(bottom=r_min, top=r_max)  # None side autoscales
+
         title = f"{self.v_title.get()}"
         if len(x_targets) == 1:
             title += f"   (x = {x_targets[0]:g} @ {x_col})"
@@ -594,6 +636,17 @@ if __name__ == "__main__":
         assert format_angle_deg(135, "-90 to 90") == -45.0
         assert format_angle_deg(90, "-90 to 90") == -90.0
         assert format_angle_deg(45, "0 to 360") == 45.0
+        # manual R range parsing (blank side = None = autoscale)
+        assert parse_r_range("", "") == (None, None)
+        assert parse_r_range("0", "10") == (0.0, 10.0)
+        assert parse_r_range("-10", "10") == (-10.0, 10.0)
+        assert parse_r_range("", "20") == (None, 20.0)
+        for bad in [("", "abc"), ("abc", ""), ("10", "10"), ("10", "0")]:
+            try:
+                parse_r_range(*bad)
+                raise AssertionError(f"parse_r_range{bad} should have raised")
+            except ValueError:
+                pass
         print("angular polar self-check OK")
         sys.exit(0)
 
