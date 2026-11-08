@@ -10,9 +10,9 @@ from csv_utils import read_data_csv, show_help
 HELP_TEXT = (
     "HOW TO USE — Scan Organizer\n"
     "\n"
-    "Splits a measurement CSV into Forward / Backward (and fast / slow)\n"
-    "sweep files. Pick a mode, then select the CSV — every mode\n"
-    "auto-detects the sweeps from one chosen axis column.\n"
+    "Splits one or more measurement CSVs into Forward / Backward (and\n"
+    "fast / slow) sweep files. Pick a mode, then select the CSV(s) —\n"
+    "every mode auto-detects the sweeps from one chosen axis column.\n"
     "\n"
     "Modes:\n"
     "1. Smart Split (Fast & Slow Axis - Auto Detect)\n"
@@ -28,9 +28,14 @@ HELP_TEXT = (
     "5. Snake - Auto Detect (Alternating)\n"
     "   Snake scans: alternating sweep direction, no return sweeps\n"
     "\n"
-    "For every mode: select the file, pick the axis column, and review\n"
+    "For every mode: select the file(s), pick the axis column, and review\n"
     "the auto-detected change threshold (steps smaller than it count as\n"
-    "noise/pauses). Outputs are saved beside the source file."
+    "noise/pauses). Outputs are saved beside each source file.\n"
+    "\n"
+    "Multiple files: you can select several CSVs at once. Either reuse\n"
+    "the settings chosen for the first file (axis columns, thresholds,\n"
+    "sweep counts) for all files, or configure each file separately.\n"
+    "A file that fails is reported and the batch can continue."
 )
 
 
@@ -137,6 +142,10 @@ class ScanOrganizer:
         self.root.title("Scan Organizer")
         self.root.geometry("400x250")
 
+        # True while processing a multi-file batch (suppresses the
+        # per-file success dialogs / root.quit until the batch is done)
+        self._batch = False
+
         # --- Force Window to Front ---
         self.root.lift()
         self.root.attributes('-topmost', True)
@@ -160,7 +169,7 @@ class ScanOrganizer:
         tk.Label(self.root, text="Note: All modes auto-detect sweeps from a chosen axis column.",
                  font=("Arial", 8), fg="gray").pack(pady=0)
 
-        tk.Button(self.root, text="Select File & Run", command=self.process_selection, height=2, width=20).pack(pady=20)
+        tk.Button(self.root, text="Select Files & Run", command=self.process_selection, height=2, width=20).pack(pady=20)
         tk.Button(self.root, text="How to Use",
                   command=lambda: show_help(
                       self.root, "Scan Organizer — Help", HELP_TEXT)
@@ -169,39 +178,100 @@ class ScanOrganizer:
     def process_selection(self):
         mode = self.mode_var.get()
 
-        file_path = filedialog.askopenfilename(
+        file_paths = filedialog.askopenfilenames(
             parent=self.root,
-            title="Select your Data CSV",
+            title="Select your Data CSV(s)",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
         )
 
-        if not file_path:
+        if not file_paths:
             return
+        file_paths = list(file_paths)
+        multi = len(file_paths) > 1
+        self._batch = multi
 
-        try:
-            df = read_data_csv(file_path)
+        # Multiple files: optionally ask the settings once (based on the
+        # first file) and reuse them for every remaining file.
+        settings = {}
+        reuse = False
+        if multi:
+            reuse = messagebox.askyesno(
+                "Multiple Files",
+                f"You selected {len(file_paths)} files.\n\n"
+                "Use the same axis column(s), thresholds and sweep counts\n"
+                "for ALL files? (Asked once, based on the first file.)\n\n"
+                "Yes: same settings for all files\n"
+                "No: configure each file separately")
+            if reuse is None:
+                self._batch = False
+                return
 
-            # Route to correct logic
-            if "Smart Split" in mode:
-                self.process_smart_axis_split(df, file_path)
-            elif "Forward/Backward" in mode:
-                self.process_gate_map(df, file_path)
-            elif "Hysteresis" in mode:
-                self.process_hysteresis(df, file_path)
-            elif "Standard Loop" in mode:
-                self.process_standard_loop(df, file_path)
-            elif "Snake" in mode:
-                self.process_snake(df, file_path)
+        done, failed = 0, []
+        for i, file_path in enumerate(file_paths, 1):
+            try:
+                df = read_data_csv(file_path)
+                if multi:
+                    print(f"\n=== File {i}/{len(file_paths)}: {os.path.basename(file_path)} ===")
 
-        except Exception as e:
-            messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
+                # In per-file mode the settings cache is reset for each file;
+                # in reuse mode the answers from the first file carry over.
+                file_settings = settings if reuse else {}
+
+                # Route to correct logic; False = user cancelled a dialog
+                if "Smart Split" in mode:
+                    ok = self.process_smart_axis_split(df, file_path, file_settings)
+                elif "Forward/Backward" in mode:
+                    ok = self.process_gate_map(df, file_path, file_settings)
+                elif "Hysteresis" in mode:
+                    ok = self.process_hysteresis(df, file_path, file_settings)
+                elif "Standard Loop" in mode:
+                    ok = self.process_standard_loop(df, file_path, file_settings)
+                elif "Snake" in mode:
+                    ok = self.process_snake(df, file_path, file_settings)
+                else:
+                    messagebox.showerror("Error", f"Unknown mode: {mode}")
+                    ok = False
+
+                if ok is False:
+                    print("Processing cancelled by user.")
+                    break
+                done += 1
+
+            except Exception as e:
+                failed.append(f"{os.path.basename(file_path)}: {e}")
+                if multi:
+                    cont = messagebox.askyesno(
+                        "Error",
+                        f"An error occurred while processing\n{file_path}:\n\n{str(e)}\n\n"
+                        "Continue with the remaining files?")
+                    if not cont:
+                        break
+                else:
+                    messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
+
+        if multi:
+            msg = f"Batch complete: {done}/{len(file_paths)} file(s) processed."
+            if failed:
+                msg += "\n\nFailed:\n" + "\n".join(failed)
+            messagebox.showinfo("Done", msg)
+
+        self._batch = False
+        if done > 0 or multi:
+            self.root.quit()
 
     # =========================================================
     # SHARED HELPERS
     # =========================================================
-    def _ask_axis_and_threshold(self, df, title_prefix="Axis"):
+    def _ask_axis_and_threshold(self, df, title_prefix="Axis", settings=None):
         """Ask user to select an axis column and change threshold.
-        Returns (col_name, threshold) or (None, None) if cancelled."""
+        Returns (col_name, threshold) or (None, None) if cancelled.
+
+        If `settings` (dict) already holds 'axis_col' + 'threshold' (from a
+        previous file in a batch), they are reused without asking again."""
+        if (settings is not None and settings.get("axis_col") is not None
+                and settings.get("threshold") is not None):
+            return settings["axis_col"], settings["threshold"]
+
         columns = df.columns
         if not columns:
             messagebox.showerror("Error", "CSV appears to be empty or has no headers.")
@@ -247,6 +317,10 @@ class ScanOrganizer:
 
         if threshold is None:
             return None, None
+
+        if settings is not None:
+            settings["axis_col"] = col
+            settings["threshold"] = threshold
 
         return col, threshold
 
@@ -443,37 +517,49 @@ class ScanOrganizer:
 
         return segments
 
-    def process_gate_map(self, df, file_path):
+    def process_gate_map(self, df, file_path, settings=None):
         """Split single-axis data into forward and backward sweeps using
-        direction (sign) detection instead of magnitude thresholding."""
-        axis_col = self._ask_axis_column(df, title_prefix="Sweep Axis")
+        direction (sign) detection instead of magnitude thresholding.
+        Returns False if the user cancelled a dialog."""
+        settings = settings if settings is not None else {}
+
+        axis_col = settings.get("axis_col")
         if axis_col is None:
-            return
+            axis_col = self._ask_axis_column(df, title_prefix="Sweep Axis")
+            if axis_col is None:
+                return False
+            settings["axis_col"] = axis_col
+        if axis_col not in df.columns:
+            raise ValueError(f"Column '{axis_col}' not found in this file "
+                             f"(available: {', '.join(df.columns)})")
 
-        # Auto-compute a sensible threshold from the data:
-        #   half the median absolute non-zero diff
-        values = df[axis_col].to_numpy()
-        abs_diffs = np.abs(np.diff(values))
-        non_zero = abs_diffs[abs_diffs > 0]
-        if len(non_zero) > 0:
-            auto_threshold = float(np.median(non_zero)) * 0.5
-        else:
-            auto_threshold = float(values.max() - values.min()) * 0.01
-
-        threshold = simpledialog.askfloat(
-            "Direction Threshold",
-            f"Auto-detected step threshold: {auto_threshold:.6g}\n"
-            f"(Diffs smaller than this are treated as flat/zero)\n\n"
-            f"Adjust if needed:",
-            initialvalue=auto_threshold, parent=self.root)
+        threshold = settings.get("threshold")
         if threshold is None:
-            return
+            # Auto-compute a sensible threshold from the data:
+            #   half the median absolute non-zero diff
+            values = df[axis_col].to_numpy()
+            abs_diffs = np.abs(np.diff(values))
+            non_zero = abs_diffs[abs_diffs > 0]
+            if len(non_zero) > 0:
+                auto_threshold = float(np.median(non_zero)) * 0.5
+            else:
+                auto_threshold = float(values.max() - values.min()) * 0.01
+
+            threshold = simpledialog.askfloat(
+                "Direction Threshold",
+                f"Auto-detected step threshold: {auto_threshold:.6g}\n"
+                f"(Diffs smaller than this are treated as flat/zero)\n\n"
+                f"Adjust if needed:",
+                initialvalue=auto_threshold, parent=self.root)
+            if threshold is None:
+                return False
+            settings["threshold"] = threshold
 
         segments = self._detect_direction_segments(df, axis_col, threshold)
 
         if not segments:
             messagebox.showinfo("Info", "No sweep segments detected.")
-            return
+            return True
 
         fwd, bwd = [], []
         for segment, direction in segments:
@@ -489,16 +575,27 @@ class ScanOrganizer:
               f"({len(df) - fwd_rows - bwd_rows} flat discarded)")
 
         self.save_simple(file_path, fwd, bwd, f"FwdBwd_{axis_col}")
+        return True
 
     # =========================================================
     # MODE: Smart Split (Fast & Slow Axis - Auto Detect)
     # =========================================================
-    def process_smart_axis_split(self, df, file_path):
-        """Ask user to select Fast Axis and Slow Axis columns."""
+    def process_smart_axis_split(self, df, file_path, settings=None):
+        """Ask user to select Fast Axis and Slow Axis columns.
+        Returns False if the user cancelled a dialog."""
+        settings = settings if settings is not None else {}
         columns = df.columns
         if not columns:
             messagebox.showerror("Error", "CSV appears to be empty or has no headers.")
-            return
+            return False
+
+        # Batch: reuse the axis columns chosen for the first file
+        if settings.get("fast_col") and settings.get("slow_col"):
+            return self.run_smart_split_logic(df, file_path,
+                                              settings["fast_col"],
+                                              settings["slow_col"], settings)
+
+        result = {'ok': False}
 
         col_window = tk.Toplevel(self.root)
         col_window.title("Select Axis Columns")
@@ -529,12 +626,17 @@ class ScanOrganizer:
                                        parent=col_window)
                 return
             col_window.destroy()
-            self.run_smart_split_logic(df, file_path, fast_var.get(), slow_var.get())
+            settings["fast_col"] = fast_var.get()
+            settings["slow_col"] = slow_var.get()
+            result['ok'] = self.run_smart_split_logic(df, file_path,
+                                                      fast_var.get(), slow_var.get(),
+                                                      settings)
 
         tk.Button(col_window, text="Confirm", command=on_confirm, width=15).pack(pady=20)
         self.root.wait_window(col_window)
+        return result['ok']
 
-    def run_smart_split_logic(self, df, file_path, fast_col, slow_col):
+    def run_smart_split_logic(self, df, file_path, fast_col, slow_col, settings=None):
         """Detect segments and classify into Fast Fwd/Bwd and Slow Fwd/Bwd groups.
 
         Produces 4 outputs:
@@ -546,27 +648,37 @@ class ScanOrganizer:
         region so turnaround rows stay with the sweep that produced them,
         and fast regions split internally into Fwd/Bwd direction runs.
         Handles both fast fwd/bwd sweeps and slow-axis sweeps between them.
+        Returns False if the user cancelled a dialog.
         """
+        settings = settings if settings is not None else {}
+        for col in (fast_col, slow_col):
+            if col not in df.columns:
+                raise ValueError(f"Column '{col}' not found in this file "
+                                 f"(available: {', '.join(df.columns)})")
+
         # --- Fast Axis Threshold ---
         #   Same auto rule as the Forward/Backward Organizer: half the median
         #   absolute non-zero diff — separates real sweep steps from noise.
         fast_data_min = float(df[fast_col].min())
         fast_data_max = float(df[fast_col].max())
-        fast_abs_diffs = np.abs(np.diff(df[fast_col].to_numpy()))
-        fast_nonzero = fast_abs_diffs[fast_abs_diffs > 0]
-        if len(fast_nonzero) > 0:
-            default_fast_thresh = float(np.median(fast_nonzero)) * 0.5
-        else:
-            default_fast_thresh = (fast_data_max - fast_data_min) * 0.01
-
-        fast_threshold = simpledialog.askfloat(
-            "Fast Axis Threshold",
-            f"Enter Fast Axis ('{fast_col}') Change Threshold:\n"
-            f"(Diffs smaller than this are treated as flat/zero)\n"
-            f"Default (1% of range): {default_fast_thresh:.6g}",
-            initialvalue=default_fast_thresh, parent=self.root)
+        fast_threshold = settings.get("fast_threshold")
         if fast_threshold is None:
-            return
+            fast_abs_diffs = np.abs(np.diff(df[fast_col].to_numpy()))
+            fast_nonzero = fast_abs_diffs[fast_abs_diffs > 0]
+            if len(fast_nonzero) > 0:
+                default_fast_thresh = float(np.median(fast_nonzero)) * 0.5
+            else:
+                default_fast_thresh = (fast_data_max - fast_data_min) * 0.01
+
+            fast_threshold = simpledialog.askfloat(
+                "Fast Axis Threshold",
+                f"Enter Fast Axis ('{fast_col}') Change Threshold:\n"
+                f"(Diffs smaller than this are treated as flat/zero)\n"
+                f"Default (1% of range): {default_fast_thresh:.6g}",
+                initialvalue=default_fast_thresh, parent=self.root)
+            if fast_threshold is None:
+                return False
+            settings["fast_threshold"] = fast_threshold
 
         # --- Fast Axis Limits (optional) ---
         #   Rows where the fast axis falls outside [fast_min, fast_max] are
@@ -574,27 +686,35 @@ class ScanOrganizer:
         #   This cleanly separates the slow-axis sweep region from the fast
         #   sweep region without relying solely on diff magnitudes.
         fast_min = fast_max = None
-        use_limits = messagebox.askyesno(
-            "Fast Axis Limits",
-            f"Set fast axis sweep limits for '{fast_col}'?\n\n"
-            f"Rows outside [min, max] will be treated as slow-axis data.\n"
-            f"Data range: [{fast_data_min:.6g}, {fast_data_max:.6g}]\n\n"
-            f"Recommended if the first row of each forward sweep\n"
-            f"is being misclassified as slow-axis data.",
-            parent=self.root)
-        if use_limits:
-            fast_min = simpledialog.askfloat(
-                "Fast Axis Min",
-                f"Fast axis minimum sweep value:\n(data min = {fast_data_min:.6g})",
-                initialvalue=fast_data_min, parent=self.root)
-            if fast_min is None:
-                return
-            fast_max = simpledialog.askfloat(
-                "Fast Axis Max",
-                f"Fast axis maximum sweep value:\n(data max = {fast_data_max:.6g})",
-                initialvalue=fast_data_max, parent=self.root)
-            if fast_max is None:
-                return
+        if settings.get("limits_set"):
+            # Batch: reuse the fast-axis limits decided for the first file
+            fast_min = settings.get("fast_min")
+            fast_max = settings.get("fast_max")
+        else:
+            use_limits = messagebox.askyesno(
+                "Fast Axis Limits",
+                f"Set fast axis sweep limits for '{fast_col}'?\n\n"
+                f"Rows outside [min, max] will be treated as slow-axis data.\n"
+                f"Data range: [{fast_data_min:.6g}, {fast_data_max:.6g}]\n\n"
+                f"Recommended if the first row of each forward sweep\n"
+                f"is being misclassified as slow-axis data.",
+                parent=self.root)
+            if use_limits:
+                fast_min = simpledialog.askfloat(
+                    "Fast Axis Min",
+                    f"Fast axis minimum sweep value:\n(data min = {fast_data_min:.6g})",
+                    initialvalue=fast_data_min, parent=self.root)
+                if fast_min is None:
+                    return False
+                fast_max = simpledialog.askfloat(
+                    "Fast Axis Max",
+                    f"Fast axis maximum sweep value:\n(data max = {fast_data_max:.6g})",
+                    initialvalue=fast_data_max, parent=self.root)
+                if fast_max is None:
+                    return False
+            settings["limits_set"] = True
+            settings["fast_min"] = fast_min
+            settings["fast_max"] = fast_max
 
         # --- Slow Axis Step Threshold (auto, used internally to detect sweeps) ---
         #   Half the median non-zero slow-axis step: distinguishes a real sweep
@@ -629,6 +749,7 @@ class ScanOrganizer:
         self.save_files_smart(file_path, fast_col, slow_col,
                               result["fast_fwd"], result["fast_bwd"],
                               result["slow_fwd"], result["slow_bwd"])
+        return True
 
     def save_files_smart(self, original_path, fast_col, slow_col,
                          fast_fwd, fast_bwd, slow_fwd, slow_bwd):
@@ -667,22 +788,29 @@ class ScanOrganizer:
 
         msg = "\n".join(msg_lines)
         print(msg)
-        messagebox.showinfo("Success", msg)
-        self.root.quit()
+        if not self._batch:
+            messagebox.showinfo("Success", msg)
+            self.root.quit()
+        return msg
 
     # =========================================================
     # MODE: Snake - Auto Detect
     # =========================================================
-    def process_snake(self, df, file_path):
+    def process_snake(self, df, file_path, settings=None):
         """Auto-detect sweeps and alternate them into Fwd/Bwd."""
-        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Sweep Axis")
+        settings = settings if settings is not None else {}
+        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Sweep Axis",
+                                                           settings=settings)
         if axis_col is None:
-            return
+            return False
+        if axis_col not in df.columns:
+            raise ValueError(f"Column '{axis_col}' not found in this file "
+                             f"(available: {', '.join(df.columns)})")
 
         sweeps = self._auto_detect_sweeps(df, axis_col, threshold)
         if not sweeps:
             messagebox.showinfo("Info", "No sweep segments detected.")
-            return
+            return True
 
         fwd, bwd = [], []
         for i, sweep in enumerate(sweeps):
@@ -692,32 +820,44 @@ class ScanOrganizer:
                 bwd.append(sweep)
 
         self.save_simple(file_path, fwd, bwd, f"Snake_{axis_col}")
+        return True
 
     # =========================================================
     # MODE: Standard Loop - Auto Detect
     # =========================================================
-    def process_standard_loop(self, df, file_path):
+    def process_standard_loop(self, df, file_path, settings=None):
         """Auto-detect sweeps, group into cycles, split into Fwd/Bwd."""
-        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Loop Axis")
+        settings = settings if settings is not None else {}
+        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Loop Axis",
+                                                           settings=settings)
         if axis_col is None:
-            return
+            return False
+        if axis_col not in df.columns:
+            raise ValueError(f"Column '{axis_col}' not found in this file "
+                             f"(available: {', '.join(df.columns)})")
 
         sweeps = self._auto_detect_sweeps(df, axis_col, threshold)
         if not sweeps:
             messagebox.showinfo("Info", "No sweep segments detected.")
-            return
+            return True
 
-        sweeps_per_cycle = simpledialog.askinteger(
-            "Config", f"Detected {len(sweeps)} sweeps.\nSweeps per cycle:",
-            initialvalue=2, parent=self.root)
-        if not sweeps_per_cycle:
-            return
+        sweeps_per_cycle = settings.get("sweeps_per_cycle")
+        if sweeps_per_cycle is None:
+            sweeps_per_cycle = simpledialog.askinteger(
+                "Config", f"Detected {len(sweeps)} sweeps.\nSweeps per cycle:",
+                initialvalue=2, parent=self.root)
+            if not sweeps_per_cycle:
+                return False
+            settings["sweeps_per_cycle"] = sweeps_per_cycle
 
-        split = simpledialog.askinteger(
-            "Config", "Forward sweeps per cycle:",
-            initialvalue=sweeps_per_cycle // 2, parent=self.root)
+        split = settings.get("split")
         if split is None:
-            return
+            split = simpledialog.askinteger(
+                "Config", "Forward sweeps per cycle:",
+                initialvalue=sweeps_per_cycle // 2, parent=self.root)
+            if split is None:
+                return False
+            settings["split"] = split
 
         fwd, bwd = [], []
         for i in range(0, len(sweeps), sweeps_per_cycle):
@@ -728,42 +868,57 @@ class ScanOrganizer:
             bwd.extend(block[split:])
 
         self.save_simple(file_path, fwd, bwd, f"StandardLoop_{axis_col}")
+        return True
 
     # =========================================================
     # MODE: Hysteresis - Auto Detect
     # =========================================================
-    def process_hysteresis(self, df, file_path):
+    def process_hysteresis(self, df, file_path, settings=None):
         """Auto-detect sweeps, group into hysteresis blocks, split by sweep indices."""
-        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Hysteresis Axis")
+        settings = settings if settings is not None else {}
+        axis_col, threshold = self._ask_axis_and_threshold(df, title_prefix="Hysteresis Axis",
+                                                           settings=settings)
         if axis_col is None:
-            return
+            return False
+        if axis_col not in df.columns:
+            raise ValueError(f"Column '{axis_col}' not found in this file "
+                             f"(available: {', '.join(df.columns)})")
 
         sweeps = self._auto_detect_sweeps(df, axis_col, threshold)
         if not sweeps:
             messagebox.showinfo("Info", "No sweep segments detected.")
-            return
+            return True
 
-        sweeps_per_block = simpledialog.askinteger(
-            "Config", f"Detected {len(sweeps)} sweeps.\nSweeps per hysteresis block:",
-            initialvalue=3, parent=self.root)
-        if not sweeps_per_block:
-            return
+        sweeps_per_block = settings.get("sweeps_per_block")
+        if sweeps_per_block is None:
+            sweeps_per_block = simpledialog.askinteger(
+                "Config", f"Detected {len(sweeps)} sweeps.\nSweeps per hysteresis block:",
+                initialvalue=3, parent=self.root)
+            if not sweeps_per_block:
+                return False
+            settings["sweeps_per_block"] = sweeps_per_block
 
-        s1 = simpledialog.askinteger(
-            "Config",
-            "Split 1 (sweep index where backward starts):\n"
-            "(Sweeps 0..s1-1 are Forward part 1)",
-            initialvalue=1, parent=self.root)
+        s1 = settings.get("hyst_split1")
         if s1 is None:
-            return
+            s1 = simpledialog.askinteger(
+                "Config",
+                "Split 1 (sweep index where backward starts):\n"
+                "(Sweeps 0..s1-1 are Forward part 1)",
+                initialvalue=1, parent=self.root)
+            if s1 is None:
+                return False
+            settings["hyst_split1"] = s1
 
-        s2 = simpledialog.askinteger(
-            "Config",
-            "Split 2 (sweep index where forward resumes):\n"
-            f"(Sweeps {s1}..(Split 2 - 1) are Backward, sweeps Split 2..end are Forward part 2)",
-            initialvalue=2, parent=self.root)
+        s2 = settings.get("hyst_split2")
         if s2 is None:
-            return
+            s2 = simpledialog.askinteger(
+                "Config",
+                "Split 2 (sweep index where forward resumes):\n"
+                f"(Sweeps {s1}..(Split 2 - 1) are Backward, sweeps Split 2..end are Forward part 2)",
+                initialvalue=2, parent=self.root)
+            if s2 is None:
+                return False
+            settings["hyst_split2"] = s2
 
         fwd, bwd = [], []
         for i in range(0, len(sweeps), sweeps_per_block):
@@ -775,6 +930,7 @@ class ScanOrganizer:
             bwd.extend(block[s1:s2])
 
         self.save_simple(file_path, fwd, bwd, f"Hysteresis_{axis_col}")
+        return True
 
     # =========================================================
     # SHARED SAVER (Snake, Standard Loop, Hysteresis)
@@ -795,8 +951,10 @@ class ScanOrganizer:
 
         msg = "\n".join(msg_lines)
         print(msg)
-        messagebox.showinfo("Success", msg)
-        self.root.quit()
+        if not self._batch:
+            messagebox.showinfo("Success", msg)
+            self.root.quit()
+        return msg
 
 
 def _self_test():
