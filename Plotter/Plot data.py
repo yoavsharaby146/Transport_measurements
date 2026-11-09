@@ -110,7 +110,18 @@ class InteractivePlotter:
         # base color so it stays stable across selections / plot updates.
         self.series_groups = {}
         self.group_order = []
+        # (file_key, y_col) -> short member name typed in the Groups dialog
+        # (e.g. '1', '2', '50mV') used as the member part of the legend label.
+        self.series_members = {}
         self.v_group_style = tk.StringVar(value="Shade + Line Style")
+        # Legend label composition in Group mode: "group — member" where the
+        # member is a SHORT name taken, in order of preference, from:
+        # 1. the 'Member' field typed per series in the Groups dialog,
+        # 2. the per-series Legend field in the Styles dialog,
+        # 3. the column / file name (per this setting). Modes:
+        #   "Group — Member" | "Group — Column" | "Group — File" |
+        #   "Group — File: Column" | "Group only" (one legend entry per group)
+        self.v_group_legend_mode = tk.StringVar(value="Group — Member")
 
         # Per-Z-column sticky settings (Color Map): every Z column remembers
         # its own colorbar label and Z color range; switching Z swaps them.
@@ -2135,6 +2146,10 @@ class InteractivePlotter:
             # Drop group assignments of unloaded files (Group color mode)
             for key in [key for key in self.series_groups if isinstance(key, tuple) and key[0] == k]:
                 del self.series_groups[key]
+            # Drop typed member names of unloaded files
+            for key in [key for key in getattr(self, 'series_members', {})
+                        if isinstance(key, tuple) and key[0] == k]:
+                del self.series_members[key]
         # Data changed — any cached color-map interpolation is stale
         self._cmap_cache_key = None
         self._cmap_cache_zi = None
@@ -3096,6 +3111,41 @@ class InteractivePlotter:
             out.append((colors_by_group[g][i], ls))
         return out
 
+    def _compose_group_label(self, key, fk, yc, style_leg='', member_fallback=None):
+        """Legend label for a grouped series in 'Group' color mode: 'group — member'.
+
+        The GROUP part is written once per group (Groups dialog). The MEMBER
+        part is a short per-series name taken, in order of preference, from:
+        1. the 'Member' field typed per series in the Groups dialog
+           (e.g. '1' -> '0° — 1'),
+        2. the per-series 'Legend' field in the Styles dialog (e.g. '1V'),
+        3. member_fallback, when given (e.g. 3D sweep labels like 'Y=5'),
+        4. the 'Legend text' mode chosen in the Groups dialog:
+           Group — Member | Group — Column | Group — File |
+           Group — File: Column | Group only (group name alone).
+        Ungrouped series keep the legacy behaviour (custom legend as-is).
+        """
+        gname = (self.series_groups.get(key) or '').strip()
+        if not gname:
+            return style_leg or (member_fallback if member_fallback is not None else f"{fk}: {yc}")
+        mode = self.v_group_legend_mode.get()
+        if mode == "Group only":
+            return gname
+        member_name = (getattr(self, 'series_members', {}).get(key) or '').strip()
+        if member_name:
+            member = member_name
+        elif style_leg:
+            member = style_leg
+        elif member_fallback is not None:
+            member = member_fallback
+        elif mode == "Group — File":
+            member = fk
+        elif mode == "Group — File: Column":
+            member = f"{fk}: {yc}"
+        else:  # "Group — Member" / "Group — Column" (default) -> column name
+            member = yc
+        return f"{gname} — {member}"
+
     def _group_base_colors_hex(self):
         """{group_name: hex base color} using the same tab10 mapping as plotting."""
         from matplotlib.colors import to_hex
@@ -3121,7 +3171,9 @@ class InteractivePlotter:
 
         ttk.Label(top, text="Assign each displayed series to a group. In 'Group' color mode every group "
                             "gets one base color; members inside a group are distinguished by shade and/or "
-                            "line style. Type a new name in a row's Group box to create a group.",
+                            "line style. Type a short name/number in a row's Member box — the legend then "
+                            "shows 'group — member' (e.g. '0° — 1'). Type a new name in a row's Group box "
+                            "to create a group.",
                   font=('Arial', 9, 'italic'), foreground='gray', wraplength=560,
                   justify='left').pack(anchor='w', pady=(0, 6))
 
@@ -3129,9 +3181,26 @@ class InteractivePlotter:
         mf = ttk.Frame(top)
         mf.pack(fill='x', pady=(0, 2))
         ttk.Label(mf, text="Distinguish members by:").pack(side='left')
-        ttk.Combobox(mf, textvariable=self.v_group_style,
-                     values=["Shade + Line Style", "Shade", "Line Style"],
-                     state='readonly', width=18).pack(side='left', padx=4)
+        _ms_cb = ttk.Combobox(mf, textvariable=self.v_group_style,
+                              values=["Shade + Line Style", "Shade", "Line Style"],
+                              state='readonly', width=18)
+        _ms_cb.pack(side='left', padx=4)
+        _ms_cb.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
+
+        # Legend label composition: write the group ONCE; each series shows
+        # 'group — member' with a SHORT member name (Member field typed below,
+        # else Styles legend, else column / file per this setting).
+        lf = ttk.Frame(top)
+        lf.pack(fill='x', pady=2)
+        ttk.Label(lf, text="Legend text:").pack(side='left')
+        _lt_cb = ttk.Combobox(lf, textvariable=self.v_group_legend_mode,
+                              values=["Group — Member", "Group — Column", "Group — File",
+                                      "Group — File: Column", "Group only"],
+                              state='readonly', width=18)
+        _lt_cb.pack(side='left', padx=4)
+        _lt_cb.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
+        ttk.Label(lf, text="Member box / short Styles legend overrides the member part",
+                  font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=4)
 
         # Auto-assign by filename/column pattern
         af = ttk.Frame(top)
@@ -3187,18 +3256,37 @@ class InteractivePlotter:
             bases = self._group_base_colors_hex()
             hdr = ttk.Frame(inner)
             hdr.pack(fill='x', pady=2)
-            ttk.Label(hdr, text="Series (file : column)", width=44, anchor='w',
+            ttk.Label(hdr, text="Series (file : column)", width=38, anchor='w',
                       font=('Arial', 9, 'bold')).pack(side='left')
-            ttk.Label(hdr, text="Group", width=18, font=('Arial', 9, 'bold')).pack(side='left', padx=6)
+            ttk.Label(hdr, text="Group", width=17, font=('Arial', 9, 'bold')).pack(side='left', padx=6)
+            ttk.Label(hdr, text="Member", width=11, font=('Arial', 9, 'bold')).pack(side='left', padx=6)
             ttk.Label(hdr, text="Base color", font=('Arial', 9, 'bold')).pack(side='left', padx=6)
             for key in pairs:
                 r = ttk.Frame(inner)
                 r.pack(fill='x', pady=1)
-                ttk.Label(r, text=f"{key[0]} : {key[1]}", width=44, anchor='w').pack(side='left')
+                ttk.Label(r, text=f"{key[0]} : {key[1]}", width=38, anchor='w').pack(side='left')
                 var = tk.StringVar(value=self.series_groups.get(key, ''))
-                ttk.Combobox(r, textvariable=var, values=names, width=16).pack(side='left', padx=6)
+                grp_cb = ttk.Combobox(r, textvariable=var, values=names, width=15)
+                grp_cb.pack(side='left', padx=6)
+                grp_cb.bind('<<ComboboxSelected>>', lambda e: self.update_plot())
+                # Short member name typed by the user -> 'group — member' legend
+                mem_var = tk.StringVar(value=getattr(self, 'series_members', {}).get(key, ''))
+                mem_ent = ttk.Entry(r, textvariable=mem_var, width=10)
+                mem_ent.pack(side='left', padx=6)
+                # Replot as soon as the user finishes typing (Enter or focus leaves)
+                mem_ent.bind('<Return>', lambda e: self.update_plot())
+                mem_ent.bind('<FocusOut>', lambda e: self.update_plot())
                 sw = tk.Label(r, text="        ")
                 sw.pack(side='left', padx=6)
+
+                def _up_mem(k=key, v=mem_var):
+                    val = v.get().strip()
+                    if val:
+                        self.series_members[k] = val
+                    else:
+                        self.series_members.pop(k, None)
+
+                mem_var.trace('w', lambda *_a, f=_up_mem: f())
 
                 def _update(k=key, v=var, s=sw):
                     val = v.get().strip()
@@ -3644,13 +3732,18 @@ class InteractivePlotter:
                     ls = st.get('linestyle', _gls)
                     # Use per-series legend from styles, fallback to csv legend, then default
                     style_leg = st.get('legend', '').strip()
-                    if style_leg:
+                    if (self.series_groups.get(sk) or '').strip():
+                        # Series ASSIGNED to a group (Groups dialog): legend =
+                        # 'group — member' — works in EVERY color mode. The group
+                        # name is written ONCE; the member is the typed Member
+                        # name, else the Styles legend entry, else the column /
+                        # file per the Groups 'Legend text' mode. A Styles
+                        # legend never removes the group prefix.
+                        lbl = self._compose_group_label(sk, fk, yc, style_leg)
+                    elif style_leg:
                         lbl = style_leg
                     elif c_idx < len(cust_legs) and cust_legs[c_idx]:
                         lbl = cust_legs[c_idx]
-                    elif group_mode:
-                        _gname = (self.series_groups.get(sk) or '').strip()
-                        lbl = f"{_gname} — {fk}: {yc}" if _gname else f"{fk}: {yc}"
                     else:
                         lbl = f"{fk}: {yc}"
 
@@ -4025,7 +4118,14 @@ class InteractivePlotter:
                     w = st.get('width', 2.0)
                     ls = st.get('linestyle', '-')
                     style_leg = st.get('legend', '').strip()
-                    lbl = style_leg if style_leg else lbl
+                    if (self.series_groups.get(sk) or '').strip():
+                        # Assigned to a group: 'group — member' (member = typed
+                        # Member name / short Styles legend if set, else the
+                        # sweep label, e.g. 'Y=5') — any color mode.
+                        lbl = self._compose_group_label(sk, sk[0], sk[1], style_leg,
+                                                        member_fallback=lbl)
+                    else:
+                        lbl = style_leg if style_leg else lbl
                     ln3, = self.ax.plot(xs_p, ys_p, zs_p,
                                         color=c, linewidth=w, linestyle=ls, label=lbl)
                     lines.append(ln3)
@@ -4488,6 +4588,12 @@ class InteractivePlotter:
                 
                 # Filter lines/labels based on show_in_legend setting AND hidden_legend_items
                 series_keys_for_legend = [(fk, yc) for (fk, yc, _) in series_to_plot]
+                # 'Group only' legend mode: ONE entry per group (first line of
+                # the group) instead of a duplicate entry per member.
+                _group_only_dedupe = (self.v_group_legend_mode.get() == "Group only" and
+                                      any((self.series_groups.get(k) or '').strip()
+                                          for k in series_keys_for_legend))
+                _seen_leg_labels = set()
                 filtered_lines = []
                 filtered_labels = []
                 filtered_keys = []  # Track which keys are still visible
@@ -4506,9 +4612,15 @@ class InteractivePlotter:
                                 ln.set_visible(False)
                         elif st.get('show_in_legend', True):
                             # Show in legend — include in legend entries
-                            filtered_lines.append(ln)
-                            filtered_labels.append(lbl)
-                            filtered_keys.append(key)
+                            # (unless 'Group only' already showed this label)
+                            if _group_only_dedupe and lbl in _seen_leg_labels:
+                                pass
+                            else:
+                                if _group_only_dedupe:
+                                    _seen_leg_labels.add(lbl)
+                                filtered_lines.append(ln)
+                                filtered_labels.append(lbl)
+                                filtered_keys.append(key)
                         else:
                             # show_in_legend=False — keep line visible but exclude from legend
                             pass
@@ -5055,9 +5167,13 @@ class InteractivePlotter:
             # === SERIES GROUPS (Group color mode) ===
             # Tuple keys serialize as "file|||column" (same scheme as styles).
             session_data["series_groups"] = {f"{k[0]}|||{k[1]}": g for k, g in self.series_groups.items()}
+            # Typed member names ('group — member' legend in Group color mode)
+            session_data["series_members"] = {f"{k[0]}|||{k[1]}": m
+                                              for k, m in getattr(self, 'series_members', {}).items()}
             session_data["group_settings"] = {
                 "group_order": list(self.group_order),
                 "member_style": self.v_group_style.get(),
+                "legend_mode": self.v_group_legend_mode.get(),
             }
             
             # === LEGEND SETTINGS ===
@@ -7479,6 +7595,16 @@ class InteractivePlotter:
             self.group_order = list(_gs.get("group_order", []))
             if _gs.get("member_style") in ("Shade + Line Style", "Shade", "Line Style"):
                 self.v_group_style.set(_gs["member_style"])
+            _gleg = _gs.get("legend_mode", "Group — Member")
+            if _gleg in ("Group — Member", "Group — Column", "Group — File",
+                         "Group — File: Column", "Group only"):
+                self.v_group_legend_mode.set(_gleg)
+            # Restore typed member names (same "file|||column" key scheme)
+            self.series_members = {}
+            for str_key, mname in session_data.get("series_members", {}).items():
+                parts = str_key.split("|||")
+                if len(parts) == 2 and mname and mname.strip():
+                    self.series_members[(parts[0], parts[1])] = mname.strip()
             
             # === RESTORE PER-Z-COLUMN SETTINGS (Color Map label/range memory) ===
             self.z_prefs = session_data.get("z_column_prefs", {}) or {}
