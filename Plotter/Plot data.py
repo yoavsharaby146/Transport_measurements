@@ -81,6 +81,9 @@ class InteractivePlotter:
         self.root.deiconify()
 
         self.datasets = {}
+        # dataset_key -> full source path. Used by the Groups dialog to
+        # auto-assign groups by FOLDER name (folder-per-angle layouts).
+        self.dataset_paths = {}
         self.current_dataset_key = None
         self.styles = {}
         # Name of the loaded/saved session file (shown in the window title
@@ -2123,6 +2126,7 @@ class InteractivePlotter:
                         counter += 1
                 
                 self.datasets[key] = df
+                self.dataset_paths[key] = filepath
             except Exception as e:
                 errors.append(f"{os.path.basename(filepath)}: {e}")
         if errors:
@@ -2140,6 +2144,7 @@ class InteractivePlotter:
         keys = [self.dataset_listbox.get(i) for i in sel]
         for k in keys:
             if k in self.datasets: del self.datasets[k]
+            self.dataset_paths.pop(k, None)
             self.file_divs.pop(k, None)
             for key in [key for key in self.file_divs if isinstance(key, tuple) and key[0] == k]:
                 del self.file_divs[key]
@@ -3202,15 +3207,23 @@ class InteractivePlotter:
         ttk.Label(lf, text="Member box / short Styles legend overrides the member part",
                   font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=4)
 
-        # Auto-assign by filename/column pattern
+        # Auto-assign groups from folder name / filename / column
         af = ttk.Frame(top)
         af.pack(fill='x', pady=2)
+        auto_source = tk.StringVar(value="Folder name")
         pat_var = tk.StringVar()
-        ttk.Label(af, text="Auto pattern:").pack(side='left')
-        ttk.Entry(af, textvariable=pat_var, width=26).pack(side='left', padx=4)
+        ttk.Label(af, text="Auto-assign:").pack(side='left')
+        ttk.Combobox(af, textvariable=auto_source,
+                     values=["Folder name", "Filename", "Column"],
+                     state='readonly', width=11).pack(side='left', padx=4)
+        ttk.Entry(af, textvariable=pat_var, width=20).pack(side='left', padx=4)
         ttk.Button(af, text="⚡ Auto-Assign", command=lambda: auto_assign()).pack(side='left', padx=4)
-        ttk.Label(af, text="regex, 1st capture group = group name (e.g. angle_(\\d+))",
-                  font=('Arial', 8, 'italic'), foreground='gray').pack(side='left', padx=4)
+        ttk.Label(top, text="Group = the source text (folder / file stem / column) of each series. "
+                            "Blank pattern = use the whole text; with a regex, the 1st capture group "
+                            "of it becomes the group (e.g. angle_(\\d+) on folder 'angle_30' -> '30'). "
+                            "You can still edit any group afterwards.",
+                  font=('Arial', 8, 'italic'), foreground='gray', wraplength=560,
+                  justify='left').pack(anchor='w', pady=(0, 2))
 
         # Scrollable series rows
         wrap = ttk.Frame(top)
@@ -3307,26 +3320,49 @@ class InteractivePlotter:
 
         def auto_assign():
             pat = pat_var.get().strip()
-            if not pat:
-                messagebox.showinfo("Info", "Enter a regex pattern first, e.g.  angle_(\\d+)", parent=d)
-                return
+            source = auto_source.get()
             try:
-                rx = re.compile(pat)
+                rx = re.compile(pat) if pat else None
             except re.error as e:
                 messagebox.showerror("Bad Pattern", str(e), parent=d)
                 return
+
+            def _source_text(key):
+                """Text the group is derived from, per the chosen source."""
+                fk, yc = key
+                if source == "Folder name":
+                    p = self.dataset_paths.get(fk)
+                    if p:
+                        return os.path.basename(os.path.dirname(os.path.abspath(p)))
+                    # Session-loaded files have no stored path — fall back to
+                    # the '(folder)' suffix used to disambiguate same-name files.
+                    m = re.match(r'^(.*) \([^)]+\)$', fk)
+                    return m.group(1) if m else ""
+                if source == "Filename":
+                    return os.path.splitext(fk)[0]
+                return yc
+
             matched = 0
             for key in pairs:
-                m = rx.search(key[0]) or rx.search(key[1])
-                if m:
+                s = _source_text(key)
+                if not s:
+                    continue
+                if rx is not None:
+                    m = rx.search(s)
+                    if not m:
+                        continue
                     gname = (m.group(1) if m.groups() else m.group(0)).strip()
-                    if gname:
-                        self.series_groups[key] = gname
-                        if gname not in self.group_order:
-                            self.group_order.append(gname)
-                        matched += 1
+                else:
+                    gname = s.strip()
+                if gname:
+                    self.series_groups[key] = gname
+                    if gname not in self.group_order:
+                        self.group_order.append(gname)
+                    matched += 1
             build_rows()
-            messagebox.showinfo("Auto-Assign", f"{matched} series assigned to groups.", parent=d)
+            self.update_plot()
+            messagebox.showinfo("Auto-Assign",
+                                f"{matched} series assigned to groups (source: {source}).", parent=d)
 
         def rename_group():
             old = sel_group.get()
@@ -5154,6 +5190,8 @@ class InteractivePlotter:
                     "columns": df.columns,
                     "data": df.to_numpy().tolist()
                 }
+            # Source paths (Groups dialog folder-name auto-assign survives sessions)
+            session_data["dataset_paths"] = dict(getattr(self, 'dataset_paths', {}))
             
             # === STYLES (per-series) ===
             session_data["styles"] = {}
@@ -7577,6 +7615,8 @@ class InteractivePlotter:
                 data = df_data["data"]
                 df = pl.DataFrame(data, schema=columns, orient="row")
                 self.datasets[filename] = df
+            # Restore source paths (folder-name auto-assign in Groups dialog)
+            self.dataset_paths = dict(session_data.get("dataset_paths", {}))
             
             # === RESTORE STYLES ===
             for str_key, style_val in session_data.get("styles", {}).items():
