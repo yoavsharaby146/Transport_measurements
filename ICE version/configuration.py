@@ -89,6 +89,7 @@ def _maybe(instrument_class, enabled=True, addr="", name="Instrument"):
 
 #Magnet (COM)
 if overrides.get("use_magnet") and overrides.get("magnet_com"):
+    magnet = None
     try:
         magnet = Cryomagnetics_MPS4G(
             overrides.get("magnet_com"),
@@ -99,13 +100,24 @@ if overrides.get("use_magnet") and overrides.get("magnet_com"):
     except Exception as e:
         # e.g., SerialException: Access is denied (COM5 in use)
         print(f"[configuration] Magnet not opened: {e}")
-        print("Establishing connection to magnet after previous connection. ")
-        magnet.close()
-        magnet = Cryomagnetics_MPS4G(
-            overrides.get("magnet_com"),
-            baudrate=int(overrides.get("magnet_baud", 9600)),
-            timeout=float(overrides.get("magnet_timeout_s", 0.3)),
-        )
+        print("Retrying connection to magnet after previous connection...")
+        # Close a half-open instance (if one was created) before retrying
+        try:
+            if magnet is not None and hasattr(magnet, "close"):
+                magnet.close()
+        except Exception:
+            pass
+        time.sleep(1.0)  # give Windows a moment to release the COM handle
+        try:
+            magnet = Cryomagnetics_MPS4G(
+                overrides.get("magnet_com"),
+                baudrate=int(overrides.get("magnet_baud", 9600)),
+                timeout=float(overrides.get("magnet_timeout_s", 0.3)),
+            )
+            magnet.remote()
+        except Exception as e2:
+            print(f"[configuration] Magnet retry failed: {e2}")
+            magnet = None
 else:
     magnet = None
 

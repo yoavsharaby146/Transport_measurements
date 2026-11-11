@@ -404,6 +404,7 @@ class Launcher(QtWidgets.QMainWindow):
             self.stop()
         except Exception:
             pass
+        _close_all_instruments()
         QtWidgets.QApplication.instance().quit()
 
     def closeEvent(self, event):
@@ -412,29 +413,45 @@ class Launcher(QtWidgets.QMainWindow):
         except Exception:
             pass
 
-        try:
-            import configuration as cfg
-            instrument_list = [
-                cfg.magnet,
-                cfg.Gate_1, cfg.Gate_2, cfg.Dual_gate,
-                cfg.MFLI_1, cfg.MFLI_2, cfg.MFLI_3,
-                cfg.SRS860_1, cfg.SRS860_2,
-                cfg.SRS830_1, cfg.SRS830_2, cfg.SRS830_3,
-                getattr(cfg, "YokoGS200_1", 0), getattr(cfg, "YokoGS200_2", 0),
-                getattr(cfg, "Yoko7651_1", 0), getattr(cfg, "Yoko7651_2", 0),
-                getattr(cfg, "K6221", 0)
-            ]
-
-            for inst in instrument_list:
-                if inst != 0 and hasattr(inst, 'adapter'):
-                    try:
-                        inst.adapter.close()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        _close_all_instruments()
 
         super().closeEvent(event)
+
+
+def _close_all_instruments():
+    """Close every connected instrument on ANY exit path.
+
+    VISA/pymeasure instruments are closed via their adapter; plain-serial
+    drivers (e.g. the Cryomagnetics MPS4G magnet, which has no 'adapter'
+    attribute) are closed via their own close() method. Without this the
+    magnet COM port stays owned by the process and the NEXT program run
+    cannot open it (Access denied -> 'n/a' in the magnet setup dialog).
+    """
+    try:
+        import configuration as cfg
+        instrument_list = [
+            cfg.magnet,
+            cfg.Gate_1, cfg.Gate_2, cfg.Dual_gate,
+            cfg.MFLI_1, cfg.MFLI_2, cfg.MFLI_3,
+            cfg.SRS860_1, cfg.SRS860_2,
+            cfg.SRS830_1, cfg.SRS830_2, cfg.SRS830_3,
+            getattr(cfg, "YokoGS200_1", 0), getattr(cfg, "YokoGS200_2", 0),
+            getattr(cfg, "Yoko7651_1", 0), getattr(cfg, "Yoko7651_2", 0),
+            getattr(cfg, "K6221", 0)
+        ]
+
+        for inst in instrument_list:
+            if inst in (None, 0):
+                continue
+            try:
+                if hasattr(inst, 'adapter'):
+                    inst.adapter.close()
+                elif hasattr(inst, 'close'):
+                    inst.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
@@ -458,6 +475,9 @@ if __name__ == "__main__":
         _rebind_instruments_from_configuration()
 
         app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+        # Safety net: close every instrument (incl. the magnet COM port) no
+        # matter how the app exits (last window closed, quit(), X button).
+        app.aboutToQuit.connect(_close_all_instruments)
         win = Launcher()
         win.show()
         sys.exit(app.exec_())

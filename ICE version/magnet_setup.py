@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 
 from PyQt5 import QtWidgets, QtCore
 
@@ -77,27 +78,36 @@ def _save_safety_limits(limits: dict) -> None:
         json.dump(data, f, indent=2)
 
 
-def _read_magnet_info(com: str, baud: int, timeout: float):
+def _read_magnet_info(com: str, baud: int, timeout: float,
+                      attempts: int = 2, wait_s: float = 1.0):
     """Open the MPS4G briefly and read range limits & default rates.
 
     Returns (ranges_A, rates_A_s) lists for ranges 0-4, or (None, None)
     when the magnet cannot be reached. The port is always closed again.
+    Retries once by default: Windows can take a moment to release a COM
+    handle held by a previous instance of the program.
     """
-    try:
-        from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
-        magnet = Cryomagnetics_MPS4G(com, baudrate=baud, timeout=timeout)
+    last_err = None
+    for attempt in range(max(1, attempts)):
         try:
-            magnet.remote()
-            ranges_A = [float(getattr(magnet, f"current_range{i}")) for i in range(5)]
-            rates_A_s = [float(getattr(magnet, f"current_rate{i}")) for i in range(5)]
-            return ranges_A, rates_A_s
-        finally:
+            from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
+            magnet = Cryomagnetics_MPS4G(com, baudrate=baud, timeout=timeout)
             try:
-                magnet.close()
-            except Exception:
-                pass
-    except Exception:
-        return None, None
+                magnet.remote()
+                ranges_A = [float(getattr(magnet, f"current_range{i}")) for i in range(5)]
+                rates_A_s = [float(getattr(magnet, f"current_rate{i}")) for i in range(5)]
+                return ranges_A, rates_A_s
+            finally:
+                try:
+                    magnet.close()
+                except Exception:
+                    pass
+        except Exception as exc:
+            last_err = exc
+            if attempt < attempts - 1:
+                time.sleep(wait_s)
+    print(f"[magnet_setup] could not read magnet: {last_err}")
+    return None, None
 
 
 class MagnetSetupDialog(QtWidgets.QDialog):
