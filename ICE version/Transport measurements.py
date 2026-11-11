@@ -444,6 +444,16 @@ if __name__ == "__main__":
     import configuration as _cfg
 
     def _start_launcher():
+        # Magnet rate/range setup dialog — shown only when the magnet was
+        # selected in the pre-launch dialog (skipped silently otherwise).
+        # Must run BEFORE the configuration reload so the freshly saved
+        # safety limits are in place for all procedures.
+        try:
+            import magnet_setup
+            magnet_setup.run_if_magnet_in_use()
+        except Exception as exc:
+            print(f"[launcher] magnet setup skipped: {exc}")
+
         reload(_cfg)
         _rebind_instruments_from_configuration()
 

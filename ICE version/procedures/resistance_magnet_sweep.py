@@ -45,25 +45,11 @@ class Resistance_magnet_sweep_measurement(ICEProcedure):
         if self.use_magnet == False:
             log.warning("Magnet was not chosen measurement aborted")
             return
-        original_rates = {i: getattr(magnet, f"current_rate{i}") for i in range(5)}
-        SAFETY_MAX_RATE_PER_RANGE = {0: 0.20,1: 0.10,2: 0.05,3: 0.03,4: 0.001}
+        # Apply the requested sweep rate per current range, clamped by the
+        # safety limits set in the magnet setup dialog (see base.py).
+        original_rates = base.apply_magnet_sweep_rates(magnet, self.sweep_rate)
 
         try:
-            for i in range(5):
-                max_rate = SAFETY_MAX_RATE_PER_RANGE[i]
-                if self.sweep_rate <= max_rate:
-                    applied_rate = self.sweep_rate
-                else:
-                    applied_rate = original_rates[i]
-                    log.warning(
-                    "Requested rate %g T/min exceeds safety limit %g T/min for range %d — "
-                    "ignored, default rate %g T/min retained.",
-                    self.sweep_rate, max_rate, i, original_rates[i]
-                    )
-                rate_A_s = (applied_rate * 10.375) / 60
-                setattr(magnet, f'current_rate{i}', rate_A_s)
-                log.info("Range %d rate set to %g T/min (%g A/s)", i, applied_rate, rate_A_s)
-            
             time_0 = time.time()
             log.info("starting to sweep field to %g Tesla", self.Target_field)
             # --- 1. Persistent Heater Logic ---
@@ -102,8 +88,7 @@ class Resistance_magnet_sweep_measurement(ICEProcedure):
                 
             log.info("Magnetic field Reached!")
         finally:
-            for i in range(5):
-                setattr(magnet, f'current_rate{i}', original_rates[i])
+            base.restore_magnet_rates(magnet, original_rates)
 
     def shutdown(self):
         magnet = base.magnet

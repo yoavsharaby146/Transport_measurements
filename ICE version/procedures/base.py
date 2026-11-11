@@ -11,7 +11,8 @@ import logging
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
-import time, math, sys
+import time, math, sys, json
+from pathlib import Path
 import numpy as np
 from scipy.constants import e
 from scipy.constants import epsilon_0
@@ -61,6 +62,86 @@ K6221             = getattr(_cfg, "K6221", 0)
 RMS_TO_PEAK = 1.4142
 
 save_dir = r"C:\Users\ICE\Desktop\ICE Measurements\Yoav"
+
+
+# ---------------- Magnet sweep-rate helpers ----------------
+
+# Tesla-per-ampere conversion for the ICE Cryomagnetics MPS4G magnet
+# (the driver uses 1.0375 * 10 A per Tesla).
+MAGNET_A_PER_T = 10.375
+
+# Default per-range safety limits (T/min) for magnet sweeps. These are only
+# the fallback values; the actual limits are chosen by the user in the
+# magnet rate setup dialog (magnet_setup.py, shown after the pre-launch
+# dialog when the magnet is in use) and stored in instrument_overrides.json.
+MAGNET_DEFAULT_SAFETY_RATES = {0: 0.20, 1: 0.10, 2: 0.05, 3: 0.03, 4: 0.001}
+
+_MAGNET_OVERRIDES_JSON = Path(_cfg.__file__).with_name("instrument_overrides.json")
+
+
+def get_magnet_safety_limits():
+    """Per-range maximum sweep rates (T/min) for the magnet.
+
+    Reads the limits saved by the magnet rate setup dialog from
+    instrument_overrides.json (key 'magnet_safety_limits'); missing or
+    unreadable entries fall back to MAGNET_DEFAULT_SAFETY_RATES.
+    """
+    limits = dict(MAGNET_DEFAULT_SAFETY_RATES)
+    try:
+        saved = json.loads(_MAGNET_OVERRIDES_JSON.read_text("utf-8"))
+        saved = saved.get("magnet_safety_limits") or {}
+        for i in range(5):
+            v = saved.get(str(i), saved.get(i))
+            if v is None:
+                continue
+            try:
+                limits[i] = float(v)
+            except (TypeError, ValueError):
+                pass
+    except Exception:
+        pass
+    return limits
+
+
+def apply_magnet_sweep_rates(magnet, sweep_rate):
+    """Set the magnet's per-range charge rates for a requested sweep rate.
+
+    The requested sweep_rate (T/min) is written to every current range
+    where it does not exceed that range's safety limit (see
+    get_magnet_safety_limits()); where it does, the instrument's existing
+    default rate is kept and a warning is logged. Rates are converted to
+    A/s with MAGNET_A_PER_T.
+
+    Returns a dict of the original per-range rates (A/s) to hand to
+    restore_magnet_rates() when the measurement ends.
+    """
+    original_rates = {i: getattr(magnet, f"current_rate{i}") for i in range(5)}
+    safety_limits = get_magnet_safety_limits()
+    for i in range(5):
+        max_rate = safety_limits[i]
+        if sweep_rate <= max_rate:
+            applied_rate = sweep_rate
+            rate_A_s = (applied_rate * MAGNET_A_PER_T) / 60
+        else:
+            applied_rate = original_rates[i] * 60.0 / MAGNET_A_PER_T  # T/min (log only)
+            rate_A_s = original_rates[i]  # keep the instrument's default rate as-is
+            log.warning(
+                "Requested rate %g T/min exceeds safety limit %g T/min for range %d — "
+                "ignored, default rate %g T/min retained.",
+                sweep_rate, max_rate, i, applied_rate
+            )
+        setattr(magnet, f'current_rate{i}', rate_A_s)
+        log.info("Range %d rate set to %g T/min (%g A/s)", i, applied_rate, rate_A_s)
+    return original_rates
+
+
+def restore_magnet_rates(magnet, original_rates):
+    """Restore the magnet's per-range charge rates saved by
+    apply_magnet_sweep_rates()."""
+    if not original_rates or not _is_connected(magnet):
+        return
+    for i, rate in original_rates.items():
+        setattr(magnet, f'current_rate{i}', rate)
 
 
 # ---------------- Static column templates (backward compat + fallback) ----------------

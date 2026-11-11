@@ -43,6 +43,7 @@ class Resistance_magnet_and_2gate_mapping_measurement(ICEProcedure):
     field_end = FloatParameter('Magnetic field end (T)', default=1, group_by='mapping', group_condition=True)
     field_step = FloatParameter('Magnetic field step size (mT)', default=50, group_by='mapping', group_condition=True)
     mag_delay = FloatParameter('Delay after Magnetic sweep (s)', default=60, group_by='mapping', group_condition=True)
+    sweep_rate = FloatParameter('Sweep rate (T/min)', default=0.1, group_by='mapping', group_condition=True)
 
     # Gate 1 Settings
     smu_1 = base._make_smu_parameter('Top Gate SMU', default='Gate_1',
@@ -77,6 +78,16 @@ class Resistance_magnet_and_2gate_mapping_measurement(ICEProcedure):
         return self._read_standard(t0)
 
     def execute(self):
+        magnet = base.magnet
+        # Apply the requested sweep rate per current range, clamped by the
+        # safety limits set in the magnet setup dialog (see base.py).
+        original_rates = base.apply_magnet_sweep_rates(magnet, self.sweep_rate)
+        try:
+            self._execute_map()
+        finally:
+            base.restore_magnet_rates(magnet, original_rates)
+
+    def _execute_map(self):
         magnet = base.magnet
         time_0 = time.time()
         log.info("Starting Magnet + 2-Gate Map")
@@ -185,7 +196,7 @@ proc_resistance_magnet_2gate_map = {
             'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
             'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
             'mapping', 'scan_mode',
-            'field_start', 'field_end', 'field_step',
+            'field_start', 'field_end', 'field_step', 'sweep_rate',
             'smu_1', 'smu_1_sp1', 'smu_1_sp2',
             'smu_2', 'smu_2_sp1', 'smu_2_sp2',
             'smu_points',

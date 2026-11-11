@@ -54,6 +54,7 @@ class Resistance_magnet_and_gate_mapping_measurement(ICEProcedure):
     field_step = FloatParameter('Magnetic field step size (mT)', default=50, group_by='mapping', group_condition=True)
 
     mag_delay = FloatParameter('Delay after Magnetic sweep (s)', default=120, group_by='mapping', group_condition=True)
+    sweep_rate = FloatParameter('Sweep rate (T/min)', default=0.1, group_by='mapping', group_condition=True)
     acq_delay = FloatParameter('Acquisition Delay (s)', default=1)
 
     def startup(self):
@@ -65,6 +66,16 @@ class Resistance_magnet_and_gate_mapping_measurement(ICEProcedure):
         return self._read_standard(t0)
 
     def execute(self):
+        magnet = base.magnet
+        # Apply the requested sweep rate per current range, clamped by the
+        # safety limits set in the magnet setup dialog (see base.py).
+        original_rates = base.apply_magnet_sweep_rates(magnet, self.sweep_rate)
+        try:
+            self._execute_map()
+        finally:
+            base.restore_magnet_rates(magnet, original_rates)
+
+    def _execute_map(self):
         magnet = base.magnet
         time_0 = time.time()
 
@@ -179,7 +190,7 @@ proc_resistance_magnet_gate_map = {
         'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
         'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
         'mapping', 'line_transition', 'scan_mode',
-        'field_start', 'field_end', 'field_step',
+        'field_start', 'field_end', 'field_step', 'sweep_rate',
         'smu', 'gate_start', 'gate_end', 'gate_step',
         'mag_delay', 'acq_delay',
     ],
