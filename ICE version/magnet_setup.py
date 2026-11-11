@@ -82,10 +82,11 @@ def _read_magnet_info(com: str, baud: int, timeout: float,
                       attempts: int = 2, wait_s: float = 1.0):
     """Open the MPS4G briefly and read range limits & default rates.
 
-    Returns (ranges_A, rates_A_s) lists for ranges 0-4, or (None, None)
-    when the magnet cannot be reached. The port is always closed again.
-    Retries once by default: Windows can take a moment to release a COM
-    handle held by a previous instance of the program.
+    Returns (ranges_A, rates_A_s, error_text): the two lists for ranges
+    0-4 and None on success, or (None, None, reason) when the magnet
+    cannot be reached. The port is always closed again. Retries once by
+    default: Windows can take a moment to release a COM handle held by
+    a previous instance of the program.
     """
     last_err = None
     for attempt in range(max(1, attempts)):
@@ -93,10 +94,16 @@ def _read_magnet_info(com: str, baud: int, timeout: float,
             from Instruments.Cryomagnetics_MPS4G import Cryomagnetics_MPS4G
             magnet = Cryomagnetics_MPS4G(com, baudrate=baud, timeout=timeout)
             try:
+                # Drop any stale bytes from a previous session so the
+                # first query response cannot be misaligned.
+                try:
+                    magnet.serial.reset_input_buffer()
+                except Exception:
+                    pass
                 magnet.remote()
                 ranges_A = [float(getattr(magnet, f"current_range{i}")) for i in range(5)]
                 rates_A_s = [float(getattr(magnet, f"current_rate{i}")) for i in range(5)]
-                return ranges_A, rates_A_s
+                return ranges_A, rates_A_s, None
             finally:
                 try:
                     magnet.close()
@@ -106,15 +113,16 @@ def _read_magnet_info(com: str, baud: int, timeout: float,
             last_err = exc
             if attempt < attempts - 1:
                 time.sleep(wait_s)
-    print(f"[magnet_setup] could not read magnet: {last_err}")
-    return None, None
+    err_text = f"{type(last_err).__name__}: {last_err}"
+    print(f"[magnet_setup] could not read magnet: {err_text}")
+    return None, None, err_text
 
 
 class MagnetSetupDialog(QtWidgets.QDialog):
     """Shows the magnet's ranges & default rates (read-only) and lets the
     user edit ONLY the per-range safety rates (T/min)."""
 
-    def __init__(self, ranges_A, rates_A_s, saved_limits, parent=None):
+    def __init__(self, ranges_A, rates_A_s, saved_limits, error_text=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Magnet Sweep Rate Setup (Cryomagnetics MPS4G)")
         self.setModal(True)
@@ -136,8 +144,9 @@ class MagnetSetupDialog(QtWidgets.QDialog):
 
         if not live:
             warn = QtWidgets.QLabel(
-                "WARNING: could not read the magnet (port busy/offline). "
-                "Range/default-rate columns show 'n/a'; the safety rates below still apply.")
+                "WARNING: could not read the magnet — the Range/default-rate columns "
+                "show 'n/a'; the safety rates below still apply."
+                + (f"\nReason: {error_text}" if error_text else ""))
             warn.setStyleSheet("color: #b00000;")
             warn.setWordWrap(True)
             layout.addWidget(warn)
@@ -209,11 +218,12 @@ def run_if_magnet_in_use() -> bool:
 
     QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
     try:
-        ranges_A, rates_A_s = _read_magnet_info(com, baud, timeout)
+        ranges_A, rates_A_s, error_text = _read_magnet_info(com, baud, timeout)
     finally:
         QtWidgets.QApplication.restoreOverrideCursor()
 
-    dlg = MagnetSetupDialog(ranges_A, rates_A_s, _saved_safety_limits())
+    dlg = MagnetSetupDialog(ranges_A, rates_A_s, _saved_safety_limits(),
+                            error_text=error_text)
     if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
         print("[magnet_setup] cancelled — previously saved safety limits kept.")
         return False

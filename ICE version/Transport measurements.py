@@ -461,6 +461,14 @@ if __name__ == "__main__":
     import configuration as _cfg
 
     def _start_launcher():
+        # NOTE: the procedures package (imported at module load, long before
+        # the dialogs) already ran configuration.py, which OPENED the magnet
+        # COM port (and VISA sessions) at startup. Close everything now so
+        # the magnet setup dialog can open the port itself — otherwise the
+        # same-process double open fails with "Access denied" and the dialog
+        # shows 'n/a'. reload(_cfg) below reopens all instruments fresh.
+        _close_all_instruments()
+
         # Magnet rate/range setup dialog — shown only when the magnet was
         # selected in the pre-launch dialog (skipped silently otherwise).
         # Must run BEFORE the configuration reload so the freshly saved

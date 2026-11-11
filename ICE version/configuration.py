@@ -89,7 +89,6 @@ def _maybe(instrument_class, enabled=True, addr="", name="Instrument"):
 
 #Magnet (COM)
 if overrides.get("use_magnet") and overrides.get("magnet_com"):
-    magnet = None
     try:
         magnet = Cryomagnetics_MPS4G(
             overrides.get("magnet_com"),
@@ -98,13 +97,16 @@ if overrides.get("use_magnet") and overrides.get("magnet_com"):
         )
         magnet.remote()
     except Exception as e:
-        # e.g., SerialException: Access is denied (COM5 in use)
+        # e.g., SerialException: Access is denied (COM port already open).
+        # configuration.py is re-executed by reload() while the previous
+        # execution's instance may STILL hold the port in THIS process —
+        # close it before retrying.
         print(f"[configuration] Magnet not opened: {e}")
-        print("Retrying connection to magnet after previous connection...")
-        # Close a half-open instance (if one was created) before retrying
+        print("Closing any previous instance in this process and retrying...")
         try:
-            if magnet is not None and hasattr(magnet, "close"):
-                magnet.close()
+            old = globals().get('magnet')
+            if old not in (None, 0) and hasattr(old, 'close'):
+                old.close()
         except Exception:
             pass
         time.sleep(1.0)  # give Windows a moment to release the COM handle
