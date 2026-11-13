@@ -136,9 +136,9 @@ class MagnetSetupDialog(QtWidgets.QDialog):
         intro = QtWidgets.QLabel(
             "Ranges and default rates below are read from the magnet and are "
             "READ-ONLY.\nOnly the per-range safety rates (max sweep rate in T/min) "
-            "may be edited. During a sweep, a requested rate\nis applied only where it "
-            "does not exceed that range's safety limit; otherwise the default rate "
-            "is kept.")
+            "may be edited. During a sweep, a requested rate\nis applied as-is while it "
+            "does not exceed that range's safety limit; where it does, it is clamped "
+            "to the safety limit\n(the sweep always runs as fast as allowed, never faster).")
         intro.setWordWrap(True)
         layout.addWidget(intro)
 

@@ -106,11 +106,11 @@ def get_magnet_safety_limits():
 def apply_magnet_sweep_rates(magnet, sweep_rate):
     """Set the magnet's per-range charge rates for a requested sweep rate.
 
-    The requested sweep_rate (T/min) is written to every current range
-    where it does not exceed that range's safety limit (see
-    get_magnet_safety_limits()); where it does, the instrument's existing
-    default rate is kept and a warning is logged. Rates are converted to
-    A/s with MAGNET_A_PER_T.
+    The requested sweep_rate (T/min) is written to every current range,
+    CLAMPED to that range's safety limit (see get_magnet_safety_limits()):
+    a range whose limit is below the request gets the limit itself, i.e.
+    the sweep always runs as fast as allowed but never faster. Rates are
+    converted to A/s with MAGNET_A_PER_T.
 
     Returns a dict of the original per-range rates (A/s) to hand to
     restore_magnet_rates() when the measurement ends.
@@ -119,17 +119,16 @@ def apply_magnet_sweep_rates(magnet, sweep_rate):
     safety_limits = get_magnet_safety_limits()
     for i in range(5):
         max_rate = safety_limits[i]
-        if sweep_rate <= max_rate:
-            applied_rate = sweep_rate
-            rate_A_s = (applied_rate * MAGNET_A_PER_T) / 60
-        else:
-            applied_rate = original_rates[i] * 60.0 / MAGNET_A_PER_T  # T/min (log only)
-            rate_A_s = original_rates[i]  # keep the instrument's default rate as-is
+        if sweep_rate > max_rate:
             log.warning(
                 "Requested rate %g T/min exceeds safety limit %g T/min for range %d — "
-                "ignored, default rate %g T/min retained.",
-                sweep_rate, max_rate, i, applied_rate
+                "clamped to the safety limit.",
+                sweep_rate, max_rate, i
             )
+            applied_rate = max_rate
+        else:
+            applied_rate = sweep_rate
+        rate_A_s = (applied_rate * MAGNET_A_PER_T) / 60
         setattr(magnet, f'current_rate{i}', rate_A_s)
         log.info("Range %d rate set to %g T/min (%g A/s)", i, applied_rate, rate_A_s)
     return original_rates
