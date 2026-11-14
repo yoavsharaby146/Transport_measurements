@@ -9,4 +9,6 @@ numpy>=1.24
 scipy>=1.10
 pandas>=2.0         # CSV loading / reshaping
 polars>=0.20        # fast CSV parsing (Plot data.py)
-openpyxl>=3.1       # Excel (xlsx) export/read support for pandas
+fastexcel>=0.10     # polars read_excel uses the 'calamine' engine by default —
+                    # xlsx/xls loading fails without it (openpyxl alone is NOT enough)
+openpyxl>=3.1       # checked by the plotters' Excel guard; xlsx write/read for pandas
