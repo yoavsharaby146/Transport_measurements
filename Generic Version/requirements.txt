@@ -1,0 +1,19 @@
+# Generic Version — Transport measurement suite (PyMeasure/PyQt5)
+# Keithleys + lock-ins only (no magnet, no cryostat)
+# Run:  pip install -r requirements.txt
+# Python 3.8+
+#
+# Instrument drivers live in the sibling ../Instruments/ directory
+# (no separate install needed — keep the repo folder layout intact).
+
+PyQt5>=5.15
+pymeasure>=0.14
+pyqtgraph>=0.13
+numpy>=1.24
+scipy>=1.10
+
+# Instrument communication
+# pyvisa: VISA backend (Keithley/Yokogawa/SRS) — also needs a VISA
+#         implementation, e.g. NI-VISA or: pip install pyvisa-py
+pyvisa>=1.13
+zhinst>=22.02       # Zurich Instruments MFLI (imported by Instruments/MFLI.py)

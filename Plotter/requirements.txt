@@ -1,0 +1,12 @@
+# Plotter — offline plotting tools for measurement CSVs
+# Run:  pip install -r requirements.txt
+# Python 3.8+
+
+PyQt6>=6.5          # csv_plotter.py / csv_plotter_xyy.py
+pyqtgraph>=0.13     # fast live plotting (uses the Qt binding above)
+matplotlib>=3.7     # polar plots / export-quality figures
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0         # CSV loading / reshaping
+polars>=0.20        # fast CSV parsing (Plot data.py)
+openpyxl>=3.1       # Excel (xlsx) export/read support for pandas
