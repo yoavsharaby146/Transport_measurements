@@ -160,6 +160,7 @@ Early/experimental versions of the IV/VI sweeper scripts:
 |------|-------------|
 | `IV VI sweeper.py` | Original single-instrument IV/VI sweeper (no gate support) |
 | `IV VI sweeper with gate.py` | Intermediate version with gate voltage support |
+| `IV VI sweeper improved.py` | Bias (Keithley 2450) + **two independent gates** (each selectable: Keithley 2450 / **Keithley 2604B** (SMU A or B — one 2604B can drive both gates) / Yokogawa 7651 / Yokogawa GS200). Gate loop modes: single-gate (Gate 1 or Gate 2), dual-gate 2D map (all Vg1×Vg2 combinations, **nesting order selectable**: Gate 1 or Gate 2 as outer loop), and dual-gate movement loop (both gates ramped in lock-step along a line, e.g. density/displacement-field scans); a **single sweep can also apply each gate's manual target first** (checkboxes in "None" mode). Per-sweep CSV export named with a **sequential folder counter, pymeasure-style** (`IV_000_...`, `IV_001_...`, `VI_000_...`, continuing past existing files in the save directory) plus `Gate1Voltage(V)`/`Gate2Voltage(V)` columns. `_smoke_test_2gate.py` is a hardware-free self-check. |
 | `Instruments/` | Local copy of the Keithley 2450 driver for standalone use |
 
 > **Note:** These are archived prototypes. For active use, prefer the main `IV_VI_Sweeper.py` in the parent folder.
