@@ -79,8 +79,18 @@ app.dual_outer_var.set("1")
 
 app.loop_mode_var.set("movement")
 app._toggle_loop_entries()
+check("movement: g1 step disabled", str(app.ent_g1_loop_step.cget("state")) == "disabled")
 check("movement: g2 step disabled", str(app.ent_g2_loop_step.cget("state")) == "disabled")
-check("movement: both move label", "both gates move together" in app.lbl_loop_points.cget("text"))
+check("movement: points entry enabled", str(app.ent_loop_points.cget("state")) != "disabled")
+check("movement: both move label", "21 bias sweeps (both gates move together)"
+      in app.lbl_loop_points.cget("text"))
+# constant-n / constant-D semantics: both gates are linspaces with one count
+npts = int(app.ent_loop_points.get())
+ml1 = list(mod.np.linspace(-5, 5, npts))
+ml2 = list(mod.np.linspace(-2, 2, npts))
+check("movement: common point count",
+      len(ml1) == len(ml2) == npts and ml1[0] == -5 and ml1[-1] == 5
+      and ml2[0] == -2 and ml2[-1] == 2)
 
 app.loop_mode_var.set("gate2")
 app._toggle_loop_entries()
@@ -136,10 +146,8 @@ app.gates[0]._update_chan_visibility()
 check("chan combo hidden again", app.gates[0].chan_combo.winfo_manager() == "")
 
 # point-list construction (single/dual/movement) replicated from start_sweep
-l1 = mod.arange_inclusive(-5, 5, 1)
-l2 = mod.np.linspace(-2, 2, len(l1))
-check("movement zip length", len(list(zip(l1, l2))) == 11)
 check("dual product length", len([(a, b) for a in l1 for b in l1]) == 121)
+check("movement zip length", len(list(zip(ml1, ml2))) == npts)
 
 app.cleanup()
 root.destroy()

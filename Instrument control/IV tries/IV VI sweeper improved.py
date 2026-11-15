@@ -556,6 +556,7 @@ class IVVISweeperImproved:
             'bias_nplc': "1",
             # Gate loop (shared ramp/settle settings)
             'gate_settle': "1", 'loop_ramp_step': "10", 'loop_ramp_delay': "0.05",
+            'loop_points': "21",
             # Gate loop ranges
             'g1_start': "-5", 'g1_end': "5", 'g1_loop_step': "1",
             'g2_start': "-5", 'g2_end': "5", 'g2_loop_step': "1",
@@ -746,6 +747,11 @@ class IVVISweeperImproved:
         self.ent_loop_ramp_delay = ttk.Entry(sf, width=7)
         self.ent_loop_ramp_delay.insert(0, self.saved_params['loop_ramp_delay'])
         self.ent_loop_ramp_delay.pack(side="left", padx=3)
+        # common point count for the dual gate movement loop (disabled otherwise)
+        ttk.Label(sf, text="Points:").pack(side="left", padx=(20, 0))
+        self.ent_loop_points = ttk.Entry(sf, width=6)
+        self.ent_loop_points.insert(0, self.saved_params['loop_points'])
+        self.ent_loop_points.pack(side="left", padx=3)
         self.lbl_loop_points = ttk.Label(sf, text="1 bias sweep",
                                          font=("Arial", 9, "bold"))
         self.lbl_loop_points.pack(side="left", padx=25)
@@ -766,7 +772,8 @@ class IVVISweeperImproved:
         self.chk_apply_g2.pack(side="left", padx=8)
 
         for e in (self.ent_g1_start, self.ent_g1_end, self.ent_g1_loop_step,
-                  self.ent_g2_start, self.ent_g2_end, self.ent_g2_loop_step):
+                  self.ent_g2_start, self.ent_g2_end, self.ent_g2_loop_step,
+                  self.ent_loop_points):
             e.bind('<KeyRelease>', lambda ev: self._update_loop_points_label())
 
         # === 6. SAVE + EXECUTION ===
@@ -825,8 +832,13 @@ class IVVISweeperImproved:
         for e in (self.ent_g2_start, self.ent_g2_end, self.ent_g2_loop_step):
             e.config(state=state2)
         if mode == "movement":
-            # movement mode: point count comes from Gate 1; Gate 2 follows a linspace
+            # movement mode: both gates share one common point count (linspace);
+            # per-gate steps are meaningless there
+            self.ent_g1_loop_step.config(state="disabled")
             self.ent_g2_loop_step.config(state="disabled")
+        # common point count only used by the dual gate movement loop
+        self.ent_loop_points.config(
+            state="normal" if mode == "movement" else "disabled")
         for e in (self.ent_gate_settle, self.ent_loop_ramp_step, self.ent_loop_ramp_delay):
             e.config(state=state_shared)
         # nesting order only relevant for the dual 2D loop
@@ -853,7 +865,7 @@ class IVVISweeperImproved:
     def _update_loop_points_label(self):
         mode = self.loop_mode_var.get()
         try:
-            if mode in ("gate1", "movement", "dual"):
+            if mode in ("gate1", "dual"):
                 n1 = len(arange_inclusive(float(self.ent_g1_start.get()),
                                           float(self.ent_g1_end.get()),
                                           abs(float(self.ent_g1_loop_step.get()))))
@@ -871,8 +883,9 @@ class IVVISweeperImproved:
                 outer = "G1" if self.dual_outer_var.get() == "1" else "G2"
                 inner = "G2" if outer == "G1" else "G1"
                 text = f"{n1} x {n2} = {n1 * n2} bias sweeps ({outer} outer, {inner} inner)"
-            else:  # movement
-                text = f"{n1} bias sweeps (both gates move together)"
+            else:  # movement: one common point count for both gates
+                n = int(float(self.ent_loop_points.get()))
+                text = f"{n} bias sweeps (both gates move together)"
         except ValueError:
             text = "---"
         self.lbl_loop_points.config(text=text)
@@ -1107,7 +1120,7 @@ class IVVISweeperImproved:
                 return float(ch.ent_target.get())  # may raise ValueError
 
             try:
-                if mode in ("gate1", "dual", "movement"):
+                if mode in ("gate1", "dual"):
                     list1 = arange_inclusive(g1s, g1e, g1st)
                     if not list1:
                         messagebox.showerror("Error", "Gate 1 loop produces no points")
@@ -1118,9 +1131,6 @@ class IVVISweeperImproved:
                     if not list2:
                         messagebox.showerror("Error", "Gate 2 loop produces no points")
                         return
-                elif mode == "movement":
-                    # same number of points as Gate 1: Gate 2 follows a linspace
-                    list2 = list(np.linspace(g2s, g2e, len(list1)))
 
                 if mode == "gate1":
                     held = held_value(2)  # Gate 2 stays at its manual target
@@ -1136,7 +1146,17 @@ class IVVISweeperImproved:
                     else:
                         # Gate 1 outer loop, Gate 2 inner loop
                         points = [(v1, v2) for v1 in list1 for v2 in list2]
-                else:  # movement: both gates move together along a line
+                else:  # movement: both gates move together along a line with a
+                    # common point count — keeps any linear combination of the
+                    # gate voltages (carrier density n, displacement field D)
+                    # on a well-defined constant-n or constant-D cut
+                    npts = int(float(self.ent_loop_points.get()))
+                    if npts < 1:
+                        messagebox.showerror("Error",
+                                             "Movement loop needs at least 1 point")
+                        return
+                    list1 = list(np.linspace(g1s, g1e, npts))
+                    list2 = list(np.linspace(g2s, g2e, npts))
                     points = list(zip(list1, list2))
             except ValueError as e:
                 messagebox.showerror("Error",
