@@ -136,6 +136,13 @@ app._toggle_loop_entries()
 check("gate1 target entry", app.gates[0].ent_target.get() == "0")
 check("gate2 compliance entry", app.gates[1].ent_compliance.get() == "1e-3")
 
+# log entries are timestamped [HH:MM:SS]
+app._log_internal("timestamp probe")
+import re as _re
+last_line = app.log_text.get("1.0", "end-1c").splitlines()[-1]
+check("log timestamped", _re.match(r"^\[\d{2}:\d{2}:\d{2}\] timestamp probe$", last_line)
+      is not None)
+
 # Keithley 2604B gate option + SMU channel selector
 check("2604B in GATE_KINDS", mod.GATE_KINDS.get("Keithley 2604B") == "k2604b")
 check("chan combo hidden by default", app.gates[0].chan_combo.winfo_manager() == "")

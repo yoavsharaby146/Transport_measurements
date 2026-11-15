@@ -911,8 +911,9 @@ class IVVISweeperImproved:
         self.root.after(0, self._log_internal, message)
 
     def _log_internal(self, message):
+        stamp = time.strftime("%H:%M:%S")
         self.log_text.config(state="normal")
-        self.log_text.insert("end", f"{message}\n")
+        self.log_text.insert("end", f"[{stamp}] {message}\n")
         self.log_text.see("end")
         self.log_text.config(state="disabled")
 
