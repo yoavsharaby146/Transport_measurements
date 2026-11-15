@@ -82,6 +82,9 @@ app._toggle_loop_entries()
 check("movement: g1 step disabled", str(app.ent_g1_loop_step.cget("state")) == "disabled")
 check("movement: g2 step disabled", str(app.ent_g2_loop_step.cget("state")) == "disabled")
 check("movement: points entry enabled", str(app.ent_loop_points.cget("state")) != "disabled")
+check("movement: g2 start/end enabled",
+      str(app.ent_g2_start.cget("state")) != "disabled"
+      and str(app.ent_g2_end.cget("state")) != "disabled")
 check("movement: both move label", "21 bias sweeps (both gates move together)"
       in app.lbl_loop_points.cget("text"))
 # constant-n / constant-D semantics: both gates are linspaces with one count

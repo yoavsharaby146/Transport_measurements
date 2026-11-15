@@ -825,7 +825,7 @@ class IVVISweeperImproved:
     def _toggle_loop_entries(self):
         mode = self.loop_mode_var.get()
         state1 = "normal" if mode in ("gate1", "dual", "movement") else "disabled"
-        state2 = "normal" if mode in ("gate2", "dual") else "disabled"
+        state2 = "normal" if mode in ("gate2", "dual", "movement") else "disabled"
         state_shared = "normal" if mode != "none" else "disabled"
         for e in (self.ent_g1_start, self.ent_g1_end, self.ent_g1_loop_step):
             e.config(state=state1)

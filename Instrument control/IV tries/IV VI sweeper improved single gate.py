@@ -14,6 +14,7 @@ try:
     from Instruments.keithley2450_with_add_ons import Keithley2450
     from Instruments.yokogawa7651_with_add_ons import Yokogawa7651
     from Instruments.yokogawags200_with_add_ons import YokogawaGS200
+    from Instruments.keithley2604B import Keithley2604B
 except ImportError as e:
     print("\nCRITICAL ERROR: Could not import instrument drivers.")
     print(f"{e}")
@@ -24,6 +25,7 @@ V_RANGES = [10e-3, 100e-3, 1, 10, 30]
 
 GATE_KINDS = {
     "Keithley 2450": "keithley",
+    "Keithley 2604B": "k2604b",
     "Yokogawa 7651": "yoko7651",
     "Yokogawa GS200": "gs200",
 }
@@ -44,7 +46,9 @@ class IVVISweeperImproved:
 
         self.bias_inst = None
         self.gate_inst = None
-        self.gate_kind = None  # 'keithley' | 'yoko7651' | 'gs200'
+        self.gate_kind = None  # 'keithley' | 'k2604b' | 'yoko7651' | 'gs200'
+        self.gate_smu_parent = None  # Keithley2604B box when gate_kind == 'k2604b'
+        self.gate_chan = None        # 'smua' | 'smub' when gate_kind == 'k2604b'
         self.stop_event = threading.Event()
 
         self.saved_params = {
@@ -104,7 +108,13 @@ class IVVISweeperImproved:
                                             state="readonly", width=16)
         self.gate_kind_combo.current(0)
         self.gate_kind_combo.pack(side="left")
-        self.gate_combo = ttk.Combobox(gate_row, width=24)
+        self.gate_kind_combo.bind('<<ComboboxSelected>>',
+                                  lambda e: self._update_chan_visibility())
+        # SMU channel selector (only shown for the dual-channel Keithley 2604B)
+        self.gate_chan_combo = ttk.Combobox(gate_row, values=["SMU A", "SMU B"],
+                                            state="readonly", width=6)
+        self.gate_chan_combo.set("SMU A")
+        self.gate_combo = ttk.Combobox(gate_row, width=22)
         self.gate_combo.pack(side="left", padx=(5, 0), fill="x", expand=True)
         ttk.Button(conn, text="Connect", command=self.connect_gate, width=9).grid(row=1, column=2, padx=5)
         self.btn_gate_out = tk.Button(conn, text="Out: ---", bg="#e0e0e0", width=9,
@@ -359,12 +369,20 @@ class IVVISweeperImproved:
             messagebox.showerror("Error", "No gate address selected")
             return
         kind = GATE_KINDS[self.gate_kind_combo.get()]
+        chan = None
+        if kind == "k2604b":
+            chan = "smua" if "A" in self.gate_chan_combo.get() else "smub"
         try:
             if kind == "keithley":
                 inst = Keithley2450(addr)
                 inst.adapter.connection.timeout = 10000
                 inst.adapter.connection.read_termination = '\n'
                 inst.adapter.connection.write_termination = '\n'
+            elif kind == "k2604b":
+                parent = Keithley2604B(addr)
+                parent.instrument.timeout = 10000
+                self.gate_smu_parent = parent
+                inst = getattr(parent, chan)
             elif kind == "yoko7651":
                 inst = Yokogawa7651(addr)
                 # legacy protocol: no termination overrides (matches working GUI)
@@ -377,24 +395,37 @@ class IVVISweeperImproved:
                 inst.adapter.connection.clear()
             self.gate_inst = inst
             self.gate_kind = kind
+            self.gate_chan = chan
             self._apply_gate_ui_kind()
-            self.log(f"Gate ({self.gate_kind_combo.get()}) connected: {addr}")
+            extra = f" ({chan.upper()})" if chan else ""
+            self.log(f"Gate ({self.gate_kind_combo.get()}{extra}) connected: {addr}")
             self.update_gate_status()
         except Exception as e:
             self.gate_inst = None
             self.gate_kind = None
+            self.gate_smu_parent = None
+            self.gate_chan = None
+            self._apply_gate_ui_kind()
             messagebox.showerror("Connection Error", f"Failed to connect gate:\n{e}")
             self.log(f"Gate connection failed: {e}")
 
     def _apply_gate_ui_kind(self):
-        """NPLC only applies to the Keithley gate."""
+        """NPLC only applies to the Keithley 2450 gate; SMU selector only to 2604B."""
         state = "normal" if self.gate_kind == "keithley" else "disabled"
         self.ent_gate_nplc.config(state=state)
         self.lbl_gate_nplc.config(foreground="black" if self.gate_kind == "keithley" else "grey")
+        self._update_chan_visibility()
+
+    def _update_chan_visibility(self):
+        """Show the SMU A/B selector only when Keithley 2604B is selected."""
+        if GATE_KINDS[self.gate_kind_combo.get()] == "k2604b":
+            self.gate_chan_combo.pack(side="left", before=self.gate_combo)
+        else:
+            self.gate_chan_combo.pack_forget()
 
     def disconnect_bias(self):
         if self.bias_inst:
-            # NOTE: output intentionally left in its current state ΓÇö
+            # NOTE: output intentionally left in its current state —
             # closing the program does not mean the experiment is over.
             try:
                 on = self.bias_inst.source_enabled
@@ -409,7 +440,7 @@ class IVVISweeperImproved:
 
     def disconnect_gate(self):
         if self.gate_inst:
-            # NOTE: output and level intentionally left untouched ΓÇö
+            # NOTE: output and level intentionally left untouched —
             # closing the program does not mean the experiment is over.
             level = self._gate_read_level()
             try:
@@ -420,11 +451,16 @@ class IVVISweeperImproved:
             except Exception:
                 self.log("Gate disconnected")
             try:
-                self.gate_inst.adapter.connection.close()
+                if self.gate_kind == "k2604b":
+                    self.gate_smu_parent.close()
+                else:
+                    self.gate_inst.adapter.connection.close()
             except Exception:
                 pass
             self.gate_inst = None
             self.gate_kind = None
+            self.gate_smu_parent = None
+            self.gate_chan = None
         self.update_gate_status()
 
     def toggle_bias_terminals(self):
@@ -483,6 +519,8 @@ class IVVISweeperImproved:
         try:
             if self.gate_kind == "keithley":
                 self.gate_inst.reset()
+            elif self.gate_kind == "k2604b":
+                self.gate_smu_parent.reset()
             elif self.gate_kind == "yoko7651":
                 self.gate_inst.write("RC;E")
                 self.gate_inst.write("H0;E")
@@ -534,17 +572,24 @@ class IVVISweeperImproved:
     def _gate_enable(self, on):
         if self.gate_kind == "keithley":
             self.gate_inst.enable_source() if on else self.gate_inst.disable_source()
+        elif self.gate_kind == "k2604b":
+            self.gate_inst.output_on() if on else self.gate_inst.output_off()
         elif self.gate_kind == "yoko7651":
             self.gate_inst.enable_source() if on else self.gate_inst.disable_source()
         else:  # gs200
             self.gate_inst.source_enabled = bool(on)
 
     def _gate_output_on(self):
+        if self.gate_kind == "k2604b":
+            return bool(self.gate_inst.is_output_on())
         return bool(self.gate_inst.source_enabled)
 
     def _gate_set_level(self, level):
         if self.gate_kind == "keithley":
             self.gate_inst.source_voltage = level
+        elif self.gate_kind == "k2604b":
+            self.gate_inst.instrument.write(
+                f"{self.gate_inst.label}.source.levelv = {level}")
         elif self.gate_kind == "yoko7651":
             self.gate_inst.source_voltage = level
         else:  # gs200
@@ -553,6 +598,8 @@ class IVVISweeperImproved:
     def _gate_read_level(self):
         """Return current gate level (float) or None if readback fails."""
         try:
+            if self.gate_kind == "k2604b":
+                return float(self.gate_inst.measure__voltage())
             if self.gate_kind == "gs200":
                 return float(self.gate_inst.source_level)
             return float(self.gate_inst.source_voltage)
@@ -579,6 +626,9 @@ class IVVISweeperImproved:
         if self.gate_kind == "keithley":
             self.gate_inst.configure_voltage_source(nplc=nplc, current=1e-6,
                                                     compliance_current=compliance)
+        elif self.gate_kind == "k2604b":
+            self.gate_inst.configure_voltage_source(voltage=0,
+                                                    current_limit=compliance)
         elif self.gate_kind == "yoko7651":
             self.gate_inst.apply_voltage(max_voltage=pick_v_range(max_abs_v),
                                          compliance_current=compliance)
@@ -627,6 +677,25 @@ class IVVISweeperImproved:
                     text=f"Gate: {v:.4f} V | {i:.3e} A"))
                 return self.stop_event.is_set()
             inst.voltage_ramping_with_monitor(target, step_v, delay, callback=cb)
+        elif kind == "k2604b":
+            # driver has no callback-based monitor: software ramp + abort checks
+            start = self._gate_read_level()
+            if start is None:
+                start = 0.0
+            if step_v > 0:
+                sign = 1.0 if target > start else -1.0
+                n = int(abs(target - start) / step_v) + 1
+            else:
+                n = 1
+            seq = [start + sign * step_v * (i + 1) for i in range(n)]
+            seq[-1] = target
+            for v in seq:
+                self._gate_set_level(v)
+                self.root.after(0, lambda v=v: self.lbl_gate_status.config(
+                    text=f"Gate: {v:.4f} V"))
+                if self.stop_event.is_set():
+                    return
+                time.sleep(delay)
         else:
             # Yokos: callback(elapsed, level)
             def cb(_elapsed, level):
@@ -653,6 +722,11 @@ class IVVISweeperImproved:
             if self.gate_kind == "keithley":
                 try:
                     current = float(self.gate_inst.ask(":MEAS:CURR?"))
+                except Exception:
+                    current = None
+            elif self.gate_kind == "k2604b":
+                try:
+                    current = float(self.gate_inst.measure__current())
                 except Exception:
                     current = None
             v_str = f"{voltage:.4f}" if voltage is not None else "---"
