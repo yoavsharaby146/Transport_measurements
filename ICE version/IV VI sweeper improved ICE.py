@@ -450,6 +450,25 @@ class GateChannel:
         except Exception:
             return None
 
+    def measure_voltage(self):
+        """TRUE output-voltage measurement where the instrument can measure.
+
+        Keithley 2450: ':MEAS:VOLT?' — measures the actual voltage at the
+        terminals (catches compliance limiting, which the source register
+        hides). Keithley 2604B channel: measure__voltage() (already a real
+        measurement). The Yokogawa 7651 / GS200 are pure sources with no
+        voltmeter function — falls back to the source setpoint readback.
+        Returns None on failure.
+        """
+        try:
+            if self.kind == "keithley":
+                return float(self.inst.ask(":MEAS:VOLT?"))
+            if self.kind == "k2604b":
+                return float(self.inst.measure__voltage())
+        except Exception:
+            pass
+        return self.read_level()
+
     def configure_source(self, compliance, nplc, max_abs_v=None):
         """Configure this gate instrument as a voltage source."""
         if max_abs_v is None:
@@ -1786,9 +1805,9 @@ class IVVISweeperImproved:
                 if p.get('held_readback') and held_gi is not None:
                     ch = self.gates[held_gi - 1]
                     if ch.inst is not None:
-                        readback_val = ch.read_level()
+                        readback_val = ch.measure_voltage()
                         if readback_val is not None:
-                            self.log(f"Gate {held_gi} readback: "
+                            self.log(f"Gate {held_gi} voltage: "
                                      f"{readback_val:.4f} V")
                         else:
                             self.log(f"Note: Gate {held_gi} readback failed "
