@@ -1039,6 +1039,17 @@ class IVVISweeperImproved:
             variable=self.apply_g2_var)
         self.chk_apply_g2.pack(side="left", padx=8)
 
+        # single-gate loop option: also document the other (held) gate.
+        # The held gate's programmed target is always recorded as a column
+        # when it is connected; this toggle additionally reads its ACTUAL
+        # voltage once per sweep (post-sweep, like the field/temperature
+        # readings) and stores it as a Gate{held}Readback(V) column.
+        self.held_readback_var = tk.BooleanVar(value=False)
+        self.chk_held_readback = ttk.Checkbutton(
+            af, text="In single-gate loops: record held-gate readback (V)",
+            variable=self.held_readback_var)
+        self.chk_held_readback.pack(side="left", padx=8)
+
         for e in (self.ent_g1_start, self.ent_g1_end, self.ent_g1_loop_step,
                   self.ent_g2_start, self.ent_g2_end, self.ent_g2_loop_step,
                   self.ent_loop_points):
@@ -1114,10 +1125,10 @@ class IVVISweeperImproved:
         its own toggle (field needs the magnet; temperature needs ICElog).
         """
         box = ttk.LabelFrame(parent, text="Field & Temperature (ICE)", padding=5)
-        self.doc_field_var = tk.BooleanVar(value=True)
+        self.doc_field_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(box, text="Record field each sweep",
                         variable=self.doc_field_var).pack(anchor="w", pady=1)
-        self.doc_temp_var = tk.BooleanVar(value=True)
+        self.doc_temp_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(box, text="Record temperature each sweep",
                         variable=self.doc_temp_var).pack(anchor="w", pady=1)
         btns = ttk.Frame(box)
@@ -1185,6 +1196,10 @@ class IVVISweeperImproved:
         apply_state = "normal" if mode == "none" else "disabled"
         self.chk_apply_g1.config(state=apply_state)
         self.chk_apply_g2.config(state=apply_state)
+        # held-gate readback only meaningful in single-gate loop modes
+        # (in dual/movement loops both gates are already recorded)
+        held_state = "normal" if mode in ("gate1", "gate2") else "disabled"
+        self.chk_held_readback.config(state=held_state)
         for gi, var in ((1, self.apply_g1_var), (2, self.apply_g2_var)):
             if mode == "none" and var.get() and self.gates[gi - 1].inst is None:
                 self.log(f"Note: 'Apply Gate {gi} target' is checked but "
@@ -1574,6 +1589,8 @@ class IVVISweeperImproved:
             'loop_ramp_step': ramp_step, 'loop_ramp_delay': ramp_delay,
             'doc_field': self.doc_field_var.get(),
             'doc_temp': self.doc_temp_var.get(),
+            'held_readback': (self.held_readback_var.get()
+                              and mode in ("gate1", "gate2")),
         }
         params.update(gate_cfg)
         threading.Thread(target=self._run_sweep_thread, args=(params,), daemon=True).start()
@@ -1761,6 +1778,25 @@ class IVVISweeperImproved:
                 if p.get('doc_temp'):
                     temp_vals = self._document_temperature()
 
+                # single-gate loops: optionally read the held gate's ACTUAL
+                # voltage once per sweep (its programmed target is already
+                # recorded as a constant column)
+                readback_val = None
+                held_gi = {"gate1": 2, "gate2": 1}.get(mode)
+                if p.get('held_readback') and held_gi is not None:
+                    ch = self.gates[held_gi - 1]
+                    if ch.inst is not None:
+                        readback_val = ch.read_level()
+                        if readback_val is not None:
+                            self.log(f"Gate {held_gi} readback: "
+                                     f"{readback_val:.4f} V")
+                        else:
+                            self.log(f"Note: Gate {held_gi} readback failed "
+                                     "— no readback column")
+                    else:
+                        self.log(f"Note: Gate {held_gi} not connected — "
+                                 "no readback column")
+
                 # sequential file number within the save folder (pymeasure-style:
                 # IV_000, IV_001, ... continuing past existing files)
                 num = next_file_number(p['save_dir'], sweep_type)
@@ -1797,6 +1833,9 @@ class IVVISweeperImproved:
                     for name, v in zip(TEMP_COLUMNS, temp_vals):
                         header += f",{name}"
                         cols.append(np.full(x.size, v))
+                if readback_val is not None:
+                    header += f",Gate{held_gi}Readback(V)"
+                    cols.append(np.full(x.size, readback_val))
 
                 csv_path = os.path.join(p['save_dir'], name + ".csv")
                 np.savetxt(csv_path, np.vstack(cols).T, delimiter=',', header=header)
@@ -1832,7 +1871,10 @@ class IVVISweeperImproved:
         except Exception as e:
             self.log(f"Sweep error: {e}")
             self._progress(f"Error: {e}")
-            self.root.after(0, lambda: messagebox.showerror("Sweep Error", str(e)))
+            # capture the message now: the except variable is deleted when
+            # the block exits, so a deferred lambda would raise NameError
+            err_msg = str(e)
+            self.root.after(0, lambda: messagebox.showerror("Sweep Error", err_msg))
         finally:
             self.root.after(0, lambda: self.btn_run.config(state="normal"))
             self.root.after(0, lambda: self.btn_abort.config(state="disabled"))
