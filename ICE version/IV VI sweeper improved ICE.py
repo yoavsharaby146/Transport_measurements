@@ -319,7 +319,9 @@ class GateChannel:
         self.lbl_status = ttk.Label(box, text=f"Gate {self.index}: --- V",
                                     font=("Consolas", 9))
         self.lbl_status.pack(anchor="w", pady=(4, 0))
-        box.pack(side="left", fill="both", expand=True, padx=4)
+        # stacked full-width (Gate 1 above Gate 2) so both cards stay visible
+        # next to the docked log even on small screens
+        box.pack(fill="x", pady=2, padx=2)
 
     # ==================== CONNECTION ====================
 
@@ -1136,12 +1138,15 @@ class IVVISweeperImproved:
                   font=("Segoe UI", 9), foreground=COLORS["muted_text"]).pack(
             side="left", padx=12)
 
-        # Keep the Run/Abort controls visible while switching between compact tabs.
-        self.tabs = ttk.Notebook(self.main_frame)
-        self.tabs.pack(fill="both", expand=True, pady=(0, 5))
+        # Left: compact tabs (connection, sweep setup, magnet). Right: the
+        # activity log, docked so it is ALWAYS visible while switching tabs.
+        # PanedWindow: the divider between the two is user-adjustable.
+        body = ttk.PanedWindow(self.main_frame, orient="horizontal")
+        body.pack(fill="both", expand=True, pady=(0, 5))
+        self.tabs = ttk.Notebook(body)
+        body.add(self.tabs, weight=1)
         instruments = self._scrollable_tab("Instruments")
         sweep_setup = self._scrollable_tab("Sweep setup")
-        activity = self._scrollable_tab("Activity log")
 
         # === 1. CONNECTION ===
         conn = ttk.LabelFrame(instruments, text="Instrument connections", padding=7)
@@ -1195,10 +1200,10 @@ class IVVISweeperImproved:
         inner.pack()
         ttk.Radiobutton(inner, text="IV Sweep (Source Voltage, Measure Current)",
                         variable=self.sweep_type_var, value="iv",
-                        command=self._update_ui_labels).pack(side="left", padx=20)
+                        command=self._update_ui_labels).pack(anchor="w")
         ttk.Radiobutton(inner, text="VI Sweep (Source Current, Measure Voltage)",
                         variable=self.sweep_type_var, value="vi",
-                        command=self._update_ui_labels).pack(side="left", padx=20)
+                        command=self._update_ui_labels).pack(anchor="w")
 
         # === 4. BIAS SWEEP CONFIG ===
         cfgf = ttk.LabelFrame(sweep_setup, text="Bias sweep", padding=7)
@@ -1252,7 +1257,8 @@ class IVVISweeperImproved:
                          ("movement", "Dual gate movement"))):
             ttk.Radiobutton(mf, text=txt, variable=self.loop_mode_var, value=val,
                             command=self._toggle_loop_entries).grid(
-                                row=i // 3, column=i % 3, sticky="w", padx=(2, 24), pady=2)
+                                row=i // 2, column=i % 2, sticky="w",
+                                padx=(2, 24), pady=2)
 
         rf = ttk.Frame(loop)
         rf.pack(fill="x", pady=(6, 0))
@@ -1262,10 +1268,10 @@ class IVVISweeperImproved:
         of.pack(fill="x", pady=(2, 0))
         ttk.Label(of, text="Dual 2D nesting order:").pack(side="left")
         self.dual_outer_var = tk.StringVar(value="1")
-        self.rb_dual_outer1 = ttk.Radiobutton(of, text="Gate 1 outer / Gate 2 inner",
+        self.rb_dual_outer1 = ttk.Radiobutton(of, text="G1 outer / G2 inner",
                                               variable=self.dual_outer_var, value="1")
         self.rb_dual_outer1.pack(side="left", padx=8)
-        self.rb_dual_outer2 = ttk.Radiobutton(of, text="Gate 2 outer / Gate 1 inner",
+        self.rb_dual_outer2 = ttk.Radiobutton(of, text="G2 outer / G1 inner",
                                               variable=self.dual_outer_var, value="2")
         self.rb_dual_outer2.pack(side="left", padx=8)
 
@@ -1317,11 +1323,14 @@ class IVVISweeperImproved:
         self.ent_loop_ramp_delay.insert(0, self.saved_params['loop_ramp_delay'])
         self.ent_loop_ramp_delay.pack(side="left", padx=3)
         # common point count for the dual gate movement loop (disabled otherwise)
-        ttk.Label(sf, text="Points:").pack(side="left", padx=(20, 0))
-        self.ent_loop_points = ttk.Entry(sf, width=6)
+        # — own row so the writing is not cut next to the docked log
+        sf2 = ttk.Frame(loop)
+        sf2.pack(fill="x", pady=(2, 0))
+        ttk.Label(sf2, text="Points:").pack(side="left")
+        self.ent_loop_points = ttk.Entry(sf2, width=6)
         self.ent_loop_points.insert(0, self.saved_params['loop_points'])
         self.ent_loop_points.pack(side="left", padx=3)
-        self.lbl_loop_points = ttk.Label(sf, text="1 bias sweep",
+        self.lbl_loop_points = ttk.Label(sf2, text="1 bias sweep",
                                          font=("Arial", 9, "bold"))
         self.lbl_loop_points.pack(side="left", padx=25)
 
@@ -1337,9 +1346,11 @@ class IVVISweeperImproved:
             af, text="Record Gate 1 voltage column (gate not driven)",
             variable=self.rec_g1_var)
         self.chk_rec_g1.pack(side="left", padx=8)
+        af2 = ttk.Frame(loop)
+        af2.pack(fill="x", pady=(2, 0))
         self.rec_g2_var = tk.BooleanVar(value=False)
         self.chk_rec_g2 = ttk.Checkbutton(
-            af, text="Record Gate 2 voltage column (gate not driven)",
+            af2, text="Record Gate 2 voltage column (gate not driven)",
             variable=self.rec_g2_var)
         self.chk_rec_g2.pack(side="left", padx=8)
 
@@ -1355,11 +1366,14 @@ class IVVISweeperImproved:
 
         # Returning the gates to 0 V after a gate loop is a user choice,
         # not a program default (the field return lives in the Magnet tab).
+        # Own row so the text is not cut next to the docked log.
+        held_row2 = ttk.Frame(loop)
+        held_row2.pack(fill="x", pady=(2, 0))
         self.return_gates_var = tk.BooleanVar(value=False)
         self.chk_return_gates = ttk.Checkbutton(
-            held_row, text="Return gates to 0 V after loop",
+            held_row2, text="Return gates to 0 V after loop",
             variable=self.return_gates_var)
-        self.chk_return_gates.pack(side="left", padx=(20, 8))
+        self.chk_return_gates.pack(side="left", padx=8)
 
         for e in (self.ent_g1_start, self.ent_g1_end, self.ent_g1_loop_step,
                   self.ent_g2_start, self.ent_g2_end, self.ent_g2_loop_step,
@@ -1398,18 +1412,17 @@ class IVVISweeperImproved:
                                       font=("Segoe UI", 10, "bold"))
         self.lbl_progress.pack(side="left", padx=10)
 
-        # === LOG ===
-        logf = ttk.LabelFrame(activity, text="Instrument & measurement messages", padding=8)
-        logf.pack(fill="both", expand=True, pady=4)
-        self.log_text = tk.Text(logf, height=8, state="disabled",
+        # === LOG (docked right, always visible; divider is draggable) ===
+        logf = ttk.LabelFrame(body, text="Instrument & measurement messages", padding=8)
+        body.add(logf, weight=0)
+        self.log_text = tk.Text(logf, height=8, width=42, wrap="word",
+                                state="disabled",
                                 bg=COLORS["log_background"], fg=COLORS["log_text"],
                                 insertbackground=COLORS["log_cursor"],
                                 selectbackground=COLORS["log_selection"],
                                 font=("Consolas", 9), relief="flat",
                                 padx=8, pady=6)
         self.log_text.pack(fill="both", expand=True)
-        ttk.Label(activity, text="Messages are preserved while you switch tabs.",
-                  style="Muted.TLabel").pack(anchor="w", padx=8, pady=5)
 
         # === 7. MAGNET CONTROL + FIELD LOOP (own tab, ICE only) ===
         mtab = self._scrollable_tab("Magnet control")
@@ -1426,11 +1439,14 @@ class IVVISweeperImproved:
         self.ent_mag_target = ttk.Entry(rowm, width=8)
         self.ent_mag_target.insert(0, self.saved_params['mag_target'])
         self.ent_mag_target.pack(side="left", padx=3)
-        self.btn_mag_go = ttk.Button(rowm, text="Go to target",
+        # buttons on their own row so nothing is cut next to the docked log
+        rowm2 = ttk.Frame(mctl)
+        rowm2.pack(fill="x", pady=(4, 0))
+        self.btn_mag_go = ttk.Button(rowm2, text="Go to target",
                                      command=self.start_manual_field_ramp)
-        self.btn_mag_go.pack(side="left", padx=12)
-        ttk.Button(rowm, text="Safety limits...",
-                   command=self.magnet.open_safety_dialog).pack(side="left", padx=4)
+        self.btn_mag_go.pack(side="left")
+        ttk.Button(rowm2, text="Safety limits...",
+                   command=self.magnet.open_safety_dialog).pack(side="left", padx=6)
         self.lbl_mag_status = ttk.Label(mctl, text="B: --- T",
                                         font=("Consolas", 9))
         self.lbl_mag_status.pack(anchor="w", pady=(4, 0))
@@ -1445,7 +1461,7 @@ class IVVISweeperImproved:
         flo.pack(fill="x", pady=5)
         self.rb_field_loop = ttk.Radiobutton(
             flo, text="Field loop (bias vs B): run one bias sweep at every "
-                      "field point below (overrides the Sweep setup loop mode)",
+                      "field point\nbelow (overrides the Sweep setup loop mode)",
             variable=self.loop_mode_var, value="field",
             command=self._toggle_loop_entries)
         self.rb_field_loop.pack(anchor="w", pady=(0, 4))
@@ -1479,7 +1495,7 @@ class IVVISweeperImproved:
             variable=self.return_field_var)
         self.chk_return_field.pack(anchor="w", pady=(4, 0))
         ttk.Label(flo, text="Forward sweep from Start to End. The field is swept "
-                            "back to 0 T after the loop only when 'Return field "
+                            "back to 0 T\nafter the loop only when 'Return field "
                             "to 0 T after loop' above is checked.",
                   style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
         for e in (self.ent_field_start, self.ent_field_end,
@@ -1490,25 +1506,43 @@ class IVVISweeperImproved:
         self._toggle_loop_entries()
 
     def _scrollable_tab(self, title):
-        """Scrollable vertical tab; still usable at 1366x768 and high DPI."""
+        """Scrollable tab (vertical + horizontal); still usable at 1366x768
+        and high DPI. The frame stretches to the canvas width when the window
+        is wide enough, and scrolls sideways when the content is wider."""
         outer = ttk.Frame(self.tabs)
         self.tabs.add(outer, text=f"  {title}  ")
         canvas = tk.Canvas(outer, bg=COLORS["canvas"], highlightthickness=0,
                            borderwidth=0)
-        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
+        vbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        hbar = ttk.Scrollbar(outer, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+        vbar.pack(side="right", fill="y")
+        hbar.pack(side="bottom", fill="x")
         canvas.pack(side="left", fill="both", expand=True)
         body = ttk.Frame(canvas, padding=(6, 6, 8, 8))
         window = canvas.create_window((0, 0), window=body, anchor="nw")
         body.bind("<Configure>", lambda _e: canvas.configure(
             scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(
-            window, width=e.width))
+
+        def on_canvas_config(e):
+            # stretch the frame to the canvas size ONLY when the content is
+            # smaller; leave natural size otherwise so BOTH scrollbars work
+            # (forcing height would clip tall content and kill vertical scroll)
+            if body.winfo_reqwidth() <= e.width:
+                canvas.itemconfigure(window, width=e.width)
+            if body.winfo_reqheight() <= e.height:
+                canvas.itemconfigure(window, height=e.height)
+        canvas.bind("<Configure>", on_canvas_config)
 
         # Windows uses delta increments of 120; scroll only over this tab.
+        # Shift+wheel pans horizontally (same direction as vertical scroll).
         def wheel(event):
-            canvas.yview_scroll(-int(event.delta / 120) if event.delta else 0, "units")
+            if getattr(event, "state", 0) & 0x0001:  # Shift held
+                canvas.xview_scroll(-int(event.delta / 120) if event.delta else 0,
+                                    "units")
+            else:
+                canvas.yview_scroll(
+                    -int(event.delta / 120) if event.delta else 0, "units")
         def bind_wheel(widget):
             widget.bind("<MouseWheel>", wheel, add="+")
             for child in widget.winfo_children():
@@ -1552,6 +1586,9 @@ class IVVISweeperImproved:
         style.map("TNotebook.Tab",
                   background=[("selected", c["surface"])],
                   foreground=[("selected", c["accent"])])
+        # visible grab handle between the tab area and the docked log
+        style.configure("TPanedwindow", background=c["border"])
+        style.configure("Sash", sashthickness=6, background=c["border"])
 
     def _build_environment_panel(self, parent):
         """Field & temperature documentation panel, next to the gate panels.
@@ -1577,7 +1614,8 @@ class IVVISweeperImproved:
         self.lbl_env_status = ttk.Label(box, text="B: ---  |  T: ---",
                                         font=("Consolas", 9))
         self.lbl_env_status.pack(anchor="w", pady=(4, 0))
-        box.pack(side="left", fill="both", expand=True, padx=4)
+        # stacked full-width below the two gate cards (small-screen layout)
+        box.pack(fill="x", pady=2, padx=2)
 
     def _update_env_label(self):
         """Refresh the small B/T readout in the environment panel."""
@@ -2490,7 +2528,7 @@ def main():
     # Compact layout for a 14-inch laptop: honor available screen space.
     # Vertical scrollbars keep every option accessible at higher scaling.
     screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
-    width = min(1080, max(760, screen_w - 80))
+    width = min(1280, max(900, screen_w - 80))
     height = min(680, max(520, screen_h - 95))
     root.geometry(f"{width}x{height}")
     root.minsize(min(760, width), min(520, height))
