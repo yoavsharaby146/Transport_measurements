@@ -49,6 +49,48 @@ GATE_KINDS = {
 }
 
 
+# ==================== WINDOW COLOR PALETTE ====================
+# Every color used by the window is defined HERE, in this one dictionary.
+# To re-theme the program: edit the values below and restart the program
+# (a running window does not live-update). Values are hex strings "#rrggbb"
+# or any Tk color name such as "grey", "orange", "white".
+COLORS = {
+    # --- window & panels ---
+    "background":        "#f4f7fb",  # window background
+    "surface":           "#ffffff",  # panel (LabelFrame) background
+    "border":            "#dce4ee",  # panel borders
+    "text":              "#253449",  # normal text
+    "muted_text":        "#718096",  # subtitle / hint text
+    "accent":            "#1768a5",  # title, section titles, selected tab
+    "tab_inactive":      "#e2eaf3",  # unselected notebook tabs
+    "tab_inactive_text": "#44566d",  # text on unselected tabs
+    "button":            "#e7eef6",  # regular ttk buttons
+    "button_hover":      "#d4e4f3",  # ttk buttons under the mouse
+    "canvas":            "#fbf4f4",  # scrollable tab canvas
+
+    # --- actions ---
+    "run":               "#16845b",  # RUN SWEEP button
+    "run_hover":         "#106b49",  # RUN SWEEP pressed/hover
+    "abort":             "#bb3f45",  # ABORT button
+    "abort_hover":       "#a7353b",  # ABORT pressed/hover
+    "action_text":       "#ffffff",  # text on RUN/ABORT buttons
+
+    # --- log console ---
+    "log_background":    "#14181f",
+    "log_text":          "#d8dee9",
+    "log_cursor":        "#26cca2",
+    "log_selection":     "#3a5a80",
+
+    # --- instrument status buttons ("Out:" / "Term:") ---
+    "status_neutral":    "#e0e0e0",  # not connected / "Term: ---"
+    "status_idle":       "#a7d8c9",  # gate row idle ("Out: ---")
+    "status_on":         "#90ee90",  # output ON
+    "status_off":        "#ffcccb",  # output OFF
+    "status_error":      "grey",     # status unknown (instrument error)
+    "status_rear":       "orange",   # bias "Term: REAR"
+}
+
+
 def pick_v_range(level):
     """Smallest fixed Yokogawa range that fits |level|."""
     for r in V_RANGES:
@@ -212,7 +254,7 @@ class GateChannel:
         self.addr_combo.pack(side="left", padx=(5, 0), fill="x", expand=True)
         ttk.Button(parent, text="Connect", command=self.connect, width=9).grid(
             row=row, column=2, padx=5)
-        self.btn_out = tk.Button(parent, text="Out: ---", bg="#e0e0e0", width=9,
+        self.btn_out = tk.Button(parent, text="Out: ---", bg=COLORS["status_neutral"], width=9,
                                  command=self.toggle_output)
         self.btn_out.grid(row=row, column=4, padx=5)
         ttk.Button(parent, text="Reset", command=self.reset, width=7).grid(
@@ -388,15 +430,15 @@ class GateChannel:
 
     def update_status(self):
         if not self.inst:
-            self.btn_out.config(text="Out: ---", bg="#a7d8c9")
+            self.btn_out.config(text="Out: ---", bg=COLORS["status_idle"])
             self.lbl_status.config(text=f"Gate {self.index}: --- V")
             return
         try:
             on = self.output_on()
             self.btn_out.config(text="Out: ON" if on else "Out: OFF",
-                                bg="#90ee90" if on else "#ffcccb")
+                                bg=COLORS["status_on"] if on else COLORS["status_off"])
         except Exception:
-            self.btn_out.config(text="Out: ???", bg="grey")
+            self.btn_out.config(text="Out: ???", bg=COLORS["status_error"])
 
     def apply_ui_kind(self):
         """NPLC only applies to the Keithley 2450 gate; SMU selector only to 2604B."""
@@ -841,7 +883,7 @@ class IVVISweeperImproved:
 
     def _build_ui(self):
         self._setup_style()
-        self.main_frame = ttk.Frame(self.root, padding=12)
+        self.main_frame = ttk.Frame(self.root, padding=8)
         self.main_frame.pack(fill="both", expand=True)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
@@ -850,29 +892,36 @@ class IVVISweeperImproved:
         header = ttk.Frame(self.main_frame)
         header.pack(fill="x", pady=(0, 8))
         ttk.Label(header, text="IV/VI Sweeper — ICE",
-                  font=("Segoe UI", 14, "bold"),
-                  foreground="#1a4d7a").pack(side="left")
+                  font=("Segoe UI", 15, "bold"),
+                  foreground=COLORS["accent"]).pack(side="left")
         ttk.Label(header,
                   text="Bias (Keithley 2450)  •  2 Gates  •  "
                        "Magnet (MPS4G) + Temperature",
-                  font=("Segoe UI", 9), foreground="#6E0909").pack(
+                  font=("Segoe UI", 9), foreground=COLORS["muted_text"]).pack(
             side="left", padx=12)
 
+        # Keep the Run/Abort controls visible while switching between compact tabs.
+        self.tabs = ttk.Notebook(self.main_frame)
+        self.tabs.pack(fill="both", expand=True, pady=(0, 5))
+        instruments = self._scrollable_tab("Instruments")
+        sweep_setup = self._scrollable_tab("Sweep setup")
+        activity = self._scrollable_tab("Activity log")
+
         # === 1. CONNECTION ===
-        conn = ttk.LabelFrame(self.main_frame, text="1. Instrument Connection", padding=10)
+        conn = ttk.LabelFrame(instruments, text="Instrument connections", padding=7)
         conn.pack(fill="x", pady=5)
-        for c in range(6):
-            conn.columnconfigure(c, weight=1)
+        conn.columnconfigure(1, weight=1)
+        conn.columnconfigure(3, weight=0)
 
         # Bias row (always Keithley 2450)
         ttk.Label(conn, text="Bias (Keithley 2450):").grid(row=0, column=0, padx=5, pady=2, sticky="e")
-        self.bias_combo = ttk.Combobox(conn, width=32)
+        self.bias_combo = ttk.Combobox(conn, width=24)
         self.bias_combo.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
         ttk.Button(conn, text="Connect", command=self.connect_bias, width=9).grid(row=0, column=2, padx=5)
-        self.btn_bias_term = tk.Button(conn, text="Term: ---", bg="#e0e0e0", width=10,
+        self.btn_bias_term = tk.Button(conn, text="Term: ---", bg=COLORS["status_neutral"], width=10,
                                        command=self.toggle_bias_terminals)
         self.btn_bias_term.grid(row=0, column=3, padx=5)
-        self.btn_bias_out = tk.Button(conn, text="Out: ---", bg="#e0e0e0", width=9,
+        self.btn_bias_out = tk.Button(conn, text="Out: ---", bg=COLORS["status_neutral"], width=9,
                                       command=self.toggle_bias_output)
         self.btn_bias_out.grid(row=0, column=4, padx=5)
         ttk.Button(conn, text="Reset", command=self.reset_bias, width=7).grid(row=0, column=5, padx=5)
@@ -892,22 +941,18 @@ class IVVISweeperImproved:
         ttk.Button(btns, text="Refresh Status", command=self.refresh_all_status).pack(side="left", padx=10)
 
         # === 2. GATE SOURCES + ENVIRONMENT (Gate 1 | Gate 2 | Field & Temp) ===
-        gates = ttk.LabelFrame(self.main_frame,
-                               text="2. Gate Sources, Ramping & Environment",
-                               padding=5)
+        gates = ttk.LabelFrame(instruments,
+                               text="Gate sources & environment", padding=6)
         gates.pack(fill="x", pady=5)
         holder = ttk.Frame(gates)
         holder.pack(fill="x")
-        for c in range(3):
-            holder.columnconfigure(c, weight=1)
+        # Two gate cards share the width, environment readouts sit below.
         self.gates[0].build_config_panel(holder)
         self.gates[1].build_config_panel(holder)
-        # field & temperature documentation lives next to the gate panels:
-        # one panel per concern, with independent toggles
-        self._build_environment_panel(holder)
+        self._build_environment_panel(gates)
 
         # === 3. MEASUREMENT TYPE ===
-        typ = ttk.LabelFrame(self.main_frame, text="3. Measurement Type", padding=10)
+        typ = ttk.LabelFrame(sweep_setup, text="Measurement mode", padding=7)
         typ.pack(fill="x", pady=5)
         self.sweep_type_var = tk.StringVar(value="iv")
         inner = ttk.Frame(typ)
@@ -920,7 +965,7 @@ class IVVISweeperImproved:
                         command=self._update_ui_labels).pack(side="left", padx=20)
 
         # === 4. BIAS SWEEP CONFIG ===
-        cfgf = ttk.LabelFrame(self.main_frame, text="4. Bias Sweep Configuration", padding=10)
+        cfgf = ttk.LabelFrame(sweep_setup, text="Bias sweep", padding=7)
         cfgf.pack(fill="x", pady=5)
         for c in range(8):
             cfgf.columnconfigure(c, weight=1)
@@ -958,19 +1003,20 @@ class IVVISweeperImproved:
         self.ent_bias_nplc.grid(row=2, column=4, padx=5, sticky="ew")
 
         # === 5. GATE LOOP CONFIG ===
-        loop = ttk.LabelFrame(self.main_frame, text="5. Gate Loop Configuration", padding=10)
+        loop = ttk.LabelFrame(sweep_setup, text="Gate sweep / mapping", padding=7)
         loop.pack(fill="x", pady=5)
 
         self.loop_mode_var = tk.StringVar(value="none")
         mf = ttk.Frame(loop)
         mf.pack(fill="x")
-        for val, txt in (("none", "None (bias sweep only)"),
+        for i, (val, txt) in enumerate((("none", "Bias only"),
                          ("gate1", "Gate 1 loop"),
                          ("gate2", "Gate 2 loop"),
-                         ("dual", "Dual gate loop (2D map)"),
-                         ("movement", "Dual gate movement loop")):
+                         ("dual", "Dual gate 2D map"),
+                         ("movement", "Dual gate movement"))):
             ttk.Radiobutton(mf, text=txt, variable=self.loop_mode_var, value=val,
-                            command=self._toggle_loop_entries).pack(side="left", padx=8)
+                            command=self._toggle_loop_entries).grid(
+                                row=i // 3, column=i % 3, sticky="w", padx=(2, 24), pady=2)
 
         rf = ttk.Frame(loop)
         rf.pack(fill="x", pady=(6, 0))
@@ -988,7 +1034,7 @@ class IVVISweeperImproved:
         self.rb_dual_outer2.pack(side="left", padx=8)
 
         g1f = ttk.Frame(rf)
-        g1f.pack(side="left", padx=(0, 30))
+        g1f.pack(anchor="w", pady=2)
         ttk.Label(g1f, text="Gate 1:").pack(side="left")
         ttk.Label(g1f, text="Start (V):").pack(side="left", padx=(8, 0))
         self.ent_g1_start = ttk.Entry(g1f, width=8)
@@ -1004,7 +1050,7 @@ class IVVISweeperImproved:
         self.ent_g1_loop_step.pack(side="left", padx=2)
 
         g2f = ttk.Frame(rf)
-        g2f.pack(side="left")
+        g2f.pack(anchor="w", pady=2)
         ttk.Label(g2f, text="Gate 2:").pack(side="left")
         ttk.Label(g2f, text="Start (V):").pack(side="left", padx=(8, 0))
         self.ent_g2_start = ttk.Entry(g2f, width=8)
@@ -1058,14 +1104,13 @@ class IVVISweeperImproved:
             variable=self.apply_g2_var)
         self.chk_apply_g2.pack(side="left", padx=8)
 
-        # single-gate loop option: also document the other (held) gate.
-        # The held gate's programmed target is always recorded as a column
-        # when it is connected; this toggle additionally reads its ACTUAL
-        # voltage once per sweep (post-sweep, like the field/temperature
-        # readings) and stores it as a Gate{held}Readback(V) column.
+        # Newer ICE revision: independent readback of the non-swept gate in
+        # single-gate loops. Keep this option on a separate row for laptops.
+        held_row = ttk.Frame(loop)
+        held_row.pack(fill="x", pady=(2, 0))
         self.held_readback_var = tk.BooleanVar(value=False)
         self.chk_held_readback = ttk.Checkbutton(
-            af, text="In single-gate loops: record held-gate readback (V)",
+            held_row, text="Single-gate loops: record held-gate voltage readback (V)",
             variable=self.held_readback_var)
         self.chk_held_readback.pack(side="left", padx=8)
 
@@ -1075,8 +1120,8 @@ class IVVISweeperImproved:
             e.bind('<KeyRelease>', lambda ev: self._update_loop_points_label())
 
         # === 6. SAVE + EXECUTION ===
-        ex = ttk.LabelFrame(self.main_frame, text="6. Save & Execution", padding=10)
-        ex.pack(fill="x", pady=5)
+        ex = ttk.LabelFrame(self.main_frame, text="Save & execute", padding=7)
+        ex.pack(fill="x", pady=(1, 0))
         row0 = ttk.Frame(ex)
         row0.pack(fill="x")
         ttk.Label(row0, text="Save Directory:").pack(side="left", padx=5)
@@ -1086,56 +1131,105 @@ class IVVISweeperImproved:
         ttk.Button(row0, text="Browse...", command=self.browse_directory).pack(side="left", padx=5)
 
         row1 = ttk.Frame(ex)
-        row1.pack(pady=8)
+        row1.pack(pady=4)
         self.btn_run = tk.Button(row1, text="RUN SWEEP", command=self.start_sweep,
-                                 width=15, bg="#2e9e4f", fg="white",
-                                 activebackground="#268a44",
-                                 activeforeground="white",
+                                 width=15, bg=COLORS["run"], fg=COLORS["action_text"],
+                                 activebackground=COLORS["run_hover"],
+                                 activeforeground=COLORS["action_text"],
                                  font=("Segoe UI", 10, "bold"),
-                                 relief="ridge", bd=2, cursor="hand2")
-        self.btn_run.pack(side="left", padx=20)
+                                 relief="flat", bd=0, padx=10, pady=6, cursor="hand2")
+        self.btn_run.pack(side="left", padx=8)
         self.btn_abort = tk.Button(row1, text="ABORT", command=self.abort_sweep,
-                                   width=10, bg="#c94040", fg="white",
-                                   activebackground="#b03636",
-                                   activeforeground="white",
+                                   width=10, bg=COLORS["abort"], fg=COLORS["action_text"],
+                                   activebackground=COLORS["abort_hover"],
+                                   activeforeground=COLORS["action_text"],
                                    font=("Segoe UI", 10, "bold"),
-                                   relief="ridge", bd=2, cursor="hand2",
+                                   relief="flat", bd=0, padx=10, pady=6, cursor="hand2",
                                    state="disabled")
-        self.btn_abort.pack(side="left", padx=20)
+        self.btn_abort.pack(side="left", padx=8)
         self.lbl_progress = ttk.Label(row1, text="Ready",
                                       font=("Segoe UI", 10, "bold"))
-        self.lbl_progress.pack(side="left", padx=20)
+        self.lbl_progress.pack(side="left", padx=10)
 
         # === LOG ===
-        logf = ttk.LabelFrame(self.main_frame, text="Log", padding=10)
-        logf.pack(fill="both", expand=True, pady=5)
+        logf = ttk.LabelFrame(activity, text="Instrument & measurement messages", padding=8)
+        logf.pack(fill="both", expand=True, pady=4)
         self.log_text = tk.Text(logf, height=8, state="disabled",
-                                bg="#14181f", fg="#b4c3df",
-                                insertbackground="#d8dee9",
-                                selectbackground="#3a5a80",
+                                bg=COLORS["log_background"], fg=COLORS["log_text"],
+                                insertbackground=COLORS["log_cursor"],
+                                selectbackground=COLORS["log_selection"],
                                 font=("Consolas", 9), relief="flat",
                                 padx=8, pady=6)
         self.log_text.pack(fill="both", expand=True)
+        ttk.Label(activity, text="Messages are preserved while you switch tabs.",
+                  style="Muted.TLabel").pack(anchor="w", padx=8, pady=5)
 
         self._update_ui_labels()
         self._toggle_loop_entries()
 
+    def _scrollable_tab(self, title):
+        """Scrollable vertical tab; still usable at 1366x768 and high DPI."""
+        outer = ttk.Frame(self.tabs)
+        self.tabs.add(outer, text=f"  {title}  ")
+        canvas = tk.Canvas(outer, bg=COLORS["canvas"], highlightthickness=0,
+                           borderwidth=0)
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        body = ttk.Frame(canvas, padding=(6, 6, 8, 8))
+        window = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>", lambda _e: canvas.configure(
+            scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(
+            window, width=e.width))
+
+        # Windows uses delta increments of 120; scroll only over this tab.
+        def wheel(event):
+            canvas.yview_scroll(-int(event.delta / 120) if event.delta else 0, "units")
+        def bind_wheel(widget):
+            widget.bind("<MouseWheel>", wheel, add="+")
+            for child in widget.winfo_children():
+                bind_wheel(child)
+        # Mouse wheel on blank tab area (and on the canvas). The scrollbar
+        # also works for controls not caught by the wheel binding.
+        canvas.bind("<MouseWheel>", wheel)
+        outer.bind("<MouseWheel>", wheel)
+        return body
+
     def _setup_style(self):
-        """Consistent, slightly more modern ttk styling for the whole window."""
+        """Build every ttk style from the COLORS palette at the top of this file."""
         style = ttk.Style(self.root)
         try:
-            style.theme_use('clam')
+            style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure('.', font=("Segoe UI", 10))
-        style.configure('TLabelframe', borderwidth=1, relief='solid')
-        style.configure('TLabelframe.Label', font=("Segoe UI", 10, "bold"),
-                        foreground='#1a4d7a')
-        style.configure('TButton', padding=(8, 3))
-        style.configure('TCheckbutton', padding=3)
-        style.configure('TRadiobutton', padding=2)
-        style.configure('TCombobox', padding=2)
-        style.configure('TEntry', padding=2)
+        c = COLORS
+        self.root.configure(bg=c["background"])
+        style.configure(".", font=("Segoe UI", 9), background=c["background"],
+                        foreground=c["text"])
+        style.configure("TFrame", background=c["background"])
+        style.configure("TLabelframe", background=c["surface"], borderwidth=1,
+                        bordercolor=c["border"], relief="solid")
+        style.configure("TLabelframe.Label", background=c["background"],
+                        font=("Segoe UI Semibold", 10), foreground=c["accent"])
+        style.configure("TLabel", background=c["background"], foreground=c["text"])
+        style.configure("Muted.TLabel", background=c["background"],
+                        foreground=c["muted_text"])
+        style.configure("TButton", padding=(8, 4), background=c["button"],
+                        foreground=c["text"], bordercolor=c["border"])
+        style.map("TButton", background=[("active", c["button_hover"])])
+        style.configure("TCheckbutton", padding=2, background=c["background"])
+        style.configure("TRadiobutton", padding=2, background=c["background"])
+        style.configure("TCombobox", padding=2)
+        style.configure("TEntry", padding=3)
+        style.configure("TNotebook", background=c["background"], borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(16, 7),
+                        background=c["tab_inactive"],
+                        foreground=c["tab_inactive_text"])
+        style.map("TNotebook.Tab",
+                  background=[("selected", c["surface"])],
+                  foreground=[("selected", c["accent"])])
 
     def _build_environment_panel(self, parent):
         """Field & temperature documentation panel, next to the gate panels.
@@ -1396,21 +1490,21 @@ class IVVISweeperImproved:
 
     def update_bias_status(self):
         if not self.bias_inst:
-            self.btn_bias_term.config(text="Term: ---", bg="#e0e0e0")
-            self.btn_bias_out.config(text="Out: ---", bg="#e0e0e0")
+            self.btn_bias_term.config(text="Term: ---", bg=COLORS["status_neutral"])
+            self.btn_bias_out.config(text="Out: ---", bg=COLORS["status_neutral"])
             return
         try:
             term = self.bias_inst.check_terminals()
             self.btn_bias_term.config(text="Term: FRONT" if "FRON" in term else "Term: REAR",
-                                      bg="#90ee90" if "FRON" in term else "orange")
+                                      bg=COLORS["status_on"] if "FRON" in term else COLORS["status_rear"])
         except Exception:
-            self.btn_bias_term.config(text="Term: ???", bg="grey")
+            self.btn_bias_term.config(text="Term: ???", bg=COLORS["status_error"])
         try:
             on = self.bias_inst.source_enabled
             self.btn_bias_out.config(text="Out: ON" if on else "Out: OFF",
-                                     bg="#90ee90" if on else "#ffcccb")
+                                     bg=COLORS["status_on"] if on else COLORS["status_off"])
         except Exception:
-            self.btn_bias_out.config(text="Out: ???", bg="grey")
+            self.btn_bias_out.config(text="Out: ???", bg=COLORS["status_error"])
 
     def refresh_all_status(self):
         self.update_bias_status()
@@ -1915,7 +2009,13 @@ class IVVISweeperImproved:
 
 def main():
     root = tk.Tk()
-    root.geometry("1150x1080")
+    # Compact layout for a 14-inch laptop: honor available screen space.
+    # Vertical scrollbars keep every option accessible at higher scaling.
+    screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
+    width = min(1080, max(760, screen_w - 80))
+    height = min(680, max(520, screen_h - 95))
+    root.geometry(f"{width}x{height}")
+    root.minsize(min(760, width), min(520, height))
     app = IVVISweeperImproved(root)
 
     def on_closing():
@@ -1928,16 +2028,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
