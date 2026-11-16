@@ -1926,6 +1926,9 @@ class IVVISweeperImproved:
                     gate_str += f"_G2_{vg2:.3f}V"
                 if field_val is not None:
                     gate_str += f"_B_{field_val:.3f}T"
+                if temp_vals is not None:
+                    # fourth temperature = probe temp: one tag for the file name
+                    gate_str += f"_T_{temp_vals[3]:.2f}K"
                 if sweep_type == "iv":
                     name = f"IV_{num:03d}{gate_str}_Sp1_{p['sp1']}mV_Sp2_{p['sp2']}mV"
                     header, x, y = "Voltage(V),Current(A),Time(s)", sourced, measured
