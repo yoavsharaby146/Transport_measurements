@@ -801,6 +801,9 @@ class MagnetChannel:
                 self.app.log(f"Magnet field: {field:.4f} T")
         except Exception:
             pass  # status read is best-effort; connection itself succeeded
+        # per-range safety limits are set once, right after connecting
+        # (same values the ICE procedures read from instrument_overrides.json)
+        self.open_safety_dialog()
 
     def disconnect(self):
         """Close the COM port properly (ICE-version cleanup pattern).
@@ -867,6 +870,122 @@ class MagnetChannel:
         except Exception:
             pass
         return limits
+
+    # ==================== SAFETY LIMITS SETUP DIALOG ====================
+
+    SAFETY_RATE_MIN = 0.0001   # T/min — lowest editable safety rate
+    SAFETY_RATE_MAX = 0.5      # T/min — highest editable safety rate
+
+    def _overrides_path(self):
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "instrument_overrides.json")
+
+    def _save_safety_limits(self, limits):
+        """Merge per-range safety limits into instrument_overrides.json
+        (same key this GUI and the ICE procedures read back)."""
+        data = {}
+        try:
+            with open(self._overrides_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        data["magnet_safety_limits"] = {str(i): float(limits[i]) for i in range(5)}
+        with open(self._overrides_path(), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+    def open_safety_dialog(self):
+        """Modal dialog: set the per-range safety rates (T/min) once.
+
+        Opens automatically right after the magnet connects and anytime
+        via the 'Safety limits...' button. The saved values clamp every
+        magnet ramp (manual and field loop) in this program.
+        """
+        dlg = tk.Toplevel(self.app.root)
+        dlg.title("Magnet safety limits (per current range)")
+        dlg.transient(self.app.root)
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        saved = self._safety_rates()
+
+        ttk.Label(dlg, text="Per-range maximum sweep rates. The read-only columns "
+                            "come from the connected instrument;\nonly the "
+                            "safety limits (T/min) are editable. Saved to "
+                            "instrument_overrides.json.",
+                  style="Muted.TLabel", justify="left").grid(
+                      row=0, column=0, columnspan=5, padx=10, pady=8, sticky="w")
+
+        for c, text in enumerate(("Range", "Field span (T)", "Up to (A)",
+                                  "Instrument rate (T/min)",
+                                  "Safety limit (T/min)")):
+            ttk.Label(dlg, text=text, font=("Segoe UI", 9, "bold")).grid(
+                row=1, column=c, padx=6, pady=2)
+
+        entries = {}
+        lower_t = 0.0
+        for i in range(5):
+            rng_a = rate_a_s = None
+            if self.inst is not None:  # live readout from the connected magnet
+                try:
+                    rng_a = float(getattr(self.inst, f"current_range{i}"))
+                except Exception:
+                    rng_a = None
+                try:
+                    rate_a_s = float(getattr(self.inst, f"current_rate{i}"))
+                except Exception:
+                    rate_a_s = None
+
+            if rng_a is not None:
+                span = f"{lower_t:.3f} – {rng_a / A_PER_T:.3f}"
+                lower_t = rng_a / A_PER_T
+            else:
+                span = "n/a"
+            ttk.Label(dlg, text=str(i)).grid(row=i + 2, column=0, padx=6)
+            ttk.Label(dlg, text=span).grid(row=i + 2, column=1, padx=6)
+            ttk.Label(dlg, text="n/a" if rng_a is None else f"{rng_a:.3f}").grid(
+                row=i + 2, column=2, padx=6)
+            ttk.Label(dlg, text="n/a" if rate_a_s is None
+                      else f"{rate_a_s * 60.0 / A_PER_T:.4f}").grid(
+                          row=i + 2, column=3, padx=6)
+            ent = ttk.Entry(dlg, width=10)
+            ent.insert(0, f"{saved[i]:.4f}")
+            ent.grid(row=i + 2, column=4, padx=6, pady=1)
+            entries[i] = ent
+
+        status = ttk.Label(dlg, text="", foreground=COLORS["abort"])
+        status.grid(row=8, column=0, columnspan=5, padx=10, sticky="w")
+
+        def do_save():
+            try:
+                limits = {i: float(entries[i].get()) for i in range(5)}
+            except ValueError:
+                status.config(text="All safety limits must be numbers")
+                return
+            for v in limits.values():
+                if not (self.SAFETY_RATE_MIN <= v <= self.SAFETY_RATE_MAX):
+                    status.config(
+                        text=f"Each limit must be {self.SAFETY_RATE_MIN:g}–"
+                             f"{self.SAFETY_RATE_MAX:g} T/min")
+                    return
+            if any(limits[i] < limits[i + 1] for i in range(4)):
+                if not messagebox.askyesno(
+                        "Unusual safety rates",
+                        "Safety rates normally decrease for higher-current "
+                        "ranges.\nSave these values anyway?", parent=dlg):
+                    return
+            try:
+                self._save_safety_limits(limits)
+            except Exception as e:
+                messagebox.showerror("Save failed", str(e), parent=dlg)
+                return
+            self.app.log("Magnet safety limits saved: "
+                         + ", ".join(f"R{i}={limits[i]:g} T/min" for i in range(5)))
+            dlg.destroy()
+
+        btns = ttk.Frame(dlg)
+        btns.grid(row=9, column=0, columnspan=5, padx=10, pady=10, sticky="e")
+        ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(side="left", padx=4)
+        ttk.Button(btns, text="Save", command=do_save).pack(side="left", padx=4)
 
     def apply_rate(self, rate_tmin):
         """Set every range's charge rate to `rate_tmin` (T/min), clamped to
@@ -1099,8 +1218,7 @@ class IVVISweeperImproved:
                          ("gate1", "Gate 1 loop"),
                          ("gate2", "Gate 2 loop"),
                          ("dual", "Dual gate 2D map"),
-                         ("movement", "Dual gate movement"),
-                         ("field", "Field loop (bias vs B)"))):
+                         ("movement", "Dual gate movement"))):
             ttk.Radiobutton(mf, text=txt, variable=self.loop_mode_var, value=val,
                             command=self._toggle_loop_entries).grid(
                                 row=i // 3, column=i % 3, sticky="w", padx=(2, 24), pady=2)
@@ -1204,6 +1322,14 @@ class IVVISweeperImproved:
             variable=self.held_readback_var)
         self.chk_held_readback.pack(side="left", padx=8)
 
+        # Returning the gates to 0 V after a gate loop is a user choice,
+        # not a program default (the field return lives in the Magnet tab).
+        self.return_gates_var = tk.BooleanVar(value=False)
+        self.chk_return_gates = ttk.Checkbutton(
+            held_row, text="Return gates to 0 V after loop",
+            variable=self.return_gates_var)
+        self.chk_return_gates.pack(side="left", padx=(20, 8))
+
         for e in (self.ent_g1_start, self.ent_g1_end, self.ent_g1_loop_step,
                   self.ent_g2_start, self.ent_g2_end, self.ent_g2_loop_step,
                   self.ent_loop_points):
@@ -1272,20 +1398,26 @@ class IVVISweeperImproved:
         self.btn_mag_go = ttk.Button(rowm, text="Go to target",
                                      command=self.start_manual_field_ramp)
         self.btn_mag_go.pack(side="left", padx=12)
+        ttk.Button(rowm, text="Safety limits...",
+                   command=self.magnet.open_safety_dialog).pack(side="left", padx=4)
         self.lbl_mag_status = ttk.Label(mctl, text="B: --- T",
                                         font=("Consolas", 9))
         self.lbl_mag_status.pack(anchor="w", pady=(4, 0))
         ttk.Label(mctl, text="The rate is applied to every range, clamped to the "
-                             "per-range safety limits saved by the magnet setup\n"
-                             "dialog. ABORT stops the ramp (field left where it is).",
+                             "per-range safety limits ('Safety limits...' button "
+                             "or the dialog shown at connect).\n"
+                             "ABORT stops the ramp (field left where it is).",
                   style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
 
         flo = ttk.LabelFrame(mtab, text="Field loop (bias sweep at each field)",
                              padding=7)
         flo.pack(fill="x", pady=5)
-        ttk.Label(flo, text="Select 'Field loop (bias vs B)' in Sweep setup to "
-                            "run a bias sweep at every field point.").pack(
-            anchor="w", pady=(0, 4))
+        self.rb_field_loop = ttk.Radiobutton(
+            flo, text="Field loop (bias vs B): run one bias sweep at every "
+                      "field point below (overrides the Sweep setup loop mode)",
+            variable=self.loop_mode_var, value="field",
+            command=self._toggle_loop_entries)
+        self.rb_field_loop.pack(anchor="w", pady=(0, 4))
         rowf = ttk.Frame(flo)
         rowf.pack(fill="x")
         ttk.Label(rowf, text="Start (T):").pack(side="left")
@@ -1309,8 +1441,15 @@ class IVVISweeperImproved:
         self.lbl_field_points = ttk.Label(rowf2, text="",
                                           font=("Arial", 9, "bold"))
         self.lbl_field_points.pack(side="left", padx=25)
-        ttk.Label(flo, text="Forward sweep from Start to End; the field is "
-                            "swept back to 0 T when the loop finishes.",
+        # return-to-0 for the FIELD is configured here, next to the field loop
+        self.return_field_var = tk.BooleanVar(value=False)
+        self.chk_return_field = ttk.Checkbutton(
+            flo, text="Return field to 0 T after loop",
+            variable=self.return_field_var)
+        self.chk_return_field.pack(anchor="w", pady=(4, 0))
+        ttk.Label(flo, text="Forward sweep from Start to End. The field is swept "
+                            "back to 0 T after the loop only when 'Return field "
+                            "to 0 T after loop' above is checked.",
                   style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
         for e in (self.ent_field_start, self.ent_field_end,
                   self.ent_field_step, self.ent_field_rate):
@@ -1471,6 +1610,11 @@ class IVVISweeperImproved:
         # (in dual/movement loops both gates are already recorded)
         held_state = "normal" if mode in ("gate1", "gate2") else "disabled"
         self.chk_held_readback.config(state=held_state)
+        # separate return-to-0 options: gates here, field in the Magnet tab
+        self.chk_return_gates.config(
+            state="normal" if mode not in ("none", "field") else "disabled")
+        self.chk_return_field.config(
+            state="normal" if mode == "field" else "disabled")
         for gi, var in ((1, self.rec_g1_var), (2, self.rec_g2_var)):
             if mode == "none" and var.get() and self.gates[gi - 1].inst is None:
                 self.log(f"Note: 'Record Gate {gi} voltage' is checked but "
@@ -1871,6 +2015,9 @@ class IVVISweeperImproved:
             'field_rate': frate if mode == "field" else 0.1,
             'held_readback': (self.held_readback_var.get()
                               and mode in ("gate1", "gate2")),
+            'return_gates': (self.return_gates_var.get()
+                             and mode not in ("none", "field")),
+            'return_field': (self.return_field_var.get() and mode == "field"),
         }
         params.update(gate_cfg)
         threading.Thread(target=self._run_sweep_thread, args=(params,), daemon=True).start()
@@ -2240,28 +2387,39 @@ class IVVISweeperImproved:
                 np.savetxt(csv_path, np.vstack(cols).T, delimiter=',', header=header)
                 self.log(f"Saved: {name}.csv")
 
-            # always return the gates to 0 V slowly after the measurement.
-            # Exception: gates applied for a single sweep stay at their manual
-            # target (they are under manual control).
+            # After a loop, gates (0 V) and field (0 T) are returned to zero
+            # ONLY when the user checked the matching 'Return ... to 0' box
+            # (gates: Sweep setup tab, field: Magnet control tab).
+            # Single-sweep gate targets always stay (they are manual control).
             if mode == "field":
-                # sweep the field back to zero at the loop's rate
-                if not self.stop_event.is_set():
-                    self.log("Sweeping field back to 0 T ...")
-                self.stop_event.clear()
-                self.magnet.go_to_field(
-                    0.0, p.get('field_rate', 0.1),
-                    progress=lambda f: self._magnet_progress(f, 0.0, 0, 1))
-            elif gate_loop and involved:
-                if not self.stop_event.is_set():
-                    self.log("Ramping gates back to 0 V ...")
-                self.stop_event.clear()
-                if mode == "movement":
-                    self._ramp_gates_together((0.0, 0.0), p['loop_ramp_step'],
-                                              p['loop_ramp_delay'])
+                if p.get('return_field'):
+                    # sweep the field back to zero at the loop's rate
+                    if not self.stop_event.is_set():
+                        self.log("Sweeping field back to 0 T ...")
+                    self.stop_event.clear()
+                    self.magnet.go_to_field(
+                        0.0, p.get('field_rate', 0.1),
+                        progress=lambda f: self._magnet_progress(f, 0.0, 0, 1))
                 else:
-                    for gi in involved:
-                        self.gates[gi - 1].ramp_to(0.0, p['loop_ramp_step'],
-                                                   p['loop_ramp_delay'])
+                    self.log(f"Field loop done — field left at {seq[-1]:.3f} T "
+                             "(return-to-0 not selected)")
+            elif gate_loop and involved:
+                if p.get('return_gates'):
+                    if not self.stop_event.is_set():
+                        self.log("Ramping gates back to 0 V ...")
+                    self.stop_event.clear()
+                    if mode == "movement":
+                        self._ramp_gates_together((0.0, 0.0), p['loop_ramp_step'],
+                                                  p['loop_ramp_delay'])
+                    else:
+                        for gi in involved:
+                            self.gates[gi - 1].ramp_to(0.0, p['loop_ramp_step'],
+                                                       p['loop_ramp_delay'])
+                else:
+                    desc = ", ".join(f"Gate {gi} at {points[-1][gi - 1]} V"
+                                     for gi in involved)
+                    self.log(f"Gate loop done — left {desc} "
+                             "(return-to-0 not selected)")
             elif involved:
                 desc = ", ".join(f"Gate {gi} at {points[-1][gi - 1]} V"
                                  for gi in involved)
@@ -2308,8 +2466,15 @@ def main():
     app = IVVISweeperImproved(root)
 
     def on_closing():
-        app.cleanup()
-        root.destroy()
+        # Always destroy the window and release the window's own resources,
+        # even if a disconnect step throws — otherwise the process can hang
+        # while still holding the magnet COM port (stray connection).
+        try:
+            app.cleanup()  # sets stop_event, closes bias/gates/magnet
+        except Exception:
+            pass  # best-effort close: never block window teardown
+        finally:
+            root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
