@@ -670,9 +670,9 @@ class MagnetChannel:
                                       command=self.toggle_connection)
         self.btn_connect.grid(row=row, column=2, padx=5)
         self.btn_read = ttk.Button(parent, text="Read Field", width=10,
-                                   command=self.read_once)
+                                   command=self.read_field_button)
         self.btn_read.grid(row=row, column=3, padx=5)
-        self.lbl_status = ttk.Label(parent, text="B: --- T | T: --- K",
+        self.lbl_status = ttk.Label(parent, text="B: --- T",
                                     font=("Consolas", 9))
         self.lbl_status.grid(row=row, column=4, columnspan=2, padx=5, sticky="w")
 
@@ -752,16 +752,9 @@ class MagnetChannel:
             self.app.log("Magnet disconnected (COM port released)")
         self.inst = None
         self.btn_connect.config(text="Connect")
-        self.lbl_status.config(text="B: --- T | T: --- K")
+        self.lbl_status.config(text="B: --- T")
 
     # ==================== READOUT ====================
-
-    @staticmethod
-    def _status_text(field=None, temps=None):
-        b_str = f"{field:.4f}" if field is not None else "---"
-        t_str = (" / ".join(f"{v:.2f}" for v in temps)
-                 if temps is not None else "---")
-        return f"B: {b_str} T | T: {t_str} K"
 
     def read_field(self):
         """Slow blocking read of the magnetic field in Tesla. None on failure."""
@@ -770,25 +763,17 @@ class MagnetChannel:
         try:
             field = float(self.inst.magnet_field)
             self.app.root.after(0, lambda: self.lbl_status.config(
-                text=self._status_text(field=field)))
+                text=f"B: {field:.4f} T"))
             return field
         except Exception as e:
             self.app.log(f"Magnet field read error: {e}")
             return None
 
-    def read_once(self):
-        """Manual button: read field + cryostat temperatures once (blocking)."""
+    def read_field_button(self):
+        """Manual button: read and log the magnetic field once (blocking)."""
         field = self.read_field()
-        temps = None
-        try:
-            temps = list(read_ice_temperature())
-        except Exception as e:
-            self.app.log(f"Temperature log read error: {e}")
-        self.lbl_status.config(text=self._status_text(field=field, temps=temps))
-        b_str = "---" if field is None else f"{field:.4f} T"
-        t_str = ("---" if temps is None
-                 else " / ".join(f"{v:.2f} K" for v in temps))
-        self.app.log(f"Magnet/temperature reading: B={b_str}, T={t_str}")
+        if field is not None:
+            self.app.log(f"Magnet field: {field:.4f} T")
 
 
 class IVVISweeperImproved:
@@ -861,18 +846,25 @@ class IVVISweeperImproved:
         self.gates[0].build_connection_row(conn, 1)
         self.gates[1].build_connection_row(conn, 2)
 
-        # Magnet row (ICE only: Cryomagnetics MPS4G over COM). Field and
-        # cryostat temperature are slow readings, so they are documented
-        # once after each completed sweep (like the gate info columns).
+        # Magnet row (ICE only: Cryomagnetics MPS4G over COM). The magnet
+        # query is slow, so the field is documented once after each
+        # completed sweep (like the gate info columns).
         self.magnet.build_connection_row(conn, 3)
 
         btns = ttk.Frame(conn)
         btns.grid(row=4, column=0, columnspan=6, pady=5)
         ttk.Button(btns, text="Scan Instruments", command=self.refresh_instruments).pack(side="left", padx=10)
         ttk.Button(btns, text="Refresh Status", command=self.refresh_all_status).pack(side="left", padx=10)
-        self.doc_field_temp_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(btns, text="Record field & temperature after each sweep",
-                        variable=self.doc_field_temp_var).pack(side="left", padx=10)
+        # field and temperature are independent slow readings: each gets its
+        # own toggle (field needs the magnet; temperature needs the ICElog)
+        self.doc_field_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(btns, text="Record magnetic field after each sweep",
+                        variable=self.doc_field_var).pack(side="left", padx=10)
+        self.doc_temp_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(btns, text="Record temperature after each sweep",
+                        variable=self.doc_temp_var).pack(side="left", padx=10)
+        ttk.Button(btns, text="Read Temperature",
+                   command=self.read_temperature_once).pack(side="left", padx=10)
 
         # === 2. GATE SOURCES CONFIG + RAMP (Gate 1 | Gate 2) ===
         gates = ttk.LabelFrame(self.main_frame,
@@ -1318,6 +1310,18 @@ class IVVISweeperImproved:
             self.magnet.read_field()  # slow (~0.5 s) but this is a manual button
         self.log("Status refreshed")
 
+    def read_temperature_once(self):
+        """Manual button: read and log the cryostat temperatures once.
+
+        Independent of the magnet — this only reads the ICElog file.
+        """
+        try:
+            temps = read_ice_temperature()
+            self.log("Temperatures (50K/4K/VTI/probe): "
+                     + " / ".join(f"{v:.2f} K" for v in temps))
+        except Exception as e:
+            self.log(f"Temperature log read error: {e}")
+
     # ==================== SWEEP EXECUTION ====================
 
     def browse_directory(self):
@@ -1488,7 +1492,8 @@ class IVVISweeperImproved:
             'compliance': compliance, 'save_dir': save_dir, 'sweep_type': sweep_type,
             'mode': mode, 'points': points, 'settle': settle,
             'loop_ramp_step': ramp_step, 'loop_ramp_delay': ramp_delay,
-            'doc_field_temp': self.doc_field_temp_var.get(),
+            'doc_field': self.doc_field_var.get(),
+            'doc_temp': self.doc_temp_var.get(),
         }
         params.update(gate_cfg)
         threading.Thread(target=self._run_sweep_thread, args=(params,), daemon=True).start()
@@ -1524,32 +1529,33 @@ class IVVISweeperImproved:
         times = np.array(data[2::3])
         return measured, sourced, times
 
-    def _document_field_and_temperature(self):
-        """Read the magnet field and cryostat temperatures once (post-sweep).
-
-        Returns (field_or_None, temps_list_or_None). Each part that is not
-        available (magnet disconnected / ICElog unreadable) is skipped with
-        a log message instead of failing the sweep.
-        """
-        field = None
-        temps = None
-        if self.magnet.inst is not None:
-            self._progress("Reading magnet field ...")
-            field = self.magnet.read_field()
-            if field is not None:
-                self.log(f"Magnetic field: {field:.4f} T")
-            else:
-                self.log("Note: magnet field read failed — no field column")
-        else:
+    def _document_field(self):
+        """Read the magnet field once (post-sweep). None when unavailable."""
+        if self.magnet.inst is None:
             self.log("Note: magnet not connected — no field column")
+            return None
+        self._progress("Reading magnet field ...")
+        field = self.magnet.read_field()
+        if field is not None:
+            self.log(f"Magnetic field: {field:.4f} T")
+        else:
+            self.log("Note: magnet field read failed — no field column")
+        return field
+
+    def _document_temperature(self):
+        """Read the cryostat temperatures once (post-sweep).
+
+        Independent of the magnet. None when the ICElog is unreadable.
+        """
         try:
             temps = read_ice_temperature()
             self.log("Temperatures (50K/4K/VTI/probe): "
                      + " / ".join(f"{v:.2f} K" for v in temps))
+            return temps
         except Exception as e:
             self.log(f"Note: temperature log unavailable ({e}) "
                      "— no temperature columns")
-        return field, temps
+            return None
 
     def _ramp_gates_together(self, targets, step_v, delay, start_from=None):
         """Ramp Gate 1 and Gate 2 in lock-step (interleaved small steps).
@@ -1664,13 +1670,16 @@ class IVVISweeperImproved:
 
                 measured, sourced, times = self._run_single_bias_sweep(p)
 
-                # Magnetic field and cryostat temperature are very slow
-                # readings (magnet ~0.5 s/serial query, temperature from the
-                # ICElog file): document them once, AFTER the sweep is over,
-                # and store them as extra columns like the gate voltages.
+                # Magnetic field and cryostat temperature are independent
+                # slow readings (magnet ~0.5 s/serial query, temperature
+                # from the ICElog file): each is documented once, AFTER the
+                # sweep is over, only when its own toggle is checked, and
+                # stored as extra columns like the gate voltages.
                 field_val, temp_vals = None, None
-                if p.get('doc_field_temp'):
-                    field_val, temp_vals = self._document_field_and_temperature()
+                if p.get('doc_field'):
+                    field_val = self._document_field()
+                if p.get('doc_temp'):
+                    temp_vals = self._document_temperature()
 
                 # sequential file number within the save folder (pymeasure-style:
                 # IV_000, IV_001, ... continuing past existing files)
