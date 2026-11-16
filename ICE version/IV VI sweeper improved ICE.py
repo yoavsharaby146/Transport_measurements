@@ -50,18 +50,20 @@ GATE_KINDS = {
 }
 
 
-# ==================== WINDOW COLOR PALETTE ====================
+# ==================== WINDOW COLOR PALETTES ====================
 # Every color used by the window is defined HERE, in this one dictionary.
-# To re-theme the program: edit the values below and restart the program
-# (a running window does not live-update). Values are hex strings "#rrggbb"
-# or any Tk color name such as "grey", "orange", "white".
-COLORS = {
+# To re-theme the program: set ACTIVE_THEME below ("light" or "dark") and
+# restart the program (a running window does not live-update). Values are
+# hex strings "#rrggbb" or any Tk color name such as "grey", "orange",
+# "white".
+LIGHT_THEME = {
     # --- window & panels ---
     "background":        "#f4f7fb",  # window background
     "surface":           "#ffffff",  # panel (LabelFrame) background
     "border":            "#dce4ee",  # panel borders
     "text":              "#253449",  # normal text
     "muted_text":        "#718096",  # subtitle / hint text
+    "field":             "#ffffff",  # entry / combobox input fields
     "accent":            "#1768a5",  # title, section titles, selected tab
     "tab_inactive":      "#e2eaf3",  # unselected notebook tabs
     "tab_inactive_text": "#44566d",  # text on unselected tabs
@@ -90,6 +92,81 @@ COLORS = {
     "status_error":      "grey",     # status unknown (instrument error)
     "status_rear":       "orange",   # bias "Term: REAR"
 }
+
+# Inverted (dark-gray) variant: the "negative" of the light palette, but on
+# a dark GRAY base (not black) for easier reading. The status chips keep
+# their light pastel colors — they are indicator badges drawn with black
+# text, so they stay readable on the dark background too.
+DARK_THEME = {
+    # --- window & panels ---
+    "background":        "#333842",
+    "surface":           "#3a4150",
+    "border":            "#4a5364",
+    "text":              "#e6e9ee",
+    "muted_text":        "#9aa5b5",
+    "field":             "#262b34",  # entry / combobox input fields
+    "accent":            "#4fa3e3",
+    "tab_inactive":      "#2e3440",
+    "tab_inactive_text": "#c0c9d6",
+    "button":            "#3f4756",
+    "button_hover":      "#4a5468",
+    "canvas":            "#2f343e",
+
+    # --- actions ---
+    "run":               "#2e9e6b",
+    "run_hover":         "#237d54",
+    "abort":             "#c05055",
+    "abort_hover":       "#a03f44",
+    "action_text":       "#ffffff",
+
+    # --- log console ---
+    "log_background":    "#23272f",
+    "log_text":          "#d8dee9",
+    "log_cursor":        "#26cca2",
+    "log_selection":     "#3a5a80",
+
+    # --- instrument status buttons (light chips, same as light theme) ---
+    "status_neutral":    "#e0e0e0",
+    "status_idle":       "#a7d8c9",
+    "status_on":         "#90ee90",
+    "status_off":        "#ffcccb",
+    "status_error":      "grey",
+    "status_rear":       "orange",
+}
+
+# Light/dark setting: stored in instrument_overrides.json ('theme' key) and
+# switched from the header button in the running program.
+def palette_for(theme):
+    return DARK_THEME if theme == "dark" else LIGHT_THEME
+
+
+def _theme_overrides_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "instrument_overrides.json")
+
+
+def load_theme_setting():
+    try:
+        with open(_theme_overrides_path(), "r", encoding="utf-8") as f:
+            t = json.load(f).get("theme", "light")
+        return t if t in ("light", "dark") else "light"
+    except Exception:
+        return "light"
+
+
+def save_theme_setting(theme):
+    data = {}
+    try:
+        with open(_theme_overrides_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    data["theme"] = theme
+    with open(_theme_overrides_path(), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+COLORS = palette_for(load_theme_setting())
 
 
 def pick_v_range(level):
@@ -1073,6 +1150,10 @@ class MagnetChannel:
 
 class IVVISweeperImproved:
     def __init__(self, root):
+        global COLORS
+        self.theme = load_theme_setting()
+        COLORS = palette_for(self.theme)
+        self.restart_requested = False  # set by the theme toggle
         self.root = root
         self.root.title("IV/VI Sweeper ICE - Bias (K2450) + 2 Gates "
                         "+ Magnet (MPS4G) & Temperature")
@@ -1137,6 +1218,12 @@ class IVVISweeperImproved:
                        "Magnet (MPS4G) + Temperature",
                   font=("Segoe UI", 9), foreground=COLORS["muted_text"]).pack(
             side="left", padx=12)
+        # light/dark switch: saved to instrument_overrides.json and applied
+        # by restarting the window (see toggle_theme / main)
+        self.btn_theme = ttk.Button(
+            header, text=f"Theme: {self.theme.capitalize()}",
+            command=self.toggle_theme, width=12)
+        self.btn_theme.pack(side="right")
 
         # Left: compact tabs (connection, sweep setup, magnet). Right: the
         # activity log, docked so it is ALWAYS visible while switching tabs.
@@ -1579,6 +1666,16 @@ class IVVISweeperImproved:
         style.configure("TRadiobutton", padding=2, background=c["background"])
         style.configure("TCombobox", padding=2)
         style.configure("TEntry", padding=3)
+        # input fields get EXPLICIT field/text colors: without this the
+        # entries inherit the theme foreground (light in dark mode) over
+        # the default white field background -> unreadable text
+        style.configure("TEntry", fieldbackground=c["field"],
+                        foreground=c["text"], insertcolor=c["text"])
+        style.configure("TCombobox", fieldbackground=c["field"],
+                        foreground=c["text"])
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", c["field"])],
+                  foreground=[("readonly", c["text"])])
         style.configure("TNotebook", background=c["background"], borderwidth=0)
         style.configure("TNotebook.Tab", padding=(16, 7),
                         background=c["tab_inactive"],
@@ -2515,6 +2612,29 @@ class IVVISweeperImproved:
             for ch in self.gates:
                 self.root.after(0, lambda ch=ch: ch.btn_ramp.config(state="normal"))
 
+    def toggle_theme(self):
+        """Switch light/dark theme. Saved to instrument_overrides.json and
+        applied by restarting the window (Tk cannot restyle live). Instrument
+        connections close on restart; outputs/levels stay as they are."""
+        new_theme = "dark" if self.theme == "light" else "light"
+        connected = any((self.bias_inst, self.gates[0].inst, self.gates[1].inst,
+                         self.magnet.inst))
+        if connected:
+            if not messagebox.askyesno(
+                    "Restart to switch theme",
+                    f"Switch to the {new_theme} theme?\n"
+                    "The window restarts to apply the colors; instrument "
+                    "connections\nclose (outputs and levels stay as they are) "
+                    "and must be reconnected."):
+                return
+        save_theme_setting(new_theme)
+        self.restart_requested = True
+        try:
+            self.cleanup()  # stop threads + close connections/COM port
+        except Exception:
+            pass
+        self.root.destroy()
+
     def cleanup(self):
         self.stop_event.set()
         self.disconnect_bias()
@@ -2524,29 +2644,32 @@ class IVVISweeperImproved:
 
 
 def main():
-    root = tk.Tk()
-    # Compact layout for a 14-inch laptop: honor available screen space.
-    # Vertical scrollbars keep every option accessible at higher scaling.
-    screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
-    width = min(1280, max(900, screen_w - 80))
-    height = min(680, max(520, screen_h - 95))
-    root.geometry(f"{width}x{height}")
-    root.minsize(min(760, width), min(520, height))
-    app = IVVISweeperImproved(root)
+    # The theme toggle restarts the window in-process: run the whole
+    # launch in a loop and exit only when the user really closes it.
+    while True:
+        root = tk.Tk()
+        # Compact layout for a 14-inch laptop: honor available screen space.
+        # Vertical scrollbars keep every option accessible at higher scaling.
+        screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
+        width = min(1280, max(900, screen_w - 80))
+        height = min(680, max(520, screen_h - 95))
+        root.geometry(f"{width}x{height}")
+        root.minsize(min(760, width), min(520, height))
+        app = IVVISweeperImproved(root)
 
-    def on_closing():
-        # Always destroy the window and release the window's own resources,
-        # even if a disconnect step throws — otherwise the process can hang
-        # while still holding the magnet COM port (stray connection).
-        try:
-            app.cleanup()  # sets stop_event, closes bias/gates/magnet
-        except Exception:
-            pass  # best-effort close: never block window teardown
-        finally:
-            root.destroy()
+        def on_closing():
+            app.restart_requested = False  # normal exit, do not relaunch
+            try:
+                app.cleanup()  # stop threads, close connections + COM port
+            except Exception:
+                pass
+            finally:
+                root.destroy()
 
-    root.protocol("WM_DELETE_WINDOW", on_closing)
-    root.mainloop()
+        root.protocol("WM_DELETE_WINDOW", on_closing)
+        root.mainloop()
+        if not app.restart_requested:
+            break
 
 
 if __name__ == "__main__":
