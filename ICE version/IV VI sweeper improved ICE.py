@@ -262,6 +262,11 @@ class GateChannel:
         self.addr_combo.pack(side="left", padx=(5, 0), fill="x", expand=True)
         ttk.Button(parent, text="Connect", command=self.connect, width=9).grid(
             row=row, column=2, padx=5)
+        # front/rear terminal control — only functional on a Keithley 2450
+        # gate (same as the bias row); inert on the Yokogawas / 2604B
+        self.btn_term = tk.Button(parent, text="Term: ---", bg=COLORS["status_neutral"],
+                                  width=10, command=self.toggle_terminals)
+        self.btn_term.grid(row=row, column=3, padx=5)
         self.btn_out = tk.Button(parent, text="Out: ---", bg=COLORS["status_neutral"], width=9,
                                  command=self.toggle_output)
         self.btn_out.grid(row=row, column=4, padx=5)
@@ -417,6 +422,20 @@ class GateChannel:
         except Exception as e:
             self.app.log(f"Gate {self.index} output error: {e}")
 
+    def toggle_terminals(self):
+        """Swap front/rear terminals (Keithley 2450 gates only, like bias)."""
+        if not self.inst or self.kind != "keithley":
+            return
+        try:
+            if "FRON" in self.inst.check_terminals():
+                self.inst.use_rear_terminals()
+            else:
+                self.inst.use_front_terminals()
+            time.sleep(0.2)
+            self.update_status()
+        except Exception as e:
+            self.app.log(f"Gate {self.index} terminal error: {e}")
+
     def reset(self):
         if not self.inst:
             return
@@ -439,8 +458,20 @@ class GateChannel:
     def update_status(self):
         if not self.inst:
             self.btn_out.config(text="Out: ---", bg=COLORS["status_idle"])
+            self.btn_term.config(text="Term: ---", bg=COLORS["status_neutral"])
             self.lbl_status.config(text=f"Gate {self.index}: --- V")
             return
+        if self.kind == "keithley":
+            try:
+                term = self.inst.check_terminals()
+                self.btn_term.config(
+                    text="Term: FRONT" if "FRON" in term else "Term: REAR",
+                    bg=COLORS["status_on"] if "FRON" in term
+                    else COLORS["status_rear"])
+            except Exception:
+                self.btn_term.config(text="Term: ???", bg=COLORS["status_error"])
+        else:  # Yokogawas / 2604B channel: no selectable terminals
+            self.btn_term.config(text="Term: ---", bg=COLORS["status_neutral"])
         try:
             on = self.output_on()
             self.btn_out.config(text="Out: ON" if on else "Out: OFF",
