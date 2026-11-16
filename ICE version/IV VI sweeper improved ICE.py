@@ -669,12 +669,9 @@ class MagnetChannel:
         self.btn_connect = ttk.Button(parent, text="Connect", width=9,
                                       command=self.toggle_connection)
         self.btn_connect.grid(row=row, column=2, padx=5)
-        self.btn_read = ttk.Button(parent, text="Read Field", width=10,
-                                   command=self.read_field_button)
-        self.btn_read.grid(row=row, column=3, padx=5)
         self.lbl_status = ttk.Label(parent, text="B: --- T",
                                     font=("Consolas", 9))
-        self.lbl_status.grid(row=row, column=4, columnspan=2, padx=5, sticky="w")
+        self.lbl_status.grid(row=row, column=3, columnspan=3, padx=5, sticky="w")
 
     # ==================== CONNECTION ====================
 
@@ -774,6 +771,9 @@ class MagnetChannel:
         field = self.read_field()
         if field is not None:
             self.app.log(f"Magnet field: {field:.4f} T")
+        # also feed the combined B/T readout in the environment panel
+        self.app._env_field = field
+        self.app._update_env_label()
 
 
 class IVVISweeperImproved:
@@ -786,6 +786,9 @@ class IVVISweeperImproved:
         self.gates = [GateChannel(1, self), GateChannel(2, self)]
         self.magnet = MagnetChannel(self)
         self.stop_event = threading.Event()
+        # last manual environment readings shown in the field/temperature panel
+        self._env_field = None
+        self._env_temps = None
 
         self.saved_params = {
             # IV sweep (voltage source)
@@ -818,10 +821,23 @@ class IVVISweeperImproved:
     # ============================ UI ============================
 
     def _build_ui(self):
-        self.main_frame = ttk.Frame(self.root, padding=10)
+        self._setup_style()
+        self.main_frame = ttk.Frame(self.root, padding=12)
         self.main_frame.pack(fill="both", expand=True)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+
+        # title bar
+        header = ttk.Frame(self.main_frame)
+        header.pack(fill="x", pady=(0, 8))
+        ttk.Label(header, text="IV/VI Sweeper — ICE",
+                  font=("Segoe UI", 14, "bold"),
+                  foreground="#1a4d7a").pack(side="left")
+        ttk.Label(header,
+                  text="Bias (Keithley 2450)  •  2 Gates  •  "
+                       "Magnet (MPS4G) + Temperature",
+                  font=("Segoe UI", 9), foreground="#666666").pack(
+            side="left", padx=12)
 
         # === 1. CONNECTION ===
         conn = ttk.LabelFrame(self.main_frame, text="1. Instrument Connection", padding=10)
@@ -855,28 +871,21 @@ class IVVISweeperImproved:
         btns.grid(row=4, column=0, columnspan=6, pady=5)
         ttk.Button(btns, text="Scan Instruments", command=self.refresh_instruments).pack(side="left", padx=10)
         ttk.Button(btns, text="Refresh Status", command=self.refresh_all_status).pack(side="left", padx=10)
-        # field and temperature are independent slow readings: each gets its
-        # own toggle (field needs the magnet; temperature needs the ICElog)
-        self.doc_field_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(btns, text="Record magnetic field after each sweep",
-                        variable=self.doc_field_var).pack(side="left", padx=10)
-        self.doc_temp_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(btns, text="Record temperature after each sweep",
-                        variable=self.doc_temp_var).pack(side="left", padx=10)
-        ttk.Button(btns, text="Read Temperature",
-                   command=self.read_temperature_once).pack(side="left", padx=10)
 
-        # === 2. GATE SOURCES CONFIG + RAMP (Gate 1 | Gate 2) ===
+        # === 2. GATE SOURCES + ENVIRONMENT (Gate 1 | Gate 2 | Field & Temp) ===
         gates = ttk.LabelFrame(self.main_frame,
-                               text="2. Gate Voltage Sources & Ramping (independent)",
+                               text="2. Gate Sources, Ramping & Environment",
                                padding=5)
         gates.pack(fill="x", pady=5)
         holder = ttk.Frame(gates)
         holder.pack(fill="x")
-        holder.columnconfigure(0, weight=1)
-        holder.columnconfigure(1, weight=1)
+        for c in range(3):
+            holder.columnconfigure(c, weight=1)
         self.gates[0].build_config_panel(holder)
         self.gates[1].build_config_panel(holder)
+        # field & temperature documentation lives next to the gate panels:
+        # one panel per concern, with independent toggles
+        self._build_environment_panel(holder)
 
         # === 3. MEASUREMENT TYPE ===
         typ = ttk.LabelFrame(self.main_frame, text="3. Measurement Type", padding=10)
@@ -1047,23 +1056,90 @@ class IVVISweeperImproved:
         ttk.Button(row0, text="Browse...", command=self.browse_directory).pack(side="left", padx=5)
 
         row1 = ttk.Frame(ex)
-        row1.pack(pady=5)
-        self.btn_run = ttk.Button(row1, text="RUN SWEEP", command=self.start_sweep, width=15)
+        row1.pack(pady=8)
+        self.btn_run = tk.Button(row1, text="RUN SWEEP", command=self.start_sweep,
+                                 width=15, bg="#2e9e4f", fg="white",
+                                 activebackground="#268a44",
+                                 activeforeground="white",
+                                 font=("Segoe UI", 10, "bold"),
+                                 relief="ridge", bd=2, cursor="hand2")
         self.btn_run.pack(side="left", padx=20)
-        self.btn_abort = ttk.Button(row1, text="ABORT", command=self.abort_sweep, width=10,
-                                    state="disabled")
+        self.btn_abort = tk.Button(row1, text="ABORT", command=self.abort_sweep,
+                                   width=10, bg="#c94040", fg="white",
+                                   activebackground="#b03636",
+                                   activeforeground="white",
+                                   font=("Segoe UI", 10, "bold"),
+                                   relief="ridge", bd=2, cursor="hand2",
+                                   state="disabled")
         self.btn_abort.pack(side="left", padx=20)
-        self.lbl_progress = ttk.Label(row1, text="Ready", font=("Arial", 10))
+        self.lbl_progress = ttk.Label(row1, text="Ready",
+                                      font=("Segoe UI", 10, "bold"))
         self.lbl_progress.pack(side="left", padx=20)
 
         # === LOG ===
         logf = ttk.LabelFrame(self.main_frame, text="Log", padding=10)
         logf.pack(fill="both", expand=True, pady=5)
-        self.log_text = tk.Text(logf, height=8, state="disabled", bg="#f0f0f0", font=("Consolas", 9))
+        self.log_text = tk.Text(logf, height=8, state="disabled",
+                                bg="#14181f", fg="#d8dee9",
+                                insertbackground="#d8dee9",
+                                selectbackground="#3a5a80",
+                                font=("Consolas", 9), relief="flat",
+                                padx=8, pady=6)
         self.log_text.pack(fill="both", expand=True)
 
         self._update_ui_labels()
         self._toggle_loop_entries()
+
+    def _setup_style(self):
+        """Consistent, slightly more modern ttk styling for the whole window."""
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use('clam')
+        except tk.TclError:
+            pass
+        style.configure('.', font=("Segoe UI", 10))
+        style.configure('TLabelframe', borderwidth=1, relief='solid')
+        style.configure('TLabelframe.Label', font=("Segoe UI", 10, "bold"),
+                        foreground='#1a4d7a')
+        style.configure('TButton', padding=(8, 3))
+        style.configure('TCheckbutton', padding=3)
+        style.configure('TRadiobutton', padding=2)
+        style.configure('TCombobox', padding=2)
+        style.configure('TEntry', padding=2)
+
+    def _build_environment_panel(self, parent):
+        """Field & temperature documentation panel, next to the gate panels.
+
+        Field and temperature are independent slow readings, so each gets
+        its own toggle (field needs the magnet; temperature needs ICElog).
+        """
+        box = ttk.LabelFrame(parent, text="Field & Temperature (ICE)", padding=5)
+        self.doc_field_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(box, text="Record field each sweep",
+                        variable=self.doc_field_var).pack(anchor="w", pady=1)
+        self.doc_temp_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(box, text="Record temperature each sweep",
+                        variable=self.doc_temp_var).pack(anchor="w", pady=1)
+        btns = ttk.Frame(box)
+        btns.pack(fill="x", pady=(6, 0))
+        ttk.Button(btns, text="Read Field",
+                   command=self.magnet.read_field_button).pack(
+            side="left", padx=2)
+        ttk.Button(btns, text="Read Temp",
+                   command=self.read_temperature_once).pack(
+            side="left", padx=2)
+        self.lbl_env_status = ttk.Label(box, text="B: ---  |  T: ---",
+                                        font=("Consolas", 9))
+        self.lbl_env_status.pack(anchor="w", pady=(4, 0))
+        box.pack(side="left", fill="both", expand=True, padx=4)
+
+    def _update_env_label(self):
+        """Refresh the small B/T readout in the environment panel."""
+        b_str = (f"{self._env_field:.4f} T" if self._env_field is not None
+                 else "---")
+        t_str = (" / ".join(f"{v:.2f}" for v in self._env_temps) + " K"
+                 if self._env_temps is not None else "---")
+        self.lbl_env_status.config(text=f"B: {b_str}  |  T: {t_str}")
 
     # ==================== LOOP HELPERS ====================
 
@@ -1315,12 +1391,16 @@ class IVVISweeperImproved:
 
         Independent of the magnet — this only reads the ICElog file.
         """
+        temps = None
         try:
             temps = read_ice_temperature()
             self.log("Temperatures (50K/4K/VTI/probe): "
                      + " / ".join(f"{v:.2f} K" for v in temps))
         except Exception as e:
             self.log(f"Temperature log read error: {e}")
+        # also feed the combined B/T readout in the environment panel
+        self._env_temps = temps
+        self._update_env_label()
 
     # ==================== SWEEP EXECUTION ====================
 
@@ -1769,7 +1849,7 @@ class IVVISweeperImproved:
 
 def main():
     root = tk.Tk()
-    root.geometry("1050x1050")
+    root.geometry("1150x1080")
     app = IVVISweeperImproved(root)
 
     def on_closing():
