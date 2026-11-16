@@ -1089,20 +1089,23 @@ class IVVISweeperImproved:
                                          font=("Arial", 9, "bold"))
         self.lbl_loop_points.pack(side="left", padx=25)
 
-        # single-sweep option: apply each gate's manual target before the sweep
+        # plain-sweep (bias-only) options: the sweep NEVER drives the gates —
+        # gate voltages are set manually in section 2 (Ramp Gate). These
+        # checkboxes only select which gate voltages are DOCUMENTED in the
+        # file (one true voltage measurement per sweep, if connected).
         af = ttk.Frame(loop)
         af.pack(fill="x", pady=(6, 0))
-        ttk.Label(af, text="Single sweep:").pack(side="left")
-        self.apply_g1_var = tk.BooleanVar(value=False)
-        self.chk_apply_g1 = ttk.Checkbutton(
-            af, text="Apply Gate 1 target (section 2) before sweep",
-            variable=self.apply_g1_var)
-        self.chk_apply_g1.pack(side="left", padx=8)
-        self.apply_g2_var = tk.BooleanVar(value=False)
-        self.chk_apply_g2 = ttk.Checkbutton(
-            af, text="Apply Gate 2 target (section 2) before sweep",
-            variable=self.apply_g2_var)
-        self.chk_apply_g2.pack(side="left", padx=8)
+        ttk.Label(af, text="Plain sweep:").pack(side="left")
+        self.rec_g1_var = tk.BooleanVar(value=False)
+        self.chk_rec_g1 = ttk.Checkbutton(
+            af, text="Record Gate 1 voltage column (gate not driven)",
+            variable=self.rec_g1_var)
+        self.chk_rec_g1.pack(side="left", padx=8)
+        self.rec_g2_var = tk.BooleanVar(value=False)
+        self.chk_rec_g2 = ttk.Checkbutton(
+            af, text="Record Gate 2 voltage column (gate not driven)",
+            variable=self.rec_g2_var)
+        self.chk_rec_g2.pack(side="left", padx=8)
 
         # Newer ICE revision: independent readback of the non-swept gate in
         # single-gate loops. Keep this option on a separate row for laptops.
@@ -1305,17 +1308,18 @@ class IVVISweeperImproved:
         self.rb_dual_outer1.config(state=order_state)
         self.rb_dual_outer2.config(state=order_state)
 
-        # 'apply gate target' checkboxes only relevant without a gate loop
-        apply_state = "normal" if mode == "none" else "disabled"
-        self.chk_apply_g1.config(state=apply_state)
-        self.chk_apply_g2.config(state=apply_state)
+        # 'record gate voltage' checkboxes only relevant without a gate loop
+        # (in loop modes both gate columns are always written)
+        rec_state = "normal" if mode == "none" else "disabled"
+        self.chk_rec_g1.config(state=rec_state)
+        self.chk_rec_g2.config(state=rec_state)
         # held-gate readback only meaningful in single-gate loop modes
         # (in dual/movement loops both gates are already recorded)
         held_state = "normal" if mode in ("gate1", "gate2") else "disabled"
         self.chk_held_readback.config(state=held_state)
-        for gi, var in ((1, self.apply_g1_var), (2, self.apply_g2_var)):
+        for gi, var in ((1, self.rec_g1_var), (2, self.rec_g2_var)):
             if mode == "none" and var.get() and self.gates[gi - 1].inst is None:
-                self.log(f"Note: 'Apply Gate {gi} target' is checked but "
+                self.log(f"Note: 'Record Gate {gi} voltage' is checked but "
                          f"Gate {gi} is not connected")
 
         need = {"gate1": [1], "gate2": [2], "dual": [1, 2], "movement": [1, 2]}.get(mode, [])
@@ -1558,18 +1562,19 @@ class IVVISweeperImproved:
             return
 
         mode = self.loop_mode_var.get()
-        # in 'none' mode the user may still ask for gates to be set to their
-        # manual targets before the single sweep runs
-        apply_gates = []
+        # plain-sweep mode: gates are NEVER driven by the sweep (control them
+        # manually via section 2). The checkboxes only choose which gate
+        # voltages get documented as columns in the file.
+        record_gates = []
         if mode == "none":
-            apply_gates = [gi for gi in (1, 2)
-                           if (self.apply_g1_var.get() if gi == 1
-                               else self.apply_g2_var.get())]
+            record_gates = [gi for gi in (1, 2)
+                            if (self.rec_g1_var.get() if gi == 1
+                                else self.rec_g2_var.get())]
         points = [(None, None)]
         gate_cfg = {}
         settle = ramp_step = ramp_delay = 0.0
 
-        if mode != "none" or apply_gates:
+        if mode != "none":
             try:
                 settle = float(self.ent_gate_settle.get())
                 ramp_step = abs(float(self.ent_loop_ramp_step.get())) / 1000.0
@@ -1656,33 +1661,6 @@ class IVVISweeperImproved:
                                      f"section 2): {e}")
                 return
 
-        elif apply_gates:
-            # single sweep with gates applied to their manual targets first
-            for gi in apply_gates:
-                if self.gates[gi - 1].inst is None:
-                    messagebox.showerror(
-                        "Error", f"'Apply Gate {gi} target' is checked but Gate {gi} "
-                                 "is not connected")
-                    return
-                ch = self.gates[gi - 1]
-                try:
-                    gate_cfg[f'g{gi}_compliance'] = float(ch.ent_compliance.get())
-                    gate_cfg[f'g{gi}_nplc'] = float(ch.ent_nplc.get())
-                except ValueError:
-                    messagebox.showerror("Error",
-                                         f"Invalid gate {gi} compliance/NPLC parameters")
-                    return
-            try:
-                helds = [float(self.gates[gi - 1].ent_target.get())
-                         if gi in apply_gates else None
-                         for gi in (1, 2)]
-            except ValueError as e:
-                messagebox.showerror("Error",
-                                     f"Invalid gate target (enter a valid Target in "
-                                     f"section 2): {e}")
-                return
-            points = [tuple(helds)]
-
         sweep_type = self.sweep_type_var.get()
         if sweep_type == "iv":
             keys = ['iv_sp1', 'iv_sp2', 'iv_step', 'iv_delay', 'iv_compliance']
@@ -1702,6 +1680,7 @@ class IVVISweeperImproved:
             'loop_ramp_step': ramp_step, 'loop_ramp_delay': ramp_delay,
             'doc_field': self.doc_field_var.get(),
             'doc_temp': self.doc_temp_var.get(),
+            'record_gates': record_gates,
             'held_readback': (self.held_readback_var.get()
                               and mode in ("gate1", "gate2")),
         }
@@ -1915,6 +1894,31 @@ class IVVISweeperImproved:
                             self.log(f"Note: Gate {held_gi} readback failed "
                                      "— no readback column")
 
+                # plain sweeps: document the manually-set gate voltages. The
+                # sweep never drives the gates — one true voltage measurement
+                # per recorded gate, post-sweep, only when connected + output
+                # on. The recorded value goes into Gate{n}Voltage(V).
+                gate_readings = {}
+                if mode == "none" and p.get('record_gates'):
+                    for gi in p['record_gates']:
+                        ch = self.gates[gi - 1]
+                        if ch.inst is None:
+                            self.log(f"Note: Gate {gi} not connected — "
+                                     "no voltage column")
+                        elif not ch.output_on():
+                            # measuring with the output OFF would record a
+                            # meaningless ~0 V / floating reading
+                            self.log(f"Note: Gate {gi} output is OFF — "
+                                     "no voltage column")
+                        else:
+                            v = ch.measure_voltage()
+                            if v is None:
+                                self.log(f"Note: Gate {gi} voltage read "
+                                         "failed — no voltage column")
+                            else:
+                                gate_readings[gi] = v
+                                self.log(f"Gate {gi} voltage: {v:.4f} V")
+
                 # sequential file number within the save folder (pymeasure-style:
                 # IV_000, IV_001, ... continuing past existing files)
                 num = next_file_number(p['save_dir'], sweep_type)
@@ -1944,6 +1948,14 @@ class IVVISweeperImproved:
                 if vg2 is not None:
                     header += ",Gate2Voltage(V)"
                     cols.append(np.full(x.size, vg2))
+                # plain sweeps: manually-set gate voltages (true measurement
+                # taken once, after the sweep)
+                if gate_readings.get(1) is not None:
+                    header += ",Gate1Voltage(V)"
+                    cols.append(np.full(x.size, gate_readings[1]))
+                if gate_readings.get(2) is not None:
+                    header += ",Gate2Voltage(V)"
+                    cols.append(np.full(x.size, gate_readings[2]))
                 # magnetic field + cryostat temperatures: one reading taken
                 # after the sweep finished (slow instruments), repeated on
                 # every row so each file is self-describing
