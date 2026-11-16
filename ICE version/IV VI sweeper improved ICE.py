@@ -1948,8 +1948,8 @@ class IVVISweeperImproved:
                     header += ",field(T)"
                     cols.append(np.full(x.size, field_val))
                 if temp_vals is not None:
-                    for name, v in zip(TEMP_COLUMNS, temp_vals):
-                        header += f",{name}"
+                    for col_name, v in zip(TEMP_COLUMNS, temp_vals):
+                        header += f",{col_name}"
                         cols.append(np.full(x.size, v))
                 if readback_val is not None:
                     header += f",Gate{held_gi}Readback(V)"
