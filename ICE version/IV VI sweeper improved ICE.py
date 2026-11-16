@@ -388,7 +388,7 @@ class GateChannel:
 
     def update_status(self):
         if not self.inst:
-            self.btn_out.config(text="Out: ---", bg="#e0e0e0")
+            self.btn_out.config(text="Out: ---", bg="#a7d8c9")
             self.lbl_status.config(text=f"Gate {self.index}: --- V")
             return
         try:
@@ -855,7 +855,7 @@ class IVVISweeperImproved:
         ttk.Label(header,
                   text="Bias (Keithley 2450)  •  2 Gates  •  "
                        "Magnet (MPS4G) + Temperature",
-                  font=("Segoe UI", 9), foreground="#666666").pack(
+                  font=("Segoe UI", 9), foreground="#6E0909").pack(
             side="left", padx=12)
 
         # === 1. CONNECTION ===
@@ -1110,7 +1110,7 @@ class IVVISweeperImproved:
         logf = ttk.LabelFrame(self.main_frame, text="Log", padding=10)
         logf.pack(fill="both", expand=True, pady=5)
         self.log_text = tk.Text(logf, height=8, state="disabled",
-                                bg="#14181f", fg="#d8dee9",
+                                bg="#14181f", fg="#b4c3df",
                                 insertbackground="#d8dee9",
                                 selectbackground="#3a5a80",
                                 font=("Consolas", 9), relief="flat",
@@ -1804,7 +1804,15 @@ class IVVISweeperImproved:
                 held_gi = {"gate1": 2, "gate2": 1}.get(mode)
                 if p.get('held_readback') and held_gi is not None:
                     ch = self.gates[held_gi - 1]
-                    if ch.inst is not None:
+                    if ch.inst is None:
+                        self.log(f"Note: Gate {held_gi} not connected — "
+                                 "no readback column")
+                    elif not ch.output_on():
+                        # measuring with the output OFF would record a
+                        # meaningless ~0 V / floating reading
+                        self.log(f"Note: Gate {held_gi} output is OFF — "
+                                 "no readback column")
+                    else:
                         readback_val = ch.measure_voltage()
                         if readback_val is not None:
                             self.log(f"Gate {held_gi} voltage: "
@@ -1812,9 +1820,6 @@ class IVVISweeperImproved:
                         else:
                             self.log(f"Note: Gate {held_gi} readback failed "
                                      "— no readback column")
-                    else:
-                        self.log(f"Note: Gate {held_gi} not connected — "
-                                 "no readback column")
 
                 # sequential file number within the save folder (pymeasure-style:
                 # IV_000, IV_001, ... continuing past existing files)
