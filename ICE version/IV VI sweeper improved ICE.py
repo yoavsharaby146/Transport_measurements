@@ -1,6 +1,7 @@
 import sys, os
 import re
 import csv
+import json
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -211,6 +212,13 @@ def read_ice_temperature(root=ICE_TEMP_LOG_ROOT, ext=".log",
         raise RuntimeError(f"Cannot parse temperature columns 5-8: {e}") from e
 
     return np.array(values, dtype=float)
+
+
+# Magnet field <-> current conversion used by the MPS4G driver (10.375 A per T)
+A_PER_T = 10.375
+# Per-range safety sweep rates (T/min) — fallback when instrument_overrides.json
+# has no 'magnet_safety_limits' block (same defaults as the magnet setup dialog).
+MAGNET_DEFAULT_SAFETY_RATES = {0: 0.20, 1: 0.10, 2: 0.05, 3: 0.03, 4: 0.001}
 
 
 class GateChannel:
@@ -836,6 +844,80 @@ class MagnetChannel:
         self.app._env_field = field
         self.app._update_env_label()
 
+    def update_field_status(self, field):
+        """Refresh the magnet-tab status label (safe from worker threads)."""
+        self.app.root.after(0, lambda: self.lbl_status.config(
+            text=f"B: {field:.4f} T"))
+
+    # ==================== FIELD CONTROL ====================
+
+    def _safety_rates(self):
+        """Per-range safety sweep rates (T/min) from instrument_overrides.json
+        (saved by the magnet setup dialog); defaults if missing/unreadable."""
+        limits = dict(MAGNET_DEFAULT_SAFETY_RATES)
+        try:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "instrument_overrides.json")
+            with open(path, "r", encoding="utf-8") as f:
+                saved = json.load(f).get("magnet_safety_limits") or {}
+            for i in range(5):
+                v = saved.get(str(i), saved.get(i))
+                if v is not None:
+                    limits[i] = float(v)
+        except Exception:
+            pass
+        return limits
+
+    def apply_rate(self, rate_tmin):
+        """Set every range's charge rate to `rate_tmin` (T/min), clamped to
+        that range's safety limit — the sweep runs as fast as allowed, never
+        faster (same semantics as the ICE procedures). Returns the original
+        per-range rates (A/s) to hand to restore_rates()."""
+        originals = {}
+        limits = self._safety_rates()
+        for i in range(5):
+            originals[i] = float(getattr(self.inst, f"current_rate{i}"))
+            applied = min(abs(rate_tmin), limits[i])
+            rate_a_s = applied * A_PER_T / 60.0
+            setattr(self.inst, f"current_rate{i}", rate_a_s)
+            if applied < abs(rate_tmin):
+                self.app.log(f"Range {i}: requested {rate_tmin:g} T/min exceeds "
+                             f"safety limit {limits[i]:g} T/min — clamped")
+        return originals
+
+    def restore_rates(self, originals):
+        """Restore the original per-range charge rates (A/s)."""
+        for i, r in originals.items():
+            try:
+                setattr(self.inst, f"current_rate{i}", r)
+            except Exception:
+                pass
+
+    def go_to_field(self, target_t, rate_tmin, progress=None):
+        """Sweep to `target_t` T at `rate_tmin` T/min (safety-clamped).
+
+        Blocking; polls the field every 0.5 s, aborts on stop_event.
+        Returns True when the target is reached, False on abort/failure.
+        """
+        originals = self.apply_rate(rate_tmin)
+        try:
+            self.inst.go_to_target_field(target_t)
+            tol = max(0.005, abs(target_t) * 0.005)
+            while True:
+                if self.app.stop_event.is_set():
+                    return False
+                time.sleep(0.5)
+                try:
+                    field = float(self.inst.magnet_field)
+                except Exception:
+                    continue  # transient serial glitch: keep polling
+                if progress:
+                    progress(field)
+                if abs(field - target_t) <= tol:
+                    return True
+        finally:
+            self.restore_rates(originals)
+
 
 class IVVISweeperImproved:
     def __init__(self, root):
@@ -868,6 +950,10 @@ class IVVISweeperImproved:
             'g2_start': "-5", 'g2_end': "5", 'g2_loop_step': "1",
             # Magnet (ICE only, Cryomagnetics MPS4G over COM)
             'magnet_com': "", 'magnet_baud': "115200", 'magnet_timeout': "0.3",
+            # Manual magnet control + field loop (ICE only)
+            'mag_rate': "0.1", 'mag_target': "0",
+            'field_start': "0", 'field_end': "1", 'field_step': "0.1",
+            'field_rate': "0.1",
             'save_dir': "",
         }
         for i in (1, 2):
@@ -1013,7 +1099,8 @@ class IVVISweeperImproved:
                          ("gate1", "Gate 1 loop"),
                          ("gate2", "Gate 2 loop"),
                          ("dual", "Dual gate 2D map"),
-                         ("movement", "Dual gate movement"))):
+                         ("movement", "Dual gate movement"),
+                         ("field", "Field loop (bias vs B)"))):
             ttk.Radiobutton(mf, text=txt, variable=self.loop_mode_var, value=val,
                             command=self._toggle_loop_entries).grid(
                                 row=i // 3, column=i % 3, sticky="w", padx=(2, 24), pady=2)
@@ -1167,6 +1254,68 @@ class IVVISweeperImproved:
         ttk.Label(activity, text="Messages are preserved while you switch tabs.",
                   style="Muted.TLabel").pack(anchor="w", padx=8, pady=5)
 
+        # === 7. MAGNET CONTROL + FIELD LOOP (own tab, ICE only) ===
+        mtab = self._scrollable_tab("Magnet control")
+
+        mctl = ttk.LabelFrame(mtab, text="Magnet control (manual)", padding=7)
+        mctl.pack(fill="x", pady=5)
+        rowm = ttk.Frame(mctl)
+        rowm.pack(fill="x")
+        ttk.Label(rowm, text="Sweep rate (T/min):").pack(side="left")
+        self.ent_mag_rate = ttk.Entry(rowm, width=8)
+        self.ent_mag_rate.insert(0, self.saved_params['mag_rate'])
+        self.ent_mag_rate.pack(side="left", padx=3)
+        ttk.Label(rowm, text="Target field (T):").pack(side="left", padx=(20, 0))
+        self.ent_mag_target = ttk.Entry(rowm, width=8)
+        self.ent_mag_target.insert(0, self.saved_params['mag_target'])
+        self.ent_mag_target.pack(side="left", padx=3)
+        self.btn_mag_go = ttk.Button(rowm, text="Go to target",
+                                     command=self.start_manual_field_ramp)
+        self.btn_mag_go.pack(side="left", padx=12)
+        self.lbl_mag_status = ttk.Label(mctl, text="B: --- T",
+                                        font=("Consolas", 9))
+        self.lbl_mag_status.pack(anchor="w", pady=(4, 0))
+        ttk.Label(mctl, text="The rate is applied to every range, clamped to the "
+                             "per-range safety limits saved by the magnet setup\n"
+                             "dialog. ABORT stops the ramp (field left where it is).",
+                  style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
+
+        flo = ttk.LabelFrame(mtab, text="Field loop (bias sweep at each field)",
+                             padding=7)
+        flo.pack(fill="x", pady=5)
+        ttk.Label(flo, text="Select 'Field loop (bias vs B)' in Sweep setup to "
+                            "run a bias sweep at every field point.").pack(
+            anchor="w", pady=(0, 4))
+        rowf = ttk.Frame(flo)
+        rowf.pack(fill="x")
+        ttk.Label(rowf, text="Start (T):").pack(side="left")
+        self.ent_field_start = ttk.Entry(rowf, width=8)
+        self.ent_field_start.insert(0, self.saved_params['field_start'])
+        self.ent_field_start.pack(side="left", padx=2)
+        ttk.Label(rowf, text="End (T):").pack(side="left", padx=(14, 0))
+        self.ent_field_end = ttk.Entry(rowf, width=8)
+        self.ent_field_end.insert(0, self.saved_params['field_end'])
+        self.ent_field_end.pack(side="left", padx=2)
+        ttk.Label(rowf, text="Step (T):").pack(side="left", padx=(14, 0))
+        self.ent_field_step = ttk.Entry(rowf, width=8)
+        self.ent_field_step.insert(0, self.saved_params['field_step'])
+        self.ent_field_step.pack(side="left", padx=2)
+        rowf2 = ttk.Frame(flo)
+        rowf2.pack(fill="x", pady=(4, 0))
+        ttk.Label(rowf2, text="Sweep rate (T/min):").pack(side="left")
+        self.ent_field_rate = ttk.Entry(rowf2, width=8)
+        self.ent_field_rate.insert(0, self.saved_params['field_rate'])
+        self.ent_field_rate.pack(side="left", padx=3)
+        self.lbl_field_points = ttk.Label(rowf2, text="",
+                                          font=("Arial", 9, "bold"))
+        self.lbl_field_points.pack(side="left", padx=25)
+        ttk.Label(flo, text="Forward sweep from Start to End; the field is "
+                            "swept back to 0 T when the loop finishes.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
+        for e in (self.ent_field_start, self.ent_field_end,
+                  self.ent_field_step, self.ent_field_rate):
+            e.bind('<KeyRelease>', lambda ev: self._update_loop_points_label())
+
         self._update_ui_labels()
         self._toggle_loop_entries()
 
@@ -1288,7 +1437,7 @@ class IVVISweeperImproved:
         mode = self.loop_mode_var.get()
         state1 = "normal" if mode in ("gate1", "dual", "movement") else "disabled"
         state2 = "normal" if mode in ("gate2", "dual", "movement") else "disabled"
-        state_shared = "normal" if mode != "none" else "disabled"
+        state_shared = "normal" if mode not in ("none", "field") else "disabled"
         for e in (self.ent_g1_start, self.ent_g1_end, self.ent_g1_loop_step):
             e.config(state=state1)
         for e in (self.ent_g2_start, self.ent_g2_end, self.ent_g2_loop_step):
@@ -1303,6 +1452,11 @@ class IVVISweeperImproved:
             state="normal" if mode == "movement" else "disabled")
         for e in (self.ent_gate_settle, self.ent_loop_ramp_step, self.ent_loop_ramp_delay):
             e.config(state=state_shared)
+        # field loop entries live in the Magnet control tab
+        state_f = "normal" if mode == "field" else "disabled"
+        for e in (self.ent_field_start, self.ent_field_end,
+                  self.ent_field_step, self.ent_field_rate):
+            e.config(state=state_f)
         # nesting order only relevant for the dual 2D loop
         order_state = "normal" if mode == "dual" else "disabled"
         self.rb_dual_outer1.config(state=order_state)
@@ -1350,12 +1504,19 @@ class IVVISweeperImproved:
                 outer = "G1" if self.dual_outer_var.get() == "1" else "G2"
                 inner = "G2" if outer == "G1" else "G1"
                 text = f"{n1} x {n2} = {n1 * n2} bias sweeps ({outer} outer, {inner} inner)"
+            elif mode == "field":
+                nf = len(arange_inclusive(float(self.ent_field_start.get()),
+                                          float(self.ent_field_end.get()),
+                                          abs(float(self.ent_field_step.get()))))
+                text = f"{nf} bias sweeps (field loop)"
             else:  # movement: one common point count for both gates
                 n = int(float(self.ent_loop_points.get()))
                 text = f"{n} bias sweeps (both gates move together)"
         except ValueError:
             text = "---"
         self.lbl_loop_points.config(text=text)
+        if hasattr(self, 'lbl_field_points'):
+            self.lbl_field_points.config(text=text)
 
     def _update_ui_labels(self):
         st = self.sweep_type_var.get()
@@ -1574,7 +1735,7 @@ class IVVISweeperImproved:
         gate_cfg = {}
         settle = ramp_step = ramp_delay = 0.0
 
-        if mode != "none":
+        if mode not in ("none", "field"):
             try:
                 settle = float(self.ent_gate_settle.get())
                 ramp_step = abs(float(self.ent_loop_ramp_step.get())) / 1000.0
@@ -1593,7 +1754,32 @@ class IVVISweeperImproved:
                                      "settle and ramp delay must be >= 0")
                 return
 
-        if mode != "none":
+        if mode == "field":
+            # field loop: bias sweep at every field point (magnet required)
+            if self.magnet.inst is None:
+                messagebox.showerror("Error", "Field loop requires the magnet "
+                                              "to be connected")
+                return
+            try:
+                fst = float(self.ent_field_start.get())
+                fe = float(self.ent_field_end.get())
+                fstep = abs(float(self.ent_field_step.get()))
+                frate = float(self.ent_field_rate.get())
+            except ValueError as e:
+                messagebox.showerror("Error", f"Invalid field loop parameters: {e}")
+                return
+            if frate <= 0:
+                messagebox.showerror("Error", "Field sweep rate must be > 0")
+                return
+            fields = arange_inclusive(fst, fe, fstep)
+            if not fields:
+                messagebox.showerror("Error", "Field loop produces no points")
+                return
+        else:
+            fields = []
+            frate = 0.1
+
+        if mode not in ("none", "field"):
             need = {"gate1": [1], "gate2": [2], "dual": [1, 2], "movement": [1, 2]}[mode]
             for gi in need:
                 if self.gates[gi - 1].inst is None:
@@ -1681,6 +1867,8 @@ class IVVISweeperImproved:
             'doc_field': self.doc_field_var.get(),
             'doc_temp': self.doc_temp_var.get(),
             'record_gates': record_gates,
+            'fields': fields,
+            'field_rate': frate if mode == "field" else 0.1,
             'held_readback': (self.held_readback_var.get()
                               and mode in ("gate1", "gate2")),
         }
@@ -1746,6 +1934,57 @@ class IVVISweeperImproved:
                      "— no temperature columns")
             return None
 
+    def _magnet_progress(self, field, target, i=0, n=1):
+        """Progress hook for field ramps (runs on the worker thread)."""
+        self.magnet.update_field_status(field)
+        self._progress(f"Field ramp: B = {field:.3f} T -> {target:.3f} T "
+                       f"(sweep {i + 1}/{n})")
+
+    def start_manual_field_ramp(self):
+        """Manual button: sweep the magnet to the target field at the rate."""
+        if self.magnet.inst is None:
+            messagebox.showerror("Error", "Magnet not connected")
+            return
+        try:
+            rate = abs(float(self.ent_mag_rate.get()))
+            target = float(self.ent_mag_target.get())
+        except ValueError:
+            messagebox.showerror("Error", "Invalid rate/target values")
+            return
+        if rate <= 0:
+            messagebox.showerror("Error", "Field sweep rate must be > 0")
+            return
+        self.saved_params.update({'mag_rate': str(rate),
+                                  'mag_target': self.ent_mag_target.get()})
+        self.btn_mag_go.config(state="disabled")
+        self.set_busy()
+        self.log(f"Sweeping field to {target} T at {rate} T/min ...")
+
+        def worker():
+            try:
+                ok = self.magnet.go_to_field(
+                    target, rate,
+                    progress=lambda f: self._magnet_progress(f, target))
+                if self.stop_event.is_set():
+                    self.log("Field ramp aborted (field left where it was)")
+                elif ok:
+                    self.log(f"Field ramp complete: B = {target:.4f} T")
+                else:
+                    self.log("Field ramp failed")
+            except Exception as e:
+                self.log(f"Field ramp error: {e}")
+            finally:
+                self.root.after(0, self.restore_after_field_ramp)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def restore_after_field_ramp(self):
+        self.btn_mag_go.config(state="normal")
+        self.btn_abort.config(state="disabled")
+        self.btn_run.config(state="normal")
+        for ch in self.gates:
+            ch.btn_ramp.config(state="normal")
+
     def _ramp_gates_together(self, targets, step_v, delay, start_from=None):
         """Ramp Gate 1 and Gate 2 in lock-step (interleaved small steps).
 
@@ -1785,12 +2024,20 @@ class IVVISweeperImproved:
             sweep_type = p['sweep_type']
             mode = p['mode']
             points = p['points']
-            gate_loop = mode != "none"
+            fields = p.get('fields') or []
+            seq = fields if mode == "field" else points
+            gate_loop = mode not in ("none", "field")
             # gates that are actually driven during this run (held gates included)
             involved = [gi for gi in (1, 2)
                         if any(pt[gi - 1] is not None for pt in points)]
 
-            if gate_loop:
+            if mode == "field":
+                self.log(f"Field loop: {len(seq)} bias sweeps, "
+                         f"{seq[0]:.3f} T -> {seq[-1]:.3f} T at "
+                         f"{p['field_rate']:g} T/min"
+                         + (" (programmed field recorded; manual readback skipped)"
+                            if p.get('doc_field') else ""))
+            elif gate_loop:
                 self.log(f"Gate loop mode '{mode}': {len(points)} bias sweeps")
             elif involved:
                 self.log("Single sweep with gate target(s) applied")
@@ -1826,12 +2073,25 @@ class IVVISweeperImproved:
 
             os.makedirs(p['save_dir'], exist_ok=True)
 
-            for i, pt in enumerate(points):
+            for i, pt in enumerate(seq):
                 if self.stop_event.is_set():
                     break
-                prev = points[i - 1] if i > 0 else None
 
-                if i > 0:
+                if mode == "field":
+                    # ramp the magnet from the previous field point to this one
+                    prev_f = seq[i - 1] if i > 0 else None
+                    if prev_f is None or pt != prev_f:
+                        self.log(f"Sweeping field -> {pt:.3f} T ...")
+                        self._progress(f"Sweep {i + 1}/{len(seq)}: "
+                                       f"ramping to B = {pt:.3f} T")
+                        self.magnet.go_to_field(
+                            pt, p.get('field_rate', 0.1),
+                            progress=lambda f: self._magnet_progress(f, pt, i,
+                                                                     len(seq)))
+                        if self.stop_event.is_set():
+                            break
+                elif i > 0:
+                    prev = points[i - 1] if i > 0 else None
                     if mode == "movement":
                         self.log(f"Moving gates -> G1={pt[0]} V, G2={pt[1]} V ...")
                         self._ramp_gates_together(pt, p['loop_ramp_step'],
@@ -1865,7 +2125,7 @@ class IVVISweeperImproved:
                 # sweep is over, only when its own toggle is checked, and
                 # stored as extra columns like the gate voltages.
                 field_val, temp_vals = None, None
-                if p.get('doc_field'):
+                if p.get('doc_field') and mode != "field":
                     field_val = self._document_field()
                 if p.get('doc_temp'):
                     temp_vals = self._document_temperature()
@@ -1922,7 +2182,7 @@ class IVVISweeperImproved:
                 # sequential file number within the save folder (pymeasure-style:
                 # IV_000, IV_001, ... continuing past existing files)
                 num = next_file_number(p['save_dir'], sweep_type)
-                vg1, vg2 = pt
+                vg1, vg2 = pt if mode != "field" else (None, None)
                 gate_str = ""
                 if vg1 is not None:
                     gate_str += f"_G1_{vg1:.3f}V"
@@ -1930,6 +2190,8 @@ class IVVISweeperImproved:
                     gate_str += f"_G2_{vg2:.3f}V"
                 if field_val is not None:
                     gate_str += f"_B_{field_val:.3f}T"
+                if mode == "field":
+                    gate_str += f"_B_{pt:.3f}T"
                 if temp_vals is not None:
                     # fourth temperature = probe temp: one tag for the file name
                     gate_str += f"_T_{temp_vals[3]:.2f}K"
@@ -1962,6 +2224,10 @@ class IVVISweeperImproved:
                 if field_val is not None:
                     header += ",field(T)"
                     cols.append(np.full(x.size, field_val))
+                if mode == "field":
+                    # programmed loop field, one reading per point
+                    header += ",field(T)"
+                    cols.append(np.full(x.size, pt))
                 if temp_vals is not None:
                     for col_name, v in zip(TEMP_COLUMNS, temp_vals):
                         header += f",{col_name}"
@@ -1977,7 +2243,15 @@ class IVVISweeperImproved:
             # always return the gates to 0 V slowly after the measurement.
             # Exception: gates applied for a single sweep stay at their manual
             # target (they are under manual control).
-            if gate_loop and involved:
+            if mode == "field":
+                # sweep the field back to zero at the loop's rate
+                if not self.stop_event.is_set():
+                    self.log("Sweeping field back to 0 T ...")
+                self.stop_event.clear()
+                self.magnet.go_to_field(
+                    0.0, p.get('field_rate', 0.1),
+                    progress=lambda f: self._magnet_progress(f, 0.0, 0, 1))
+            elif gate_loop and involved:
                 if not self.stop_event.is_set():
                     self.log("Ramping gates back to 0 V ...")
                 self.stop_event.clear()
