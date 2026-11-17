@@ -74,7 +74,7 @@ LIGHT_THEME = {
     # --- actions ---
     "run":               "#16845b",  # RUN SWEEP button
     "run_hover":         "#106b49",  # RUN SWEEP pressed/hover
-    "abort":             "#bb3f45",  # ABORT button
+    "abort":             "#ff000d",  # ABORT button
     "abort_hover":       "#a7353b",  # ABORT pressed/hover
     "action_text":       "#ffffff",  # text on RUN/ABORT buttons
 
@@ -109,14 +109,14 @@ DARK_THEME = {
     "tab_inactive":      "#2e3440",
     "tab_inactive_text": "#c0c9d6",
     "button":            "#3f4756",
-    "button_hover":      "#4a5468",
+    "button_hover":      "#282e3b",
     "canvas":            "#2f343e",
 
     # --- actions ---
     "run":               "#2e9e6b",
     "run_hover":         "#237d54",
-    "abort":             "#c05055",
-    "abort_hover":       "#a03f44",
+    "abort":             "#ff000d",
+    "abort_hover":       "#a7353b",
     "action_text":       "#ffffff",
 
     # --- log console ---
@@ -1664,6 +1664,10 @@ class IVVISweeperImproved:
         style.map("TButton", background=[("active", c["button_hover"])])
         style.configure("TCheckbutton", padding=2, background=c["background"])
         style.configure("TRadiobutton", padding=2, background=c["background"])
+        # clam's built-in hover state is a hardcoded near-white flash
+        # (#eeebe7); map it to the palette so dark mode does not blink
+        style.map("TCheckbutton", background=[("active", c["button_hover"])])
+        style.map("TRadiobutton", background=[("active", c["button_hover"])])
         style.configure("TCombobox", padding=2)
         style.configure("TEntry", padding=3)
         # input fields get EXPLICIT field/text colors: without this the
