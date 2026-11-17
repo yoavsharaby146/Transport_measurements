@@ -86,7 +86,6 @@ LIGHT_THEME = {
 
     # --- instrument status buttons ("Out:" / "Term:") ---
     "status_neutral":    "#e0e0e0",  # not connected / "Term: ---"
-    "status_idle":       "#a7d8c9",  # gate row idle ("Out: ---")
     "status_on":         "#90ee90",  # output ON
     "status_off":        "#ffcccb",  # output OFF
     "status_error":      "grey",     # status unknown (instrument error)
@@ -127,7 +126,6 @@ DARK_THEME = {
 
     # --- instrument status buttons (light chips, same as light theme) ---
     "status_neutral":    "#e0e0e0",
-    "status_idle":       "#a7d8c9",
     "status_on":         "#90ee90",
     "status_off":        "#ffcccb",
     "status_error":      "grey",
@@ -536,7 +534,7 @@ class GateChannel:
 
     def update_status(self):
         if not self.inst:
-            self.btn_out.config(text="Out: ---", bg=COLORS["status_idle"])
+            self.btn_out.config(text="Out: ---", bg=COLORS["status_neutral"])
             self.btn_term.config(text="Term: ---", bg=COLORS["status_neutral"])
             self.lbl_status.config(text=f"Gate {self.index}: --- V")
             return
@@ -1015,6 +1013,9 @@ class MagnetChannel:
         dlg.transient(self.app.root)
         dlg.resizable(False, False)
         dlg.grab_set()
+        # plain Toplevel keeps the light system background — paint it with
+        # the palette so dark mode does not show grey gaps behind the widgets
+        dlg.configure(bg=COLORS["background"])
 
         saved = self._safety_rates()
 
@@ -1153,7 +1154,6 @@ class IVVISweeperImproved:
         global COLORS
         self.theme = load_theme_setting()
         COLORS = palette_for(self.theme)
-        self.restart_requested = False  # set by the theme toggle
         self.root = root
         self.root.title("IV/VI Sweeper ICE - Bias (K2450) + 2 Gates "
                         "+ Magnet (MPS4G) & Temperature")
@@ -1195,6 +1195,7 @@ class IVVISweeperImproved:
                 f'g{i}_target': "0", f'g{i}_step': "10", f'g{i}_rate': "0.2",
             })
 
+        self._tab_canvases = []  # tk canvases need manual recolor on theme switch
         self._build_ui()
         self.refresh_instruments()
 
@@ -1210,16 +1211,18 @@ class IVVISweeperImproved:
         # title bar
         header = ttk.Frame(self.main_frame)
         header.pack(fill="x", pady=(0, 8))
-        ttk.Label(header, text="IV/VI Sweeper — ICE",
-                  font=("Segoe UI", 15, "bold"),
-                  foreground=COLORS["accent"]).pack(side="left")
-        ttk.Label(header,
-                  text="Bias (Keithley 2450)  •  2 Gates  •  "
-                       "Magnet (MPS4G) + Temperature",
-                  font=("Segoe UI", 9), foreground=COLORS["muted_text"]).pack(
-            side="left", padx=12)
+        self.lbl_title = ttk.Label(header, text="IV/VI Sweeper — ICE",
+                                   font=("Segoe UI", 15, "bold"),
+                                   foreground=COLORS["accent"])
+        self.lbl_title.pack(side="left")
+        self.lbl_subtitle = ttk.Label(header,
+                                      text="Bias (Keithley 2450)  •  2 Gates  •  "
+                                           "Magnet (MPS4G) + Temperature",
+                                      font=("Segoe UI", 9),
+                                      foreground=COLORS["muted_text"])
+        self.lbl_subtitle.pack(side="left", padx=12)
         # light/dark switch: saved to instrument_overrides.json and applied
-        # by restarting the window (see toggle_theme / main)
+        # LIVE (see apply_theme / toggle_theme) — no window restart
         self.btn_theme = ttk.Button(
             header, text=f"Theme: {self.theme.capitalize()}",
             command=self.toggle_theme, width=12)
@@ -1600,6 +1603,7 @@ class IVVISweeperImproved:
         self.tabs.add(outer, text=f"  {title}  ")
         canvas = tk.Canvas(outer, bg=COLORS["canvas"], highlightthickness=0,
                            borderwidth=0)
+        self._tab_canvases.append(canvas)  # recolored by apply_theme
         vbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         hbar = ttk.Scrollbar(outer, orient="horizontal", command=canvas.xview)
         canvas.configure(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
@@ -2616,28 +2620,40 @@ class IVVISweeperImproved:
             for ch in self.gates:
                 self.root.after(0, lambda ch=ch: ch.btn_ramp.config(state="normal"))
 
+    def apply_theme(self, theme):
+        """Switch the palette LIVE: ttk widgets follow _setup_style instantly;
+        the plain tk widgets whose colors were baked at creation (tab
+        canvases, log text, RUN/ABORT, header labels, status chips) are
+        re-configured here. No window restart needed."""
+        global COLORS
+        self.theme = theme
+        COLORS = palette_for(theme)
+        self.root.configure(bg=COLORS["background"])
+        self._setup_style()  # restyles every ttk widget in place
+        self.lbl_title.config(foreground=COLORS["accent"])
+        self.lbl_subtitle.config(foreground=COLORS["muted_text"])
+        self.btn_theme.config(text=f"Theme: {theme.capitalize()}")
+        self.log_text.config(bg=COLORS["log_background"],
+                             fg=COLORS["log_text"],
+                             insertbackground=COLORS["log_cursor"],
+                             selectbackground=COLORS["log_selection"])
+        for cv in self._tab_canvases:
+            cv.config(bg=COLORS["canvas"])
+        self.btn_run.config(bg=COLORS["run"],
+                            activebackground=COLORS["run_hover"])
+        self.btn_abort.config(bg=COLORS["abort"],
+                              activebackground=COLORS["abort_hover"])
+        # status chips repaint from their current instrument state
+        self.update_bias_status()
+        for ch in self.gates:
+            ch.update_status()
+
     def toggle_theme(self):
-        """Switch light/dark theme. Saved to instrument_overrides.json and
-        applied by restarting the window (Tk cannot restyle live). Instrument
-        connections close on restart; outputs/levels stay as they are."""
+        """Switch light/dark theme instantly; saved to instrument_overrides.json."""
         new_theme = "dark" if self.theme == "light" else "light"
-        connected = any((self.bias_inst, self.gates[0].inst, self.gates[1].inst,
-                         self.magnet.inst))
-        if connected:
-            if not messagebox.askyesno(
-                    "Restart to switch theme",
-                    f"Switch to the {new_theme} theme?\n"
-                    "The window restarts to apply the colors; instrument "
-                    "connections\nclose (outputs and levels stay as they are) "
-                    "and must be reconnected."):
-                return
         save_theme_setting(new_theme)
-        self.restart_requested = True
-        try:
-            self.cleanup()  # stop threads + close connections/COM port
-        except Exception:
-            pass
-        self.root.destroy()
+        self.apply_theme(new_theme)
+        self.log(f"Theme switched to {new_theme}")
 
     def cleanup(self):
         self.stop_event.set()
@@ -2648,32 +2664,26 @@ class IVVISweeperImproved:
 
 
 def main():
-    # The theme toggle restarts the window in-process: run the whole
-    # launch in a loop and exit only when the user really closes it.
-    while True:
-        root = tk.Tk()
-        # Compact layout for a 14-inch laptop: honor available screen space.
-        # Vertical scrollbars keep every option accessible at higher scaling.
-        screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
-        width = min(1280, max(900, screen_w - 80))
-        height = min(680, max(520, screen_h - 95))
-        root.geometry(f"{width}x{height}")
-        root.minsize(min(760, width), min(520, height))
-        app = IVVISweeperImproved(root)
+    root = tk.Tk()
+    # Compact layout for a 14-inch laptop: honor available screen space.
+    # Vertical scrollbars keep every option accessible at higher scaling.
+    screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
+    width = min(1280, max(900, screen_w - 80))
+    height = min(680, max(520, screen_h - 95))
+    root.geometry(f"{width}x{height}")
+    root.minsize(min(760, width), min(520, height))
+    app = IVVISweeperImproved(root)
 
-        def on_closing():
-            app.restart_requested = False  # normal exit, do not relaunch
-            try:
-                app.cleanup()  # stop threads, close connections + COM port
-            except Exception:
-                pass
-            finally:
-                root.destroy()
+    def on_closing():
+        try:
+            app.cleanup()  # stop threads, close connections + COM port
+        except Exception:
+            pass
+        finally:
+            root.destroy()
 
-        root.protocol("WM_DELETE_WINDOW", on_closing)
-        root.mainloop()
-        if not app.restart_requested:
-            break
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+    root.mainloop()
 
 
 if __name__ == "__main__":
