@@ -1,0 +1,33 @@
+# Example measurement sequence for the ICE IV/VI sweeper (Sequence tab).
+# '#' comments are allowed. Every key is optional: values missing from a
+# step are taken from the current Sweep setup GUI (set the defaults there).
+[
+  {
+    "name": "low-bias check",
+    "bias": {"sp1": 500, "sp2": -500, "step": 5, "compliance": 1e-7},
+    "save_subdir": "low_bias",
+    "repeat": 2
+  },
+  {
+    "name": "gate 1 sweep at high bias",
+    "mode": "gate1",
+    "bias": {"sp1": 2000, "sp2": -2000, "step": 10},
+    "gates": {"g1": {"start": -4, "end": 4, "step": 0.5, "compliance": 1e-3},
+              "g2": {"target": 2.0}},
+    "settle": 1.5,
+    "return_gates": true,
+    "doc_temp": true
+  },
+  {
+    "name": "thermal settle",
+    "type": "wait",
+    "seconds": 600
+  },
+  {
+    "name": "field dependence",
+    "mode": "field",
+    "field": {"start": 0, "end": 1.0, "step": 0.1, "rate": 0.05},
+    "bias": {"sp1": 1000, "sp2": -1000},
+    "return_field": true
+  }
+]

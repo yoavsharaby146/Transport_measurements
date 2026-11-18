@@ -1165,6 +1165,10 @@ class IVVISweeperImproved:
         # last manual environment readings shown in the field/temperature panel
         self._env_field = None
         self._env_temps = None
+        # sequence runner state (JSON step list loaded in the Sequence tab)
+        self._sequence_steps = []
+        self._sequence_path = ""
+        self._seq_abort = False
 
         self.saved_params = {
             # IV sweep (voltage source)
@@ -1227,6 +1231,8 @@ class IVVISweeperImproved:
             header, text=f"Theme: {self.theme.capitalize()}",
             command=self.toggle_theme, width=12)
         self.btn_theme.pack(side="right")
+        ttk.Button(header, text="Help", width=7,
+                   command=self.show_user_guide).pack(side="right", padx=6)
 
         # Left: compact tabs (connection, sweep setup, magnet). Right: the
         # activity log, docked so it is ALWAYS visible while switching tabs.
@@ -1516,6 +1522,9 @@ class IVVISweeperImproved:
 
         # === 7. MAGNET CONTROL + FIELD LOOP (own tab, ICE only) ===
         mtab = self._scrollable_tab("Magnet control")
+        # sequence tab last (right-most): Instruments, Sweep setup, Magnet
+        # control, Sequence
+        sequence_tab = self._scrollable_tab("Sequence")
 
         mctl = ttk.LabelFrame(mtab, text="Magnet control (manual)", padding=7)
         mctl.pack(fill="x", pady=5)
@@ -1591,6 +1600,86 @@ class IVVISweeperImproved:
         for e in (self.ent_field_start, self.ent_field_end,
                   self.ent_field_step, self.ent_field_rate):
             e.bind('<KeyRelease>', lambda ev: self._update_loop_points_label())
+
+        # === 8. SEQUENCE (JSON step list; GUI values are the defaults) ===
+        sq = ttk.LabelFrame(sequence_tab, text="Measurement sequence", padding=7)
+        sq.pack(fill="both", expand=True, pady=5)
+        sqrow = ttk.Frame(sq)
+        sqrow.pack(fill="x")
+        ttk.Button(sqrow, text="Load sequence...",
+                   command=self.load_sequence_file).pack(side="left")
+        self.btn_seq_run = tk.Button(sqrow, text="RUN SEQUENCE",
+                                     command=self.run_sequence, width=15,
+                                     bg=COLORS["run"], fg=COLORS["action_text"],
+                                     activebackground=COLORS["run_hover"],
+                                     activeforeground=COLORS["action_text"],
+                                     font=("Segoe UI", 10, "bold"),
+                                     relief="flat", bd=0, padx=10, pady=4,
+                                     cursor="hand2")
+        self.btn_seq_run.pack(side="left", padx=12)
+        self.lbl_seq_total = ttk.Label(sqrow, text="no sequence loaded",
+                                       font=("Segoe UI", 10, "bold"))
+        self.lbl_seq_total.pack(side="left", padx=10)
+        self.lbl_seq_path = ttk.Label(sq, text="File: ---", style="Muted.TLabel")
+        self.lbl_seq_path.pack(anchor="w", pady=(4, 0))
+
+        # step editor: build sequences without writing JSON by hand.
+        # 'Capture GUI' snapshots the current Sweep setup as one step.
+        ops = ttk.Frame(sq)
+        ops.pack(fill="x", pady=(4, 0))
+        ttk.Button(ops, text="Add step...",
+                   command=lambda: self.seq_edit_step(-1)).pack(side="left")
+        ttk.Button(ops, text="Capture GUI",
+                   command=self.seq_capture_gui).pack(side="left", padx=4)
+        ttk.Button(ops, text="Edit...",
+                   command=lambda: self.seq_edit_step(None)).pack(side="left")
+        ttk.Button(ops, text="Delete",
+                   command=self.seq_delete_step).pack(side="left", padx=4)
+        ttk.Button(ops, text="Clear all",
+                   command=self.seq_clear_all).pack(side="left")
+        ttk.Button(ops, text="Up",
+                   command=lambda: self.seq_move_step(-1)).pack(side="left")
+        ttk.Button(ops, text="Down",
+                   command=lambda: self.seq_move_step(1)).pack(side="left", padx=4)
+        ttk.Button(ops, text="Save as...",
+                   command=self.seq_save_file).pack(side="left", padx=(16, 0))
+        ttk.Button(ops, text="Help / examples",
+                   command=self.seq_help).pack(side="left", padx=4)
+
+        treef = ttk.Frame(sq)
+        treef.pack(fill="both", expand=True, pady=(4, 0))
+        cols = ("idx", "name", "type", "mode", "bias", "gates", "field", "repeat")
+        self.seq_tree = ttk.Treeview(treef, columns=cols, show="headings",
+                                     height=10, selectmode="extended")
+        headings = {"idx": "#", "name": "Name", "type": "Type", "mode": "Loop mode",
+                    "bias": "Bias (sp1..sp2/step)", "gates": "Gates",
+                    "field": "Field (T)", "repeat": "Repeat"}
+        widths = {"idx": 34, "name": 170, "type": 60, "mode": 90,
+                  "bias": 150, "gates": 190, "field": 130, "repeat": 60}
+        for c in cols:
+            self.seq_tree.heading(c, text=headings[c])
+            self.seq_tree.column(c, width=widths[c], anchor="w",
+                                 stretch=(c in ("name", "bias", "gates")))
+        seqbar = ttk.Scrollbar(treef, orient="vertical", command=self.seq_tree.yview)
+        self.seq_tree.configure(yscrollcommand=seqbar.set)
+        seqbar.pack(side="right", fill="y")
+        self.seq_tree.pack(side="left", fill="both", expand=True)
+        # double-click a row to edit that step
+        self.seq_tree.bind("<Double-1>",
+                           lambda e: self.seq_edit_step(None))
+        # Delete key removes the selected step(s)
+        self.seq_tree.bind("<Delete>",
+                           lambda e: self.seq_delete_step())
+        ttk.Label(sq, text="Each step overrides the current Sweep setup values "
+                           "(missing keys = GUI values). Keys: name, type "
+                           "(sweep/wait), repeat, save_subdir, mode, sweep_type,\n"
+                           "bias {sp1,sp2,step,delay,compliance}, gates {g1/g2 "
+                           "{start,end,step,compliance,nplc,target}}, field "
+                           "{start,end,step,rate}, settle, loop_ramp_step (mV),\n"
+                           "loop_ramp_delay, points (movement), dual_outer, "
+                           "doc_field, doc_temp, held_readback, record_gates, "
+                           "return_gates, return_field. '#' comments allowed.",
+                  style="Muted.TLabel", justify="left").pack(anchor="w", pady=(6, 0))
 
         self._update_ui_labels()
         self._toggle_loop_entries()
@@ -1672,6 +1761,14 @@ class IVVISweeperImproved:
         # (#eeebe7); map it to the palette so dark mode does not blink
         style.map("TCheckbutton", background=[("active", c["button_hover"])])
         style.map("TRadiobutton", background=[("active", c["button_hover"])])
+        # sequence step table (Treeview) follows the palette too
+        style.configure("Treeview", background=c["surface"],
+                        foreground=c["text"], fieldbackground=c["surface"],
+                        rowheight=22, bordercolor=c["border"])
+        style.configure("Treeview.Heading", background=c["button"],
+                        foreground=c["text"], font=("Segoe UI", 9, "bold"))
+        style.map("Treeview", background=[("selected", c["log_selection"])])
+        style.map("Treeview.Heading", background=[("active", c["button_hover"])])
         style.configure("TCombobox", padding=2)
         style.configure("TEntry", padding=3)
         # input fields get EXPLICIT field/text colors: without this the
@@ -2025,74 +2122,104 @@ class IVVISweeperImproved:
         if not self.bias_inst:
             messagebox.showerror("Error", "Bias instrument not connected (must be Keithley 2450)")
             return
+        try:
+            params = self._collect_sweep_params()
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+            return
+        self.set_busy()
+        threading.Thread(target=self._run_sweep_thread, args=(params,), daemon=True).start()
+
+    def _collect_sweep_params(self, ov=None):
+        """Read the GUI sweep settings into a validated params dict for
+        _run_sweep_thread. `ov` is an optional sequence-step override dict
+        (same key names as the sequence JSON); override values win over the
+        GUI entries. Raises ValueError with a user-facing message."""
+        ov = ov or {}
+        bias_ov = ov.get('bias') or {}
+        gates_ov = ov.get('gates') or {}
+        g1ov = gates_ov.get('g1') or {}
+        g2ov = gates_ov.get('g2') or {}
+        field_ov = ov.get('field') or {}
+
+        def pick(section, key, widget):
+            # sequence override wins over the GUI entry
+            if key in section:
+                return str(section[key])
+            return widget.get()
+
+        def flag(key, var):
+            if key in ov:
+                return bool(ov[key])
+            return bool(var.get())
 
         try:
-            sp1 = float(self.ent_sp1.get())
-            sp2 = float(self.ent_sp2.get())
-            step = abs(float(self.ent_step.get()))
-            delay = float(self.ent_delay.get())
-            compliance = float(self.ent_compliance.get())
-            save_dir = self.ent_dir.get()
+            sp1 = float(pick(bias_ov, 'sp1', self.ent_sp1))
+            sp2 = float(pick(bias_ov, 'sp2', self.ent_sp2))
+            step = abs(float(pick(bias_ov, 'step', self.ent_step)))
+            delay = float(pick(bias_ov, 'delay', self.ent_delay))
+            compliance = float(pick(bias_ov, 'compliance', self.ent_compliance))
         except ValueError:
-            messagebox.showerror("Error", "Invalid numeric parameters")
-            return
-        if not save_dir:
-            messagebox.showerror("Error", "Please select a save directory")
-            return
+            raise ValueError("Invalid numeric parameters")
 
-        mode = self.loop_mode_var.get()
+        save_dir = str(ov.get('save_dir', self.ent_dir.get()))
+        subdir = str(ov.get('save_subdir', '')).strip()
+        if subdir:  # per-step sub-folder inside the save directory
+            save_dir = os.path.join(save_dir, subdir)
+        if not save_dir:
+            raise ValueError("Please select a save directory")
+
+        sweep_type = str(ov.get('sweep_type', self.sweep_type_var.get()))
+        mode = str(ov.get('mode', self.loop_mode_var.get()))
         # plain-sweep mode: gates are NEVER driven by the sweep (control them
         # manually via section 2). The checkboxes only choose which gate
         # voltages get documented as columns in the file.
         record_gates = []
         if mode == "none":
-            record_gates = [gi for gi in (1, 2)
-                            if (self.rec_g1_var.get() if gi == 1
-                                else self.rec_g2_var.get())]
+            if 'record_gates' in ov:
+                record_gates = [int(g) for g in ov['record_gates']]
+            else:
+                record_gates = [gi for gi in (1, 2)
+                                if (self.rec_g1_var.get() if gi == 1
+                                    else self.rec_g2_var.get())]
         points = [(None, None)]
         gate_cfg = {}
         settle = ramp_step = ramp_delay = 0.0
 
         if mode not in ("none", "field"):
             try:
-                settle = float(self.ent_gate_settle.get())
-                ramp_step = abs(float(self.ent_loop_ramp_step.get())) / 1000.0
-                ramp_delay = float(self.ent_loop_ramp_delay.get())
-                g1s = float(self.ent_g1_start.get())
-                g1e = float(self.ent_g1_end.get())
-                g1st = abs(float(self.ent_g1_loop_step.get()))
-                g2s = float(self.ent_g2_start.get())
-                g2e = float(self.ent_g2_end.get())
+                settle = float(pick(ov, 'settle', self.ent_gate_settle))
+                ramp_step = abs(float(pick(ov, 'loop_ramp_step',
+                                           self.ent_loop_ramp_step))) / 1000.0
+                ramp_delay = float(pick(ov, 'loop_ramp_delay',
+                                        self.ent_loop_ramp_delay))
+                g1s = float(pick(g1ov, 'start', self.ent_g1_start))
+                g1e = float(pick(g1ov, 'end', self.ent_g1_end))
+                g2s = float(pick(g2ov, 'start', self.ent_g2_start))
+                g2e = float(pick(g2ov, 'end', self.ent_g2_end))
             except ValueError as e:
-                messagebox.showerror("Error", f"Invalid gate loop parameters: {e}")
-                return
+                raise ValueError(f"Invalid gate loop parameters: {e}")
             if ramp_step == 0 or ramp_delay < 0 or settle < 0:
-                messagebox.showerror("Error",
-                                     "Gate loop ramp step must be non-zero; "
-                                     "settle and ramp delay must be >= 0")
-                return
+                raise ValueError("Gate loop ramp step must be non-zero; "
+                                 "settle and ramp delay must be >= 0")
 
         if mode == "field":
             # field loop: bias sweep at every field point (magnet required)
             if self.magnet.inst is None:
-                messagebox.showerror("Error", "Field loop requires the magnet "
-                                              "to be connected")
-                return
+                raise ValueError("Field loop requires the magnet "
+                                 "to be connected")
             try:
-                fst = float(self.ent_field_start.get())
-                fe = float(self.ent_field_end.get())
-                fstep = abs(float(self.ent_field_step.get()))
-                frate = float(self.ent_field_rate.get())
+                fst = float(pick(field_ov, 'start', self.ent_field_start))
+                fe = float(pick(field_ov, 'end', self.ent_field_end))
+                fstep = abs(float(pick(field_ov, 'step', self.ent_field_step)))
+                frate = float(pick(field_ov, 'rate', self.ent_field_rate))
             except ValueError as e:
-                messagebox.showerror("Error", f"Invalid field loop parameters: {e}")
-                return
+                raise ValueError(f"Invalid field loop parameters: {e}")
             if frate <= 0:
-                messagebox.showerror("Error", "Field sweep rate must be > 0")
-                return
+                raise ValueError("Field sweep rate must be > 0")
             fields = arange_inclusive(fst, fe, fstep)
             if not fields:
-                messagebox.showerror("Error", "Field loop produces no points")
-                return
+                raise ValueError("Field loop produces no points")
         else:
             fields = []
             frate = 0.1
@@ -2101,20 +2228,22 @@ class IVVISweeperImproved:
             need = {"gate1": [1], "gate2": [2], "dual": [1, 2], "movement": [1, 2]}[mode]
             for gi in need:
                 if self.gates[gi - 1].inst is None:
-                    messagebox.showerror("Error",
-                                         f"Loop mode requires Gate {gi} to be connected")
-                    return
+                    raise ValueError(f"Loop mode requires Gate {gi} to be connected")
                 ch = self.gates[gi - 1]
+                gov = g1ov if gi == 1 else g2ov
                 try:
-                    gate_cfg[f'g{gi}_compliance'] = float(ch.ent_compliance.get())
-                    gate_cfg[f'g{gi}_nplc'] = float(ch.ent_nplc.get())
+                    gate_cfg[f'g{gi}_compliance'] = float(
+                        pick(gov, 'compliance', ch.ent_compliance))
+                    gate_cfg[f'g{gi}_nplc'] = float(
+                        pick(gov, 'nplc', ch.ent_nplc))
                 except ValueError:
-                    messagebox.showerror("Error",
-                                         f"Invalid gate {gi} compliance/NPLC parameters")
-                    return
+                    raise ValueError(f"Invalid gate {gi} compliance/NPLC parameters")
 
             def held_value(gi):
                 """Constant voltage for a connected but non-looped gate."""
+                gov = g2ov if gi == 2 else g1ov
+                if 'target' in gov:
+                    return float(gov['target'])
                 ch = self.gates[gi - 1]
                 if ch.inst is None:
                     return None
@@ -2122,16 +2251,15 @@ class IVVISweeperImproved:
 
             try:
                 if mode in ("gate1", "dual"):
+                    g1st = abs(float(pick(g1ov, 'step', self.ent_g1_loop_step)))
                     list1 = arange_inclusive(g1s, g1e, g1st)
                     if not list1:
-                        messagebox.showerror("Error", "Gate 1 loop produces no points")
-                        return
+                        raise ValueError("Gate 1 loop produces no points")
                 if mode in ("gate2", "dual"):
-                    g2st = abs(float(self.ent_g2_loop_step.get()))
+                    g2st = abs(float(pick(g2ov, 'step', self.ent_g2_loop_step)))
                     list2 = arange_inclusive(g2s, g2e, g2st)
                     if not list2:
-                        messagebox.showerror("Error", "Gate 2 loop produces no points")
-                        return
+                        raise ValueError("Gate 2 loop produces no points")
 
                 if mode == "gate1":
                     held = held_value(2)  # Gate 2 stays at its manual target
@@ -2141,7 +2269,7 @@ class IVVISweeperImproved:
                     points = [(held, v) for v in list2]
                 elif mode == "dual":
                     # full 2D map; nesting order is user-selectable
-                    if self.dual_outer_var.get() == "2":
+                    if str(ov.get('dual_outer', self.dual_outer_var.get())) == "2":
                         # Gate 2 outer loop, Gate 1 inner loop
                         points = [(v1, v2) for v2 in list2 for v1 in list1]
                     else:
@@ -2151,21 +2279,17 @@ class IVVISweeperImproved:
                     # common point count — keeps any linear combination of the
                     # gate voltages (carrier density n, displacement field D)
                     # on a well-defined constant-n or constant-D cut
-                    npts = int(float(self.ent_loop_points.get()))
+                    npts = int(float(pick(ov, 'points', self.ent_loop_points)))
                     if npts < 1:
-                        messagebox.showerror("Error",
-                                             "Movement loop needs at least 1 point")
-                        return
+                        raise ValueError("Movement loop needs at least 1 point")
                     list1 = list(np.linspace(g1s, g1e, npts))
                     list2 = list(np.linspace(g2s, g2e, npts))
                     points = list(zip(list1, list2))
             except ValueError as e:
-                messagebox.showerror("Error",
-                                     f"Invalid held-gate target (enter a valid Target in "
-                                     f"section 2): {e}")
-                return
+                raise ValueError(f"Invalid held-gate target (enter a valid Target "
+                                 f"in section 2): {e}")
 
-        sweep_type = self.sweep_type_var.get()
+        # remember the GUI values for the next launch of this dialog
         if sweep_type == "iv":
             keys = ['iv_sp1', 'iv_sp2', 'iv_step', 'iv_delay', 'iv_compliance']
         else:
@@ -2173,32 +2297,858 @@ class IVVISweeperImproved:
         for key, ent in zip(keys, [self.ent_sp1, self.ent_sp2, self.ent_step,
                                    self.ent_delay, self.ent_compliance]):
             self.saved_params[key] = ent.get()
-        self.saved_params['save_dir'] = save_dir
-
-        self.set_busy()
+        self.saved_params['save_dir'] = self.ent_dir.get()
 
         params = {
             'sp1': sp1, 'sp2': sp2, 'step': step, 'delay': delay,
             'compliance': compliance, 'save_dir': save_dir, 'sweep_type': sweep_type,
             'mode': mode, 'points': points, 'settle': settle,
             'loop_ramp_step': ramp_step, 'loop_ramp_delay': ramp_delay,
-            'doc_field': self.doc_field_var.get(),
-            'doc_temp': self.doc_temp_var.get(),
+            'doc_field': flag('doc_field', self.doc_field_var),
+            'doc_temp': flag('doc_temp', self.doc_temp_var),
             'record_gates': record_gates,
             'fields': fields,
             'field_rate': frate if mode == "field" else 0.1,
-            'held_readback': (self.held_readback_var.get()
+            'held_readback': (flag('held_readback', self.held_readback_var)
                               and mode in ("gate1", "gate2")),
-            'return_gates': (self.return_gates_var.get()
+            'return_gates': (flag('return_gates', self.return_gates_var)
                              and mode not in ("none", "field")),
-            'return_field': (self.return_field_var.get() and mode == "field"),
+            'return_field': (flag('return_field', self.return_field_var)
+                             and mode == "field"),
         }
         params.update(gate_cfg)
-        threading.Thread(target=self._run_sweep_thread, args=(params,), daemon=True).start()
+        return params
 
     def abort_sweep(self):
+        self._seq_abort = True  # stops the whole sequence, not just this sweep
         self.stop_event.set()
         self.log("Abort requested...")
+
+    # ==================== SEQUENCE (JSON STEP LIST) ====================
+
+    def load_sequence_file(self):
+        path = filedialog.askopenfilename(
+            title="Load measurement sequence",
+            filetypes=[("JSON / text", "*.json *.txt"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            steps = self._parse_sequence_file(path)
+        except Exception as e:
+            messagebox.showerror("Sequence error", f"Cannot load sequence:\n{e}")
+            return
+        self._sequence_steps = steps
+        self._sequence_path = path
+        self.lbl_seq_path.config(text=f"File: {path}")
+        self._fill_sequence_tree()
+        self.log(f"Sequence loaded: {len(steps)} step(s) from "
+                 f"{os.path.basename(path)}")
+
+    @staticmethod
+    def _parse_sequence_file(path):
+        """Read a sequence JSON file ('#' comments allowed, repo convention)."""
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read()
+        stripped = "\n".join(line.split("#", 1)[0] for line in raw.splitlines())
+        data = json.loads(stripped)
+        if not isinstance(data, list) or not data:
+            raise ValueError("sequence file must be a non-empty JSON list of steps")
+        for i, s in enumerate(data):
+            if not isinstance(s, dict):
+                raise ValueError(f"step {i + 1} is not a JSON object")
+            stype = str(s.get("type", "sweep"))
+            if stype not in ("sweep", "wait"):
+                raise ValueError(f"step {i + 1}: unknown type '{stype}' "
+                                 "(use 'sweep' or 'wait')")
+            if stype == "wait":
+                try:
+                    float(s.get("seconds", 0))
+                except (TypeError, ValueError):
+                    raise ValueError(f"step {i + 1}: 'seconds' must be a number")
+            try:
+                if int(s.get("repeat", 1)) < 1:
+                    raise ValueError(f"step {i + 1}: repeat must be >= 1")
+            except (TypeError, ValueError):
+                raise ValueError(f"step {i + 1}: repeat must be a number >= 1")
+        return data
+
+    def _estimate_seq_sweeps(self, step):
+        """Bias sweeps one step will produce (None when not computable)."""
+        mode = str(step.get('mode', self.loop_mode_var.get()))
+        try:
+            if mode == "none":
+                return 1
+            if mode == "field":
+                f = step.get('field') or {}
+                fst = float(f.get('start', self.ent_field_start.get()))
+                fe = float(f.get('end', self.ent_field_end.get()))
+                fs = abs(float(f.get('step', self.ent_field_step.get())))
+                return len(arange_inclusive(fst, fe, fs))
+            gates = step.get('gates') or {}
+            g1 = gates.get('g1') or {}
+            g2 = gates.get('g2') or {}
+            if mode == "movement":
+                return int(float(step.get('points', self.ent_loop_points.get())))
+            n1 = n2 = None
+            if mode in ("gate1", "dual"):
+                n1 = len(arange_inclusive(float(g1.get('start', self.ent_g1_start.get())),
+                                          float(g1.get('end', self.ent_g1_end.get())),
+                                          abs(float(g1.get('step', self.ent_g1_loop_step.get())))))
+            if mode in ("gate2", "dual"):
+                n2 = len(arange_inclusive(float(g2.get('start', self.ent_g2_start.get())),
+                                          float(g2.get('end', self.ent_g2_end.get())),
+                                          abs(float(g2.get('step', self.ent_g2_loop_step.get())))))
+            if mode == "gate1":
+                return n1
+            if mode == "gate2":
+                return n2
+            return (n1 or 0) * (n2 or 0)
+        except (ValueError, TypeError, KeyError):
+            return None
+
+    def _fill_sequence_tree(self):
+        """Preview the loaded sequence in the Sequence tab table."""
+        self.seq_tree.delete(*self.seq_tree.get_children())
+        total_sweeps, total_wait = 0, 0.0
+        for i, s in enumerate(self._sequence_steps):
+            stype = str(s.get('type', 'sweep'))
+            reps = max(1, int(s.get('repeat', 1)))
+            gates = s.get('gates') or {}
+            gate_txt = []
+            for gi, key in ((1, 'g1'), (2, 'g2')):
+                g = gates.get(key) or {}
+                if 'end' in g:
+                    gate_txt.append(f"G{gi}: {g['start']}..{g['end']}"
+                                    + (f"/{g['step']}" if 'step' in g else ""))
+                elif 'target' in g or 'start' in g:
+                    gate_txt.append(f"G{gi}: {g.get('target', g.get('start'))} V")
+            f = s.get('field') or {}
+            field_txt = (f"{f['start']}..{f['end']}/{f['step']}"
+                         + (f" @{f['rate']} T/min" if 'rate' in f else "")
+                         if 'start' in f else "")
+            b = s.get('bias') or {}
+            bias_txt = (f"{b.get('sp1', '?')}..{b.get('sp2', '?')}"
+                        + (f"/{b['step']}" if 'step' in b else "")) if b else ""
+            if stype == 'wait':
+                secs = float(s.get('seconds', 0))
+                total_wait += secs * reps
+            else:
+                n = self._estimate_seq_sweeps(s)
+                total_sweeps += (n * reps) if n is not None else 0
+            self.seq_tree.insert("", "end", values=(
+                i + 1, str(s.get('name', '')), stype,
+                str(s.get('mode', '(GUI)')) if stype == 'sweep' else '',
+                bias_txt, "; ".join(gate_txt), field_txt, reps))
+        sweeps_txt = f"{total_sweeps} bias sweeps" if total_sweeps else "sweeps: ?"
+        wait_txt = f" + {total_wait:g} s waiting" if total_wait else ""
+        self.lbl_seq_total.config(
+            text=(f"{len(self._sequence_steps)} steps — {sweeps_txt}{wait_txt}"
+                  if self._sequence_steps else "no sequence loaded"))
+
+    # ==================== SEQUENCE EDITOR ====================
+
+    def seq_selected_index(self):
+        sel = self.seq_tree.selection()
+        return self.seq_tree.index(sel[0]) if sel else None
+
+    def seq_edit_step(self, index=None):
+        """Open the step editor. index=-1 creates a new step; index=None
+        edits the selected table row."""
+        if index is None:
+            index = self.seq_selected_index()
+            if index is None:
+                messagebox.showerror("Error", "Select a step in the table first")
+                return
+        step = dict(self._sequence_steps[index]) \
+            if 0 <= index < len(self._sequence_steps) else {}
+        result = self._seq_step_dialog(step)
+        if result is None:
+            return
+        if index == -1:
+            self._sequence_steps.append(result)
+            index = len(self._sequence_steps) - 1
+        else:
+            self._sequence_steps[index] = result
+        self._fill_sequence_tree()
+        children = self.seq_tree.get_children()
+        if children:
+            self.seq_tree.selection_set(children[min(index, len(children) - 1)])
+            self.seq_tree.see(children[min(index, len(children) - 1)])
+
+    def seq_delete_step(self):
+        """Delete ALL selected steps (Ctrl/Shift-click for multi-select) and
+        keep the selection on the row that follows the deleted block."""
+        indices = sorted(self.seq_tree.index(s) for s in self.seq_tree.selection())
+        if not indices:
+            messagebox.showerror("Error", "Select step(s) in the table first")
+            return
+        for i in reversed(indices):
+            del self._sequence_steps[i]
+        self._fill_sequence_tree()
+        children = self.seq_tree.get_children()
+        if children:
+            keep = min(indices[0], len(children) - 1)
+            self.seq_tree.selection_set(children[keep])
+            self.seq_tree.see(children[keep])
+
+    def seq_clear_all(self):
+        if not self._sequence_steps:
+            return
+        if messagebox.askyesno("Clear sequence",
+                               f"Delete all {len(self._sequence_steps)} step(s)?"):
+            self._sequence_steps = []
+            self._fill_sequence_tree()
+
+    def seq_move_step(self, delta):
+        index = self.seq_selected_index()
+        if index is None:
+            messagebox.showerror("Error", "Select a step in the table first")
+            return
+        new = index + delta
+        if not 0 <= new < len(self._sequence_steps):
+            return
+        self._sequence_steps[index], self._sequence_steps[new] = \
+            self._sequence_steps[new], self._sequence_steps[index]
+        self._fill_sequence_tree()
+        children = self.seq_tree.get_children()
+        self.seq_tree.selection_set(children[new])
+        self.seq_tree.see(children[new])
+
+    def seq_save_file(self):
+        if not self._sequence_steps:
+            messagebox.showerror("Error", "No steps to save")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save sequence", defaultextension=".json",
+            initialfile="sequence.json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self._sequence_steps, f, indent=2)
+        self._sequence_path = path
+        self.lbl_seq_path.config(text=f"File: {path}")
+        self.log(f"Sequence saved: {path}")
+
+    def seq_capture_gui(self):
+        """Snapshot the current Sweep setup / Magnet tab values as one new
+        sequence step (fastest way to build a sequence: set the GUI, capture,
+        change one thing, capture again...)."""
+        try:
+            step = {
+                'name': f'from GUI {time.strftime("%H:%M")}',
+                'type': 'sweep',
+                'mode': self.loop_mode_var.get(),
+                'sweep_type': self.sweep_type_var.get(),
+                'bias': {'sp1': float(self.ent_sp1.get()),
+                         'sp2': float(self.ent_sp2.get()),
+                         'step': abs(float(self.ent_step.get())),
+                         'delay': float(self.ent_delay.get()),
+                         'compliance': float(self.ent_compliance.get())},
+                'settle': float(self.ent_gate_settle.get()),
+                'loop_ramp_step': abs(float(self.ent_loop_ramp_step.get())),
+                'loop_ramp_delay': float(self.ent_loop_ramp_delay.get()),
+                'points': int(float(self.ent_loop_points.get())),
+                'doc_field': self.doc_field_var.get(),
+                'doc_temp': self.doc_temp_var.get(),
+                'held_readback': self.held_readback_var.get(),
+                'return_gates': self.return_gates_var.get(),
+                'return_field': self.return_field_var.get(),
+            }
+            gates = {}
+            for gi, key in ((1, 'g1'), (2, 'g2')):
+                ch = self.gates[gi - 1]
+                s_ent, e_ent, st_ent = ((self.ent_g1_start, self.ent_g1_end,
+                                         self.ent_g1_loop_step) if gi == 1 else
+                                        (self.ent_g2_start, self.ent_g2_end,
+                                         self.ent_g2_loop_step))
+                gates[key] = {'start': float(s_ent.get()),
+                              'end': float(e_ent.get()),
+                              'step': abs(float(st_ent.get())),
+                              'compliance': float(ch.ent_compliance.get()),
+                              'nplc': float(ch.ent_nplc.get())}
+            if step['mode'] == 'field':
+                step['field'] = {'start': float(self.ent_field_start.get()),
+                                 'end': float(self.ent_field_end.get()),
+                                 'step': abs(float(self.ent_field_step.get())),
+                                 'rate': float(self.ent_field_rate.get())}
+            else:
+                step['gates'] = gates
+        except ValueError:
+            messagebox.showerror("Error", "GUI values are not all valid numbers")
+            return
+        self._sequence_steps.append(step)
+        self._fill_sequence_tree()
+        self.log(f"Sequence: captured GUI settings as step "
+                 f"{len(self._sequence_steps)}")
+
+    USER_GUIDE_TEXT = """IV/VI SWEEPER (ICE) — USER GUIDE
+================================
+
+WHAT THIS PROGRAM DOES
+----------------------
+Runs hysteresis bias sweeps on a Keithley 2450 (voltage or current source)
+while optionally looping gate voltages (2 independent gate sources) or the
+magnetic field (Cryomagnetics MPS4G). Every sweep is saved as a numbered
+CSV in your save directory; gate voltages, field and cryostat temperatures
+are recorded as extra columns.
+
+1. CONNECT (Instruments tab)
+----------------------------
+- "Scan Instruments" fills the VISA address lists; "Refresh Status"
+  re-reads every output/terminal state.
+- Bias: always a Keithley 2450. "Term:" switches FRONT/REAR terminals,
+  "Out:" toggles the output, "Reset" resets the instrument.
+- Gate 1 / Gate 2: pick the source type (Keithley 2450, Keithley 2604B
+  channel A/B, Yokogawa 7651, Yokogawa GS200) and address. "Term:" only
+  works on a 2450 gate.
+- Magnet (MPS4G): pick the COM port. On connect a SAFETY LIMITS dialog
+  opens: set the per-range maximum sweep rates (T/min) once. They are
+  saved to instrument_overrides.json and clamp EVERY magnet ramp in this
+  program and in the Transport-measurements procedures.
+- Closing the window always releases the COM port; outputs and levels are
+  intentionally left as they are.
+
+2. GATE SOURCES (Instruments tab)
+---------------------------------
+Each gate card: compliance, NPLC (2450 only), manual ramp target/step/
+rate, "Ramp Gate", "Configure Source", "Measure Once". The plain sweep
+never drives the gates — control them here.
+
+3. FIELD & TEMPERATURE (Instruments tab)
+----------------------------------------
+Independent toggles to record the magnet field and/or the 4 cryostat
+temperatures (from the ICElog file) once AFTER each sweep, as extra CSV
+columns. Manual one-shot readings via "Read Field" / "Read Temp".
+
+4. SWEEP SETUP
+--------------
+- Measurement mode: IV (source V, measure I) or VI (source I, measure V).
+- Bias sweep: Sp1/Sp2/Step/Delay + compliance (A for IV, V for VI).
+- Loop modes:
+    Bias only    one hysteresis sweep; gates stay under manual control
+    Gate 1/2     bias sweep at every gate voltage (other gate held at its
+                 manual Target, or at the value given in a sequence step)
+    Dual 2D      full 2D map; nesting order selectable (G1/G2 outer)
+    Movement     both gates move together along a line (constant-n /
+                 constant-D cuts), common point count
+    Field        bias sweep at every field point (configured in the
+                 Magnet control tab)
+- "Return gates to 0 V after loop" and "Return field to 0 T after loop"
+  are OPTIONS (checkboxes) — unchecked, everything is left where the
+  loop ended.
+- The tab scrolls vertically (wheel) and horizontally (Shift+wheel).
+
+5. MAGNET CONTROL
+-----------------
+- Manual: sweep rate (T/min, clamped per range by the safety limits) and
+  target field. ABORT stops the ramp, field left where it is.
+- Field loop: Start/End/Step/Rate for the loop; the loop radio here
+  overrides the Sweep-setup loop mode.
+- "Safety limits..." reopens the per-range limits dialog anytime.
+
+6. SAVE & EXECUTE
+-----------------
+Pick a Save Directory, press RUN SWEEP (ABORT stops). Files are named
+IV_007_G1_1.000V_B_0.250T_T_1.23K_Sp1_1000mV_...  with sequential numbers
+continuing past existing files. The divider between the tabs and the log
+is draggable. "Theme:" switches light/dark live.
+
+7. SEQUENCE (right-most tab)
+----------------------------
+Automate long measurements: a list of steps, each overriding the current
+Sweep-setup values (missing keys = GUI values). Build it WITHOUT writing
+JSON: set the GUI and press "Capture GUI" for each configuration, or use
+"Add step..." (full editor; blank fields inherit GUI values). Edit with
+double-click; reorder with Up/Down; "Save as..." writes a JSON file you
+can reload or hand-edit ('#' comments allowed). "Help / examples" has the
+key reference and insertable examples. ABORT stops the current sweep and
+the whole sequence.
+
+EXAMPLE MEASUREMENTS
+====================
+Example 1 — careful first measurement
+  1. Connect bias; set IV, Sp1/Sp2 = +/-100 mV, step 5 mV, compliance
+     100 nA. Save directory -> RUN SWEEP. Check the CSV.
+  2. Ramp Gate 1 manually to a few volts and repeat.
+
+Example 2 — gate sweep
+  Loop mode "Gate 1 loop", Start -4 V, End 4 V, Step 0.5 V, Settle 1 s.
+  Tick "Return gates to 0 V after loop" if you want the gates back at 0.
+  RUN SWEEP -> one CSV per gate voltage, named by voltage.
+
+Example 3 — hysteresis vs magnetic field
+  Connect the magnet, set the safety limits. Magnet control tab: field
+  loop 0 -> 1 T, step 0.1 T, rate 0.05 T/min. Tick "Record temperature
+  each sweep". RUN SWEEP -> bias sweep at every field, B in every file.
+
+Example 4 — gates x fields overnight (Sequence tab)
+  "Help / examples" -> "Insert example: gates x fields" gives a working
+  skeleton (ramp to a fixed field, gate sweep, next field...). Edit the
+  field values / gate range with double-click, Save as..., RUN SEQUENCE.
+
+SAFETY NOTES
+------------
+- Magnet ramps NEVER exceed the per-range safety limits (clamped + logged).
+- Gate voltages always ramp slowly (ramp step/delay), never jump.
+- Closing the program or aborting does not switch outputs off or quench
+  the field; it only stops the automation.
+"""
+
+    def show_user_guide(self):
+        """Program-wide user guide window (how to use + examples)."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("User guide")
+        dlg.configure(bg=COLORS["background"])
+        dlg.transient(self.root)
+        dlg.geometry("760x640")
+        txt = tk.Text(dlg, wrap="word",
+                      bg=COLORS["log_background"], fg=COLORS["log_text"],
+                      font=("Consolas", 9), relief="flat", padx=10, pady=8)
+        bar = ttk.Scrollbar(dlg, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        txt.pack(side="left", fill="both", expand=True)
+        txt.insert("1.0", self.USER_GUIDE_TEXT)
+        txt.config(state="disabled")
+        ttk.Button(dlg, text="Close", command=dlg.destroy).pack(side="bottom",
+                                                                pady=6)
+
+    SEQ_HELP_TEXT = """HOW SEQUENCES WORK
+==================
+A sequence is a flat list of steps, run top to bottom. Every step OVERRIDES
+the current Sweep setup GUI values; keys left out inherit the GUI values.
+Fastest workflow: set the GUI, press "Capture GUI", change one thing,
+capture again.
+
+Step types
+----------
+  sweep (default)  one full measurement as configured in Sweep setup
+  wait             pause; "seconds" required (abortable via ABORT)
+
+Step keys (all optional unless noted)
+-------------------------------------
+  name            label shown in the table and log
+  type            "sweep" or "wait"
+  repeat          run this step N times (default 1; files auto-number)
+  save_subdir     write this step's files into a sub-folder of Save Directory
+  mode            none | gate1 | gate2 | dual | movement | field
+  sweep_type      "iv" or "vi"
+  bias            { sp1, sp2, step, delay, compliance }
+  gates           { g1, g2 } each { start, end, step, compliance, nplc,
+                   target }  ("target" = held-gate voltage in single-gate loops)
+  field           { start, end, step, rate (T/min) }   mode "field"
+  settle, loop_ramp_step (mV), loop_ramp_delay, points (movement),
+  dual_outer      "1" or "2"  (which gate is outer in dual 2D maps)
+  doc_field, doc_temp, held_readback, record_gates ([1,2]),
+  return_gates, return_field   true/false overrides of the GUI checkboxes
+
+Nesting / cross products (gates x fields etc.)
+---------------------------------------------
+There is no nested loop construct; expand it flat. A field step with
+start == end means "ramp the magnet to B, sweep bias there". Follow it
+with a gate-loop step and the gate sweep runs AT that field (the magnet
+holds its position). See example 1 below.
+
+Safety: every magnet ramp is clamped to the per-range safety limits
+(Safety limits... button, Magnet control tab); gate moves always ramp
+slowly; ABORT stops the current sweep and the whole sequence.
+"""
+
+    SEQ_EXAMPLE_GATEFIELD = [
+        {"name": "go to 0.25T", "mode": "field",
+         "field": {"start": 0.25, "end": 0.25, "step": 0.1, "rate": 0.05},
+         "return_field": False},
+        {"name": "gate sweep @0.25T", "mode": "gate1",
+         "gates": {"g1": {"start": -4, "end": 4, "step": 0.5}},
+         "return_gates": True},
+        {"name": "go to 0.50T", "mode": "field",
+         "field": {"start": 0.50, "end": 0.50, "step": 0.1, "rate": 0.05},
+         "return_field": False},
+        {"name": "gate sweep @0.50T", "mode": "gate1",
+         "gates": {"g1": {"start": -4, "end": 4, "step": 0.5}},
+         "return_gates": True},
+    ]
+
+    SEQ_EXAMPLE_LADDER = [
+        {"name": "careful first look", "repeat": 2,
+         "bias": {"sp1": 200, "sp2": -200, "step": 5, "compliance": 1e-9},
+         "save_subdir": "low_bias"},
+        {"name": "wider span",
+         "bias": {"sp1": 1000, "sp2": -1000, "step": 10, "compliance": 1e-8}},
+        {"name": "settle 5 min", "type": "wait", "seconds": 300},
+        {"name": "gate map at working bias", "mode": "dual",
+         "gates": {"g1": {"start": -3, "end": 3, "step": 1},
+                   "g2": {"start": -3, "end": 3, "step": 1}},
+         "doc_temp": True, "return_gates": True},
+    ]
+
+    def seq_help(self):
+        """Sequence help dialog: format reference + insertable examples."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Sequence help & examples")
+        dlg.configure(bg=COLORS["background"])
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        txt = tk.Text(dlg, wrap="word", width=78, height=26,
+                      bg=COLORS["log_background"], fg=COLORS["log_text"],
+                      font=("Consolas", 9), relief="flat", padx=8, pady=6)
+        bar = ttk.Scrollbar(dlg, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        txt.pack(side="left", fill="both", expand=True)
+        txt.insert("1.0", self.SEQ_HELP_TEXT)
+        txt.config(state="disabled")
+
+        def add_example(steps, label):
+            def _add():
+                self._sequence_steps.extend([dict(s) for s in steps])
+                self._fill_sequence_tree()
+                self.log(f"Sequence: appended example '{label}' "
+                         f"({len(steps)} steps)")
+                dlg.destroy()
+            return _add
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill="x", side="bottom", padx=8, pady=8)
+        ttk.Button(btns, text="Insert example: gates x fields",
+                   command=add_example(self.SEQ_EXAMPLE_GATEFIELD,
+                                       "gates x fields")).pack(side="left")
+        ttk.Button(btns, text="Insert example: bias ladder + gate map",
+                   command=add_example(self.SEQ_EXAMPLE_LADDER,
+                                       "bias ladder")).pack(side="left",
+                                                            padx=6)
+        ttk.Button(btns, text="Close", command=dlg.destroy).pack(
+            side="right")
+
+    def _seq_step_dialog(self, step):
+        """Modal editor for ONE sequence step.
+
+        Empty numeric field = inherit the GUI value at run time (same rule
+        as the JSON file). Flag combos: blank = inherit, 'on'/'off' override.
+        Returns the new step dict, or None when cancelled.
+        """
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Sequence step")
+        dlg.configure(bg=COLORS["background"])
+        dlg.transient(self.root)
+        dlg.grab_set()
+        step = step or {}
+        stype = str(step.get('type', 'sweep'))
+        entries = {}   # (key, subkey) -> Entry, subkey None for top-level
+        combos = {}    # flag name -> tri-state combobox ('' / on / off)
+
+        def get_val(key, sub=None):
+            if sub is None:
+                v = step.get(key)
+            else:
+                v = (step.get(key) or {}).get(sub)
+            return '' if v is None else str(v)
+
+        def frow(parent, label, key, sub=None, width=9):
+            ttk.Label(parent, text=label).pack(side="left")
+            ent = ttk.Entry(parent, width=width)
+            ent.insert(0, get_val(key, sub))
+            ent.pack(side="left", padx=(3, 14))
+            entries[(key, sub)] = ent
+            return ent
+
+        def flag_row(parent, label, key):
+            ttk.Label(parent, text=label).pack(side="left", padx=(0, 3))
+            v = step.get(key)
+            cb = ttk.Combobox(parent, values=["", "on", "off"], width=4,
+                              state="readonly")
+            cb.set("" if v is None else ("on" if v else "off"))
+            cb.pack(side="left", padx=(0, 16))
+            combos[key] = cb
+
+        # --- header: name / type / repeat / wait seconds ---
+        top = ttk.Frame(dlg)
+        top.pack(fill="x", padx=10, pady=8)
+        frow(top, "Name:", 'name', width=22)
+        ttk.Label(top, text="Type:").pack(side="left")
+        type_cb = ttk.Combobox(top, values=["sweep", "wait"], width=6,
+                               state="readonly")
+        type_cb.set(stype)
+        type_cb.pack(side="left", padx=(3, 14))
+        frow(top, "Repeat:", 'repeat', width=4)
+
+        waitf = ttk.LabelFrame(dlg, text="Wait step", padding=5)
+        waitf.pack(fill="x", padx=10, pady=4)
+        frow(waitf, "Seconds:", 'seconds', width=9)
+
+        # --- bias ---
+        biasf = ttk.LabelFrame(dlg, text="Bias sweep (blank = GUI value)",
+                               padding=5)
+        biasf.pack(fill="x", padx=10, pady=4)
+        brow = ttk.Frame(biasf)
+        brow.pack(fill="x")
+        for lbl, k in (("Sp1:", 'sp1'), ("Sp2:", 'sp2'), ("Step:", 'step'),
+                       ("Delay:", 'delay'), ("Compliance:", 'compliance')):
+            ttk.Label(brow, text=lbl).pack(side="left")
+            ent = ttk.Entry(brow, width=9)
+            ent.insert(0, get_val('bias', k))
+            ent.pack(side="left", padx=(3, 14))
+            entries[('bias', k)] = ent
+        sweep_type_row = ttk.Frame(biasf)
+        sweep_type_row.pack(fill="x")
+        ttk.Label(sweep_type_row, text="Measurement:").pack(side="left")
+        st_cb = ttk.Combobox(sweep_type_row, values=["iv", "vi"], width=4,
+                             state="readonly")
+        st_cb.set(str(step.get('sweep_type', 'iv')))
+        st_cb.pack(side="left", padx=3)
+
+        # --- loop mode ---
+        modef = ttk.LabelFrame(dlg, text="Loop mode", padding=5)
+        modef.pack(fill="x", padx=10, pady=4)
+        mode_var = tk.StringVar(value=str(step.get('mode', 'none')))
+        for val, txt in (("none", "Bias only"), ("gate1", "Gate 1"),
+                         ("gate2", "Gate 2"), ("dual", "Dual 2D"),
+                         ("movement", "Movement"), ("field", "Field")):
+            ttk.Radiobutton(modef, text=txt, variable=mode_var,
+                            value=val).pack(side="left", padx=6)
+
+        # --- gates ---
+        gatef = ttk.LabelFrame(dlg, text="Gates (blank = GUI value; loop "
+                                         "modes use start/end/step, held gate "
+                                         "uses target)", padding=5)
+        gatef.pack(fill="x", padx=10, pady=4)
+        for gi, key in ((1, 'g1'), (2, 'g2')):
+            row = ttk.Frame(gatef)
+            row.pack(fill="x", pady=1)
+            ttk.Label(row, text=f"Gate {gi}:", width=7).pack(side="left")
+            for lbl, k, w in (("Start", 'start', 7), ("End", 'end', 7),
+                              ("Step", 'step', 6), ("Compl.", 'compliance', 7),
+                              ("NPLC", 'nplc', 5), ("Target", 'target', 7)):
+                ttk.Label(row, text=lbl).pack(side="left", padx=(8, 0))
+                ent = ttk.Entry(row, width=w)
+                ent.insert(0, get_val(key, k))
+                ent.pack(side="left", padx=2)
+                entries[(key, k)] = ent
+
+        # --- field ---
+        fieldf = ttk.LabelFrame(dlg, text="Field loop (blank = GUI value)",
+                                padding=5)
+        fieldf.pack(fill="x", padx=10, pady=4)
+        frow1 = ttk.Frame(fieldf)
+        frow1.pack(fill="x")
+        for lbl, k in (("Start (T):", 'start'), ("End (T):", 'end'),
+                       ("Step (T):", 'step'), ("Rate (T/min):", 'rate')):
+            ttk.Label(frow1, text=lbl).pack(side="left")
+            ent = ttk.Entry(frow1, width=8)
+            ent.insert(0, get_val('field', k))
+            ent.pack(side="left", padx=(3, 14))
+            entries[('field', k)] = ent
+
+        # --- shared loop parameters ---
+        loopf = ttk.LabelFrame(dlg, text="Loop parameters (blank = GUI value)",
+                               padding=5)
+        loopf.pack(fill="x", padx=10, pady=4)
+        lrow = ttk.Frame(loopf)
+        lrow.pack(fill="x")
+        for lbl, k, w in (("Settle (s):", 'settle', 6),
+                          ("Ramp step (mV):", 'loop_ramp_step', 6),
+                          ("Ramp delay (s):", 'loop_ramp_delay', 6),
+                          ("Points (movement):", 'points', 5)):
+            ttk.Label(lrow, text=lbl).pack(side="left")
+            ent = ttk.Entry(lrow, width=w)
+            ent.insert(0, get_val(k))
+            ent.pack(side="left", padx=(3, 14))
+            entries[(k, None)] = ent
+        ttk.Label(lrow, text="Dual outer:").pack(side="left")
+        outer_cb = ttk.Combobox(lrow, values=["", "1", "2"], width=3,
+                                state="readonly")
+        outer_cb.set("" if step.get('dual_outer') is None
+                     else str(step['dual_outer']))
+        outer_cb.pack(side="left", padx=3)
+
+        # --- flags + save location ---
+        optf = ttk.LabelFrame(dlg, text="Options (blank = GUI value)", padding=5)
+        optf.pack(fill="x", padx=10, pady=4)
+        orow1 = ttk.Frame(optf)
+        orow1.pack(fill="x")
+        for lbl, k in (("Record field", 'doc_field'), ("Record temp", 'doc_temp'),
+                       ("Held readback", 'held_readback'),
+                       ("Return gates", 'return_gates'),
+                       ("Return field", 'return_field')):
+            flag_row(orow1, lbl + ":", k)
+        orow2 = ttk.Frame(optf)
+        orow2.pack(fill="x", pady=(4, 0))
+        frow(orow2, "Record gates (e.g. 1,2):", 'record_gates', width=6)
+        frow(orow2, "Save subfolder:", 'save_subdir', width=14)
+
+        status = ttk.Label(dlg, text="", foreground=COLORS["abort"])
+        status.pack(anchor="w", padx=10)
+
+        def read_float(key, sub):
+            txt = entries[(key, sub)].get().strip()
+            if txt == '':
+                return None  # inherit the GUI value
+            return float(txt)  # ValueError -> caught below
+
+        def collect():
+            new = {}
+            if entries[('name', None)].get().strip():
+                new['name'] = entries[('name', None)].get().strip()
+            new['type'] = type_cb.get()
+            try:
+                rep = entries[('repeat', None)].get().strip()
+                new['repeat'] = max(1, int(float(rep))) if rep else 1
+                if new['type'] == 'wait':
+                    secs = read_float('seconds', None)
+                    if secs is None:
+                        raise ValueError("'seconds' is required for a wait step")
+                    new['seconds'] = secs
+                    return new
+                bias = {}
+                for k in ('sp1', 'sp2', 'step', 'delay', 'compliance'):
+                    v = read_float('bias', k)
+                    if v is not None:
+                        bias[k] = v
+                if bias:
+                    new['bias'] = bias
+                new['mode'] = mode_var.get()
+                if st_cb.get() != 'iv':
+                    new['sweep_type'] = st_cb.get()
+                gates = {}
+                for key in ('g1', 'g2'):
+                    g = {}
+                    for k in ('start', 'end', 'step', 'compliance', 'nplc',
+                              'target'):
+                        v = read_float(key, k)
+                        if v is not None:
+                            g[k] = v
+                    if g:
+                        gates[key] = g
+                if gates:
+                    new['gates'] = gates
+                field = {}
+                for k in ('start', 'end', 'step', 'rate'):
+                    v = read_float('field', k)
+                    if v is not None:
+                        field[k] = v
+                if field:
+                    new['field'] = field
+                for k in ('settle', 'loop_ramp_step', 'loop_ramp_delay',
+                          'points'):
+                    v = read_float(k, None)
+                    if v is not None:
+                        new[k] = v
+                if outer_cb.get():
+                    new['dual_outer'] = outer_cb.get()
+                for k, cb in combos.items():
+                    if cb.get():
+                        new[k] = (cb.get() == 'on')
+                rg = entries[('record_gates', None)].get().strip()
+                if rg:
+                    new['record_gates'] = [int(x) for x in rg.split(',')
+                                           if x.strip().isdigit()]
+                sub = entries[('save_subdir', None)].get().strip()
+                if sub:
+                    new['save_subdir'] = sub
+                return new
+            except ValueError:
+                status.config(text="All numeric fields must be numbers "
+                                   "(or blank to inherit the GUI value)")
+                return None
+
+        result = {}
+
+        def on_ok():
+            data = collect()
+            if data is not None:
+                result.update(data)
+                dlg.destroy()
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill="x", padx=10, pady=10)
+        ttk.Button(btns, text="Cancel", command=dlg.destroy).pack(
+            side="right", padx=4)
+        ttk.Button(btns, text="OK", command=on_ok).pack(side="right", padx=4)
+        dlg.wait_window()
+        return result or None
+
+    def run_sequence(self):
+        if not self._sequence_steps:
+            messagebox.showerror("Error", "No sequence loaded (Load sequence...)")
+            return
+        if not self.bias_inst:
+            messagebox.showerror("Error", "Bias instrument not connected "
+                                          "(must be Keithley 2450)")
+            return
+        try:
+            self._collect_sweep_params()  # validate the GUI defaults early
+        except ValueError as e:
+            messagebox.showerror("Error", f"Fix the Sweep setup first ({e})")
+            return
+        if not messagebox.askyesno(
+                "Run sequence",
+                f"Run {len(self._sequence_steps)} step(s)?\n"
+                "ABORT stops the current sweep and the whole sequence."):
+            return
+        self._seq_abort = False
+        self.set_busy()
+        self.btn_seq_run.config(state="disabled")
+        threading.Thread(target=self._run_sequence_thread,
+                         args=(list(self._sequence_steps),), daemon=True).start()
+
+    def _run_sequence_thread(self, steps):
+        """Run every sequence step on this worker thread.
+
+        Each sweep step reuses _run_sweep_thread via _collect_sweep_params
+        (GUI values as defaults, step values as overrides), so every safety
+        feature (magnet rate clamping, slow gate ramps, compliances) applies
+        exactly as in a manual sweep. _run_sweep_thread CLEARS stop_event
+        during its return-to-zero ramps, so the sequence-level abort intent
+        is tracked separately in _seq_abort.
+        """
+        try:
+            n_steps = len(steps)
+            for si, step in enumerate(steps):
+                if self._seq_abort or self.stop_event.is_set():
+                    break
+                name = str(step.get('name', f'step {si + 1}'))
+                reps = max(1, int(step.get('repeat', 1)))
+                stype = str(step.get('type', 'sweep'))
+                if stype == 'wait':
+                    secs = float(step.get('seconds', 0))
+                    self.log(f"[Sequence {si + 1}/{n_steps}] '{name}': "
+                             f"waiting {secs:g} s")
+                    end_t = time.time() + secs
+                    while time.time() < end_t and not self._seq_abort:
+                        time.sleep(min(0.5, max(0.0, end_t - time.time())))
+                    continue
+                for rep in range(1, reps + 1):
+                    if self._seq_abort or self.stop_event.is_set():
+                        break
+                    suffix = f" [{rep}/{reps}]" if reps > 1 else ""
+                    self._progress(f"Sequence {si + 1}/{n_steps}{suffix}: {name}")
+                    self.log(f"[Sequence {si + 1}/{n_steps}] '{name}'{suffix}")
+                    try:
+                        params = self._collect_sweep_params(step)
+                    except ValueError as e:
+                        self.log(f"Sequence step '{name}' invalid: {e} "
+                                 "— sequence stopped")
+                        self._progress(f"Error: {e}")
+                        return
+                    self._run_sweep_thread(params)
+            if self._seq_abort or self.stop_event.is_set():
+                self.log("Sequence aborted")
+                self._progress("Sequence aborted")
+            else:
+                self.log("Sequence complete!")
+                self._progress("Sequence complete")
+        except Exception as e:
+            self.log(f"Sequence error: {e}")
+            self._progress(f"Error: {e}")
+            err_msg = str(e)
+            self.root.after(0, lambda: messagebox.showerror(
+                "Sequence Error", err_msg))
+        finally:
+            self._seq_abort = False
+            self.stop_event.clear()
+            self.root.after(0, lambda: self.btn_seq_run.config(state="normal"))
 
     def _run_single_bias_sweep(self, p):
         """Configure + run one hysteresis sweep on the Keithley bias. Returns arrays."""
@@ -2641,6 +3591,8 @@ class IVVISweeperImproved:
             cv.config(bg=COLORS["canvas"])
         self.btn_run.config(bg=COLORS["run"],
                             activebackground=COLORS["run_hover"])
+        self.btn_seq_run.config(bg=COLORS["run"],
+                                activebackground=COLORS["run_hover"])
         self.btn_abort.config(bg=COLORS["abort"],
                               activebackground=COLORS["abort_hover"])
         # status chips repaint from their current instrument state
