@@ -2652,7 +2652,9 @@ columns. Manual one-shot readings via "Read Field" / "Read Temp".
 Pick a Save Directory, press RUN SWEEP (ABORT stops). Files are named
 IV_007_G1_1.000V_B_0.250T_T_1.23K_Sp1_1000mV_...  with sequential numbers
 continuing past existing files. The divider between the tabs and the log
-is draggable. "Theme:" switches light/dark live.
+is draggable.
+
+"Theme:" switches light/dark live.
 
 7. SEQUENCE (right-most tab)
 ----------------------------
