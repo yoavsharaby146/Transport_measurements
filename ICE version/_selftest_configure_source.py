@@ -133,6 +133,16 @@ assert ("range", 1) in gs.writes, gs.writes   # widened 100 mV -> 1 V
 assert gs.level == 0.1, gs.level              # no jump
 print("PASS: GS200 0.1 V -> 1 V ramp now possible (range widened, level kept)")
 
+# 1d. GS200 ramp-back-to-0 scenario: sitting at 1 V, target 0 ->
+#     max_abs_v floor 1e-3 must NOT shrink the range below the live level
+gs = FakeGS200(1.0, True)
+ch, app = make_channel(gs, "gs200")
+ch.configure_source(1e-3, 1, max_abs_v=1e-3)   # what start_manual_ramp passes for target=0
+assert gs.level == 1.0, f"level jumped to {gs.level}"
+assert ("range", 0.01) not in gs.writes, gs.writes  # 10 mV range never attempted
+assert ("range", 1) in gs.writes, gs.writes         # range covers the live 1 V
+print("PASS: GS200 ramp-to-0 keeps range >= live level (no clamp jump)")
+
 # 2. GS200, output OFF: full configure incl. zero
 gs = FakeGS200(5.0, False)
 ch, app = make_channel(gs, "gs200")

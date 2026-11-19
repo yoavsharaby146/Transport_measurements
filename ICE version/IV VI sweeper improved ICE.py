@@ -644,6 +644,19 @@ class GateChannel:
                         pass
             max_abs_v = max(cands) if cands else 1.0
 
+        # The range must cover the LIVE level too — never only the target:
+        # switching a Yokogawa to a range smaller than the current output
+        # clamps/rescales the output immediately (ramp-to-0 picked a 10 mV
+        # range while sitting at 1 V -> instant destructive jump). With this
+        # the range only ever GROWS while the output is on, and shrinks at
+        # the next configure once the level is low enough.
+        try:
+            live = abs(float(self.read_level()))
+        except Exception:
+            live = 0.0
+        if live > max_abs_v:
+            max_abs_v = live
+
         if self.kind == "keithley":
             # measurement range must cover the compliance, otherwise the
             # fixed 1 uA range overflows and currents read as garbage
