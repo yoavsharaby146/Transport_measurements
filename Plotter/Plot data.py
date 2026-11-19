@@ -3061,7 +3061,8 @@ class InteractivePlotter:
         fk, yc = key
         return (self._nat_key(yc), self._nat_key(fk))
 
-    def _group_member_defaults(self, entries, fallback_color=None, fallback_ls='-', per_occurrence=False):
+    def _group_member_defaults(self, entries, fallback_color=None, fallback_ls='-', per_occurrence=False,
+                               base_colors=None):
         """Group-based (color, linestyle) defaults for plotting entries.
 
         entries: list of (key, group_name) in PLOTTING order; group_name may
@@ -3098,7 +3099,8 @@ class InteractivePlotter:
         mode = self.v_group_style.get()
         use_shade = mode in ("Shade", "Shade + Line Style")
         use_ls = mode in ("Line Style", "Shade + Line Style")
-        colors_by_group = {g: self._group_member_colors(base_cmap(i % 10)[:3], counts[g], use_shade)
+        colors_by_group = {g: self._group_member_colors((base_colors or {}).get(g, base_cmap(i % 10)[:3]),
+                                                          counts[g], use_shade)
                            for i, g in enumerate(ordered)}
         pos = {g: {k: i for i, k in enumerate(mems)} for g, mems in members.items()}
         idx = {g: 0 for g in counts}
@@ -3655,12 +3657,29 @@ class InteractivePlotter:
             # in the Style dialog still override these defaults.
             group_defaults = {}
             group_mode = self.v_color_mode.get() == "Group"
-            if group_mode and total_lines > 0:
-                _grps = self._group_series_keys()
+            # Group-aware GRADIENT: when groups exist, each GROUP gets one base
+            # color sampled evenly from the selected colormap (stable via
+            # group_order), members shaded inside the group — two groups can
+            # never collide in color. Ungrouped series keep their own
+            # per-series gradient slot.
+            _grps = self._group_series_keys()
+            _grad_groups = (self.v_color_mode.get() == "Gradient"
+                            and any(_grps.get((fk, yc)) for (fk, yc, _axi) in series_to_plot))
+            if (group_mode or _grad_groups) and total_lines > 0:
                 _entries = [((fk, yc), _grps.get((fk, yc))) for (fk, yc, _axi) in series_to_plot]
-                _defs = self._group_member_defaults(_entries, fallback_color=generated_colors[0] if generated_colors else None)
-                for _e, _d in zip(_entries, _defs):
-                    group_defaults.setdefault(_e[0], _d)
+                if _grad_groups:
+                    _plotted = {g for _k, g in _entries if g}
+                    _gnames = [g for g in self._ordered_groups() if g in _plotted]
+                    _bases = {g: cmap((i + 0.5) / len(_gnames))[:3] for i, g in enumerate(_gnames)}
+                    _defs = self._group_member_defaults(_entries, fallback_color=None,
+                                                        base_colors=_bases)
+                    for _e, _d in zip(_entries, _defs):
+                        if _e[1]:  # grouped series only; ungrouped keep gradient slot
+                            group_defaults.setdefault(_e[0], _d)
+                else:
+                    _defs = self._group_member_defaults(_entries, fallback_color=generated_colors[0] if generated_colors else None)
+                    for _e, _d in zip(_entries, _defs):
+                        group_defaults.setdefault(_e[0], _d)
 
             axes_list = []
             if ptype == "Dual Y-Axis":
@@ -4646,6 +4665,15 @@ class InteractivePlotter:
                                     line_obj.set_visible(False)
                             else:
                                 ln.set_visible(False)
+                            # 'Group only' mode: keep ONE legend entry per group even
+                            # when the whole group is hidden, so the entry stays
+                            # clickable to re-show the group.
+                            if (_group_only_dedupe and lbl not in _seen_leg_labels
+                                    and st.get('show_in_legend', True)):
+                                _seen_leg_labels.add(lbl)
+                                filtered_lines.append(ln)
+                                filtered_labels.append(lbl)
+                                filtered_keys.append(key)
                         elif st.get('show_in_legend', True):
                             # Show in legend — include in legend entries
                             # (unless 'Group only' already showed this label)
@@ -5611,6 +5639,38 @@ class InteractivePlotter:
         # Add separator
         menu.add_separator()
         
+        # --- Group toggles: hide/show every member of a group at once ---
+        gmap = self._group_series_keys()  # {key: group} for non-empty assignments only
+        group_names = []
+        for k in all_keys:
+            g = gmap.get(k)
+            if g and g not in group_names:
+                group_names.append(g)
+        
+        if group_names:
+            menu.add_command(label="Toggle Group Visibility:", state='disabled')
+            
+            def make_group_callback(member_keys, hide):
+                def toggle():
+                    for k in member_keys:
+                        if hide:
+                            self.hidden_legend_items.add(k)
+                        else:
+                            self.hidden_legend_items.discard(k)
+                    self.update_plot()
+                    # Re-post the menu after a short delay so it stays open
+                    self.root.after(10, lambda: self._show_line_toggle_menu(screen_x, screen_y))
+                return toggle
+            
+            for g in group_names:
+                member_keys = [k for k in all_keys if gmap.get(k) == g]
+                all_hidden = all(k in self.hidden_legend_items for k in member_keys)
+                prefix = "✓ " if not all_hidden else "✗ "
+                # Any visible -> click hides all; fully hidden -> click shows all
+                menu.add_command(label=prefix + "Group: " + g,
+                                 command=make_group_callback(member_keys, not all_hidden))
+            menu.add_separator()
+        
         # Add ALL series with visibility toggle
         menu.add_command(label="Toggle Line Visibility:", state='disabled')
         for key in all_keys:
@@ -5750,7 +5810,19 @@ class InteractivePlotter:
                 if i < len(self.current_lines) and hasattr(self, 'current_legend_keys') and i < len(self.current_legend_keys):
                     key = self.current_legend_keys[i]
                     
-                    if key in self.hidden_legend_items:
+                    # 'Group only' legend mode: click toggles the WHOLE group,
+                    # not just the single first-member entry.
+                    gname = (self.series_groups.get(key) or '').strip()
+                    if (self.v_group_legend_mode.get() == "Group only" and gname):
+                        member_keys = [k for k in getattr(self, '_all_series_keys', [])
+                                       if (self.series_groups.get(k) or '').strip() == gname]
+                        if all(k in self.hidden_legend_items for k in member_keys):
+                            for k in member_keys:
+                                self.hidden_legend_items.discard(k)
+                        else:
+                            for k in member_keys:
+                                self.hidden_legend_items.add(k)
+                    elif key in self.hidden_legend_items:
                         # Show the line
                         self.hidden_legend_items.discard(key)
                     else:

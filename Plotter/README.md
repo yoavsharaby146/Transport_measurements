@@ -249,6 +249,7 @@ Uses matplotlib's default color cycle. Each series gets a different color from t
 
 ### Gradient
 Distributes colors evenly across the selected colormap (e.g., viridis). Useful for visualizing a sequence of curves as a color progression. Select from 80+ colormaps in the dropdown. A preview bar shows the gradient range.
+When series are assigned to groups (Groups dialog), the gradient becomes **group-aware**: each group gets one base color sampled evenly from the colormap (stable across selections), and members get a shade variation inside their group — two groups can never share the same color. Ungrouped series keep their own per-series gradient slots.
 
 ---
 
