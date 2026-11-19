@@ -620,7 +620,15 @@ class GateChannel:
         """
         try:
             if self.kind == "keithley":
-                return float(self.inst.ask(":MEAS:VOLT?"))
+                v = float(self.inst.ask(":MEAS:VOLT?"))
+                # :MEAS:VOLT? reconfigures the sense function to VOLT (and
+                # with it the front-panel measurement display). Restore
+                # current measurement so the gate stays V-source/I-monitor.
+                try:
+                    self.inst.write(":SENS:FUNC 'CURR'")
+                except Exception:
+                    pass
+                return v
             if self.kind == "k2604b":
                 return float(self.inst.measure__voltage())
         except Exception:

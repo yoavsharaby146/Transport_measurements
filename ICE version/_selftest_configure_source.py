@@ -91,6 +91,14 @@ class Fake2604BChannel:
 class FakeKeithley2450:
     def __init__(self):
         self.configured = None
+        self.writes = []
+
+    def ask(self, cmd):
+        self.writes.append(cmd)
+        return "1.234" if ":MEAS:VOLT?" in cmd else ""
+
+    def write(self, cmd):
+        self.writes.append(cmd)
 
     def configure_voltage_source(self, nplc=1, current=1e-6, auto_range=False,
                                  compliance_current=1.05e-8):
@@ -173,5 +181,16 @@ assert k.configured["current"] == 1e-3, k.configured
 ch.configure_source(1e-7, 1, max_abs_v=5.0)
 assert k.configured["current"] == 1e-6, k.configured  # floor at 1 uA
 print("PASS: Keithley measure range = max(compliance, 1e-6)")
+
+# 6. Keithley 2450 gate readback: :MEAS:VOLT? must restore current measuring,
+#    otherwise the front panel is left showing a voltage measurement
+k = FakeKeithley2450()
+ch, app = make_channel(k, "keithley")
+v = ch.measure_voltage()
+assert v == 1.234, v
+i_volt = k.writes.index(":MEAS:VOLT?")
+i_curr = k.writes.index(":SENS:FUNC 'CURR'")
+assert i_curr > i_volt, k.writes
+print("PASS: gate voltage readback restores :SENS:FUNC 'CURR' (display shows current)")
 
 print("\nAll configure_source self-checks passed.")
