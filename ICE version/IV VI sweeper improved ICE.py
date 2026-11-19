@@ -645,19 +645,45 @@ class GateChannel:
             max_abs_v = max(cands) if cands else 1.0
 
         if self.kind == "keithley":
-            self.inst.configure_voltage_source(nplc=nplc, current=1e-6,
+            # measurement range must cover the compliance, otherwise the
+            # fixed 1 uA range overflows and currents read as garbage
+            self.inst.configure_voltage_source(nplc=nplc,
+                                               current=max(compliance, 1e-6),
                                                compliance_current=compliance)
         elif self.kind == "k2604b":
-            self.inst.configure_voltage_source(voltage=0,
+            # keep the LIVE level when the output is on — writing levelv=0
+            # here would instantly jump a biased device to 0 V (the ramp
+            # below then has to start from 0). Zero only when output off.
+            level = 0.0
+            if self.output_on():
+                lvl = self.read_level()
+                level = lvl if lvl is not None else 0.0
+            self.inst.configure_voltage_source(voltage=level,
                                                current_limit=compliance)
         elif self.kind == "yoko7651":
             self.inst.apply_voltage(max_voltage=pick_v_range(max_abs_v),
                                     compliance_current=compliance)
         else:  # gs200
-            self.inst.source_mode = "voltage"
-            self.inst.source_range = pick_v_range(max_abs_v)
-            self.inst.current_limit = compliance
-            self.inst.source_level = 0
+            # SAFETY: the GS200 rejects mode/range changes while the output
+            # is ON, and forcing the level to 0 here would be an
+            # instantaneous, dangerous jump for the biased device. Keep the
+            # live level; only the compliance is attempted (best effort).
+            on = False
+            try:
+                on = self.output_on()
+            except Exception:
+                pass
+            if on:
+                try:
+                    self.inst.current_limit = compliance
+                except Exception as e:
+                    self.app.log(f"Gate {self.index}: GS200 compliance not "
+                                 f"changed (output ON): {e}")
+            else:
+                self.inst.source_mode = "voltage"
+                self.inst.source_range = pick_v_range(max_abs_v)
+                self.inst.current_limit = compliance
+                self.inst.source_level = 0
         self.app.log(f"Gate {self.index} source configured (compliance={compliance} A"
                      + (f", NPLC={nplc}" if self.kind == "keithley" else "") + ")")
 

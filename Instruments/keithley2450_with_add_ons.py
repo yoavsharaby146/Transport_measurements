@@ -804,6 +804,11 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
         #self.write(':SENS:CONF:LIST:CRE "senseIclist"')
         # Set to source voltage and measure current at a constant current measure range (can turn to auto with auto_range flag)
         self.source_mode = 'voltage'
+        # Pin the source range: with auto-range the clist stores a source
+        # range per point, and the sweep switches ranges at decade
+        # crossings — visible as jumps/offset steps in the data.
+        self.write(":SOUR:VOLT:RANG:AUTO 0")
+        self.write(f":SOUR:VOLT:RANG {max(abs(Sp1), abs(Sp2)) / 1000.0:g}")
         self.measure_current(1, curr_range, False)
         # Enable/disable 4-wire sensing
         self.disable_source()  # Make sure source is off
@@ -857,6 +862,10 @@ class Keithley2450(KeithleyBuffer, SCPIMixin, Instrument):
         self.write(':SOUR:CONF:LIST:CRE "sourceIclist"')
         # Set to source current and measure voltage at a constant voltage measure range
         self.source_mode = 'current'
+        # Pin the source range (see the voltage twin above): prevents
+        # mid-sweep range switching, which shows up as jumps in the data.
+        self.write(":SOUR:CURR:RANG:AUTO 0")
+        self.write(f":SOUR:CURR:RANG {max(abs(Sp1), abs(Sp2)):g}")
         self.measure_voltage(1, volt_range, False)
         # Enable/disable 4-wire sensing
         self.disable_source()  # Make sure source is off
