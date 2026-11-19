@@ -33,6 +33,7 @@ class FakeGS200:
         self.level = level
         self.source_enabled = on
         self.writes = []
+        self.refuse_range = False
 
     @property
     def source_level(self):
@@ -57,6 +58,8 @@ class FakeGS200:
 
     @source_range.setter
     def source_range(self, v):
+        if self.refuse_range:
+            raise ValueError("level exceeds new range")
         self.writes.append(("range", v))
 
     @property
@@ -103,14 +106,32 @@ def make_channel(inst, kind):
     return ch, app
 
 
-# 1. GS200, output ON at 5 V: nothing may move the level
+# 1. GS200, output ON at 5 V: nothing may move the level; range IS widened
+#    (the GS200 allows range changes with the output on)
 gs = FakeGS200(5.0, True)
 ch, app = make_channel(gs, "gs200")
 ch.configure_source(1e-3, 1, max_abs_v=5.0)
 assert gs.level == 5.0, f"GS200 level jumped to {gs.level} with output ON"
-assert all(w[0] != "mode" and w[0] != "range" for w in gs.writes), gs.writes
+assert ("range", mod.pick_v_range(5.0)) in gs.writes, gs.writes
 assert ("limit", 1e-3) in gs.writes, gs.writes
-print("PASS: GS200 output ON - level kept at 5 V, no mode/range rewrite")
+print("PASS: GS200 output ON - level kept at 5 V, range/compliance applied")
+
+# 1b. GS200, output ON, instrument refuses the range change: no crash, level kept
+gs = FakeGS200(0.1, True)
+gs.refuse_range = True
+ch, app = make_channel(gs, "gs200")
+ch.configure_source(1e-3, 1, max_abs_v=1.0)
+assert gs.level == 0.1, gs.level
+assert any("not changed" in m for m in app.messages), app.messages
+print("PASS: GS200 output ON range refusal - logged, level kept")
+
+# 1c. GS200 ramp-ladder scenario: 0 -> 0.1 V (100 mV range), then 1 V target
+gs = FakeGS200(0.1, True)
+ch, app = make_channel(gs, "gs200")
+ch.configure_source(1e-3, 1, max_abs_v=1.0)
+assert ("range", 1) in gs.writes, gs.writes   # widened 100 mV -> 1 V
+assert gs.level == 0.1, gs.level              # no jump
+print("PASS: GS200 0.1 V -> 1 V ramp now possible (range widened, level kept)")
 
 # 2. GS200, output OFF: full configure incl. zero
 gs = FakeGS200(5.0, False)

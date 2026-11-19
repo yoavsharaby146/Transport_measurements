@@ -664,10 +664,12 @@ class GateChannel:
             self.inst.apply_voltage(max_voltage=pick_v_range(max_abs_v),
                                     compliance_current=compliance)
         else:  # gs200
-            # SAFETY: the GS200 rejects mode/range changes while the output
-            # is ON, and forcing the level to 0 here would be an
-            # instantaneous, dangerous jump for the biased device. Keep the
-            # live level; only the compliance is attempted (best effort).
+            # SAFETY: the level is NEVER forced to 0 here — that was an
+            # instantaneous, dangerous jump for a biased device. The GS200
+            # itself allows range changes with the output ON (refuses only
+            # when the live level exceeds the new range) and only the
+            # voltage/current FUNCTION needs the output off — so try the
+            # range/compliance, and fall back gracefully when it refuses.
             on = False
             try:
                 on = self.output_on()
@@ -676,9 +678,10 @@ class GateChannel:
             if on:
                 try:
                     self.inst.current_limit = compliance
+                    self.inst.source_range = pick_v_range(max_abs_v)
                 except Exception as e:
-                    self.app.log(f"Gate {self.index}: GS200 compliance not "
-                                 f"changed (output ON): {e}")
+                    self.app.log(f"Gate {self.index}: GS200 range/compliance "
+                                 f"not changed (output ON): {e}")
             else:
                 self.inst.source_mode = "voltage"
                 self.inst.source_range = pick_v_range(max_abs_v)
