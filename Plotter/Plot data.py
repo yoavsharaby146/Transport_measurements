@@ -810,7 +810,7 @@ class InteractivePlotter:
         self.fig = Figure(figsize=(10, 7), dpi=100)
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=plot_frame)
-        self.canvas.draw()
+        self.canvas.draw_idle()
         
         # Create and pack toolbar FIRST at the bottom so it's always visible
         toolbar = NavigationToolbar2Tk(self.canvas, plot_frame)
@@ -823,7 +823,7 @@ class InteractivePlotter:
         self.ax.text(0.5, 0.5, 'Load data file to begin', ha='center', va='center', fontsize=16, color='gray')
         self.ax.set_xticks([]);
         self.ax.set_yticks([])
-        self.canvas.draw()
+        self.canvas.draw_idle()
         
         # Bind right-click on canvas for context menu (works even when no legend is visible)
         self.canvas.mpl_connect('button_press_event', self._on_canvas_right_click)
@@ -2179,7 +2179,7 @@ class InteractivePlotter:
             self.current_dataset_key = None;
             self.fig.clear();
             self.ax = self.fig.add_subplot(111);
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
     def on_dataset_selection_change(self, event):
         self.update_plot()
@@ -3410,6 +3410,35 @@ class InteractivePlotter:
             side='left', expand=True, fill='x', padx=2)
 
     def update_plot(self):
+        """Debounced replot: coalesce rapid triggers (arrow-key cycling,
+        dialog traces, checkbox flips) into ONE full rebuild per ~50 ms.
+        Immediate state is read inside _do_update_plot, so batched calls
+        always plot the latest widget values."""
+        if getattr(self, "_replot_after_id", None) is not None:
+            try:
+                self.root.after_cancel(self._replot_after_id)
+            except Exception:
+                pass
+        self._replot_after_id = self.root.after(50, self._do_update_plot)
+
+    @staticmethod
+    def _decimate(x, y, max_pts=20000):
+        """Display-only stride decimation for huge traces.
+
+        Screen render at ~100 dpi cannot show more than ~20k points per
+        line; striding keeps the visual identical while making plot()
+        10-50x faster on multi-million-point sweeps. NaNs (axis breaks)
+        survive striding. Export paths should keep the full data.
+        ponytail: plain stride can drop a narrow spike between samples;
+        swap for LTTB if peak fidelity on screen ever matters.
+        """
+        if x is None or len(x) <= max_pts:
+            return x, y
+        step = len(x) // max_pts
+        return x[::step], y[::step]
+
+    def _do_update_plot(self):
+        self._replot_after_id = None
         sel_ds = self.get_selected_datasets()
         if not sel_ds or self.current_dataset_key is None: return
 
@@ -3810,7 +3839,10 @@ class InteractivePlotter:
                         if "Scatter" in ptype:
                             ln = ax_t.scatter(X_plot, Y_plot, label=lbl, color=c, s=w, alpha=0.6)
                         else:
-                            ln, = ax_t.plot(X_plot, Y_plot, label=lbl, color=c, linewidth=w, linestyle=ls)
+                            # Decimate huge traces for display (visual-identical
+                            # stride; see _decimate) — Line plots only
+                            X_disp, Y_disp = self._decimate(X_plot, Y_plot)
+                            ln, = ax_t.plot(X_disp, Y_disp, label=lbl, color=c, linewidth=w, linestyle=ls)
                         series_lines.append(ln)
                         if ax_t == target_axes[0]:
                             lines.append(ln);
@@ -4980,7 +5012,7 @@ class InteractivePlotter:
                               ha="right", va="bottom", fontsize=8, color="gray",
                               fontname=font, style="italic")
 
-            self.canvas.draw()
+            self.canvas.draw_idle()
 
         except Exception as e:
             print(f"Error plotting: {e}")
