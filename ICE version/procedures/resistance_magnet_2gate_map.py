@@ -29,6 +29,11 @@ class Resistance_magnet_and_2gate_mapping_measurement(ICEProcedure):
     use_dual_gate = BooleanParameter('Use dual gate', group_by='devices', default=False)
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+    use_yoko_gs200_1 = BooleanParameter('Use Yoko GS200_1', group_by='devices', default=False)
+    use_yoko_gs200_2 = BooleanParameter('Use Yoko GS200_2', group_by='devices', default=False)
+    use_yoko7651_1 = BooleanParameter('Use Yoko7651_1', group_by='devices', default=False)
+    use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
+    use_k6221 = BooleanParameter('Use k6221 (record amplitude column)', group_by='devices', default=False)
 
     # --- Mapping Configuration ---
     mapping = BooleanParameter('Mapping Configuration', default=True)
@@ -195,6 +200,8 @@ proc_resistance_magnet_2gate_map = {
             'use_srs860_1', 'use_srs860_2',
             'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
             'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
+            'use_yoko_gs200_1', 'use_yoko_gs200_2',
+            'use_yoko7651_1', 'use_yoko7651_2', 'use_k6221',
             'mapping', 'scan_mode',
             'field_start', 'field_end', 'field_step', 'sweep_rate',
             'smu_1', 'smu_1_sp1', 'smu_1_sp2',

@@ -80,9 +80,8 @@ ICE version/
     │
     ├── differential_conductance_srs860.py      # dI/dV via SRS860
     ├── differential_conductance_zurich.py      # dI/dV via Zurich MFLI
-    ├── differential_resistance_srs860.py       # dV/dI via SRS860 aux output
-    ├── differential_resistance_zurich.py       # dV/dI via Zurich MFLI
-    ├── differential_resistance_zurich_AUX_map.py  # dV/dI AUX output mapping
+    ├── differential_resistance_aux.py          # dV/dI via any connected lock-in AUX (unified)
+    ├── differential_resistance_aux_map.py      # 2D gate × AUX map, any AUX source / SMU
     │
     ├── sequencer_rt_rv_rh.py       # Automated Rt → RV → RH sequence
     ├── sequencer_rv_dvdi.py        # Automated RV → dV/dI sequence
@@ -154,11 +153,10 @@ Each procedure is an **`ICEProcedure`** subclass (which itself extends the PyMea
 | **Magnet & 2-gate map** | `resistance_magnet_2gate_map.py` | Magnetic Field, 2D Mapping | 2D map of magnetic field vs. dual gate voltages |
 | **Differential conductance (SRS860)** | `differential_conductance_srs860.py` | Tunneling junction | dI/dV measurement using SRS860 lock-in |
 | **Differential conductance (Zurich)** | `differential_conductance_zurich.py` | Tunneling junction | dI/dV measurement using Zurich MFLI |
-| **Differential resistance (SRS860)** | `differential_resistance_srs860.py` | Differential Resistance | dV/dI measurement using SRS860 aux output |
-| **Differential resistance (Zurich)** | `differential_resistance_zurich.py` | Differential Resistance | dV/dI measurement using Zurich MFLI |
-| **Differential resistance AUX map** | `differential_resistance_zurich_AUX_map.py` | Differential Resistance, 2D Mapping | Gate-dependent dV/dI mapping via MFLI aux output |
+| **Differential resistance AUX (unified)** | `differential_resistance_aux.py` | Differential Resistance | dV/dI measurement using any connected lock-in's aux output (SRS860/SRS830/MFLI) |
+| **Differential resistance AUX map** | `differential_resistance_aux_map.py` | Differential Resistance, 2D Mapping | Gate-dependent dV/dI map; AUX source (any lock-in) + gate SMU selectable |
 | **Rt/RV/RH sequencer** | `sequencer_rt_rv_rh.py` | Time-based, Gate Sweep, Magnetic Field | Automated sequence of Rt, RV, and RH measurements |
-| **RV/dV/dI sequencer** | `sequencer_rv_dvdi.py` | Gate Sweep, Differential Resistance | Automated RV followed by dV/dI measurements |
+| **RV/dV/dI sequencer** | `sequencer_rv_dvdi.py` | Gate Sweep, Differential Resistance | Automated RV followed by dV/dI measurements (AUX source selectable: SRS860/SRS830/MFLI) |
 
 ### Category Colors
 

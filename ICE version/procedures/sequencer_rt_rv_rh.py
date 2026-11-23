@@ -39,6 +39,11 @@ class Rt_RV_RH_sequencer_measurement(ICEProcedure):
     use_dual_gate = BooleanParameter('Use dual gate', group_by='devices', default=False)
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+    use_yoko_gs200_1 = BooleanParameter('Use Yoko GS200_1', group_by='devices', default=False)
+    use_yoko_gs200_2 = BooleanParameter('Use Yoko GS200_2', group_by='devices', default=False)
+    use_yoko7651_1 = BooleanParameter('Use Yoko7651_1', group_by='devices', default=False)
+    use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
+    use_k6221 = BooleanParameter('Use k6221 (record amplitude column)', group_by='devices', default=False)
 
     def startup(self):
         self._capture_metadata()
@@ -161,7 +166,9 @@ proc_Rt_RV_RH_sequencer = {
         inputs=['Title', 'Resistor', 'Contacts', 'Gate_contacts', 'Type', 'Target_field','sweep_rate',
                 'Target_voltage', 'step_size', 'smu', 'acq_length', 'devices', 'use_magnet',
                 'use_MFLI_1', 'use_MFLI_2', 'use_MFLI_3', 'use_srs860_1', 'use_srs860_2', 'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
-                'use_dual_gate', 'use_keithley_1', 'use_keithley_2', 'acq_delay'],
+                'use_dual_gate', 'use_keithley_1', 'use_keithley_2', 'acq_delay',
+                'use_yoko_gs200_1', 'use_yoko_gs200_2',
+                'use_yoko7651_1', 'use_yoko7651_2', 'use_k6221'],
         displays=['Type','Target_field', 'sweep_rate','smu','Target_voltage','step_size','acq_length','acq_delay'],
         x=['time(s)'],
         y=['time(s)', 'time(s)'],

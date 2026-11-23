@@ -28,6 +28,11 @@ class Differential_conductance_Zurich(ICEProcedure):
     use_dual_gate = BooleanParameter('Use dual gate', group_by='devices', default=False)
     use_keithley_1 = BooleanParameter('Use k2450_1', group_by='devices', default=False)
     use_keithley_2 = BooleanParameter('Use k2450_2', group_by='devices', default=False)
+    use_yoko_gs200_1 = BooleanParameter('Use Yoko GS200_1', group_by='devices', default=False)
+    use_yoko_gs200_2 = BooleanParameter('Use Yoko GS200_2', group_by='devices', default=False)
+    use_yoko7651_1 = BooleanParameter('Use Yoko7651_1', group_by='devices', default=False)
+    use_yoko7651_2 = BooleanParameter('Use Yoko7651_2', group_by='devices', default=False)
+    use_k6221 = BooleanParameter('Use k6221 (record amplitude column)', group_by='devices', default=False)
 
     # --- Sweep Configuration ---
     scan_mode = ListParameter('Scan Mode', default='Sweep and Return',
@@ -116,6 +121,8 @@ proc_differential_conductance_Zurich = {
             'use_MFLI_2', 'use_MFLI_3',
             'use_srs860_1', 'use_srs860_2', 'use_srs830_1', 'use_srs830_2', 'use_srs830_3',
             'use_dual_gate', 'use_keithley_1', 'use_keithley_2',
+            'use_yoko_gs200_1', 'use_yoko_gs200_2',
+            'use_yoko7651_1', 'use_yoko7651_2', 'use_k6221',
             'acq_delay',
         ],
         displays=['Title', 'scan_mode', 'dc_offset_setpoint', 'dc_offset_step'],
