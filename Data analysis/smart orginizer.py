@@ -22,11 +22,17 @@ HELP_TEXT = (
     "   One-axis sweep loops: rows split into forward and backward files\n"
     "   by sweep direction\n"
     "3. Hysteresis - Auto Detect (0 -> SP1 -> SP2 -> 0)\n"
-    "   Hysteresis loops: segments identified and merged per loop\n"
+    "   Hysteresis loops: per loop, the two fwd parts are sorted+merged\n"
+    "   into one monotonic branch (duplicate join point dropped), so\n"
+    "   gradient and other row-wise math stay valid\n"
     "4. Standard Loop - Auto Detect (0 -> Max -> 0)\n"
     "   Standard up/down loops around zero\n"
     "5. Snake - Auto Detect (Alternating)\n"
     "   Snake scans: alternating sweep direction, no return sweeps\n"
+    "6. Fwd Jump Merge - Auto Detect (Repair)\n"
+    "   Repair tool for an already-split Fwd file: cuts where the sweep\n"
+    "   column has a large skip (the SP1 -> SP2 gap), reorders the parts\n"
+    "   into one monotonic sweep, drops duplicated join points\n"
     "\n"
     "For every mode: select the file(s), pick the axis column, and review\n"
     "the auto-detected change threshold (steps smaller than it count as\n"
@@ -136,6 +142,41 @@ def split_by_activity(df, fast_col, slow_col, fast_threshold, slow_threshold,
     return out
 
 
+def merge_fwd_monotonic(parts, axis_col):
+    """Merge the forward parts of one hysteresis block (e.g. 0 -> SP1 and
+    SP2 -> 0) into a single sweep sorted by the axis column.
+
+    Both parts touch 0, so after sorting the duplicated axis rows at the
+    join are dropped — np.gradient would divide by a zero step otherwise.
+    Downstream per-row arithmetic (gradient, diff) then never crosses the
+    SP1 -> SP2 gap between the two parts.
+
+    ponytail: exact-equality dedupe — only intentional boundary
+    duplicates (identical setpoint) are removed; near-duplicates from
+    read jitter stay. Upgrade to tolerance-based drop if jitter
+    duplicates ever appear.
+    """
+    merged = pl.concat(parts).sort(axis_col)
+    return merged.unique(subset=[axis_col], keep="first", maintain_order=True)
+
+
+def split_on_jumps(df, axis_col, jump_threshold):
+    """Split a sweep file into parts wherever the axis column jumps by
+    more than jump_threshold (e.g. the SP1 -> SP2 gap in an already-split
+    fwd hysteresis file). Returns a list of DataFrame parts, file order."""
+    x = df[axis_col].to_numpy()
+    if len(x) < 2:
+        return [df] if len(df) else []
+    jump = np.concatenate([[False], np.abs(np.diff(x)) > jump_threshold])
+    parts = []
+    start = 0
+    for e in np.flatnonzero(jump):
+        parts.append(df.slice(start, int(e) - start))
+        start = int(e)
+    parts.append(df.slice(start, len(df) - start))
+    return parts
+
+
 class ScanOrganizer:
     def __init__(self):
         self.root = tk.Tk()
@@ -161,7 +202,8 @@ class ScanOrganizer:
             "Forward/Backward Organizer (Direction Split)",
             "Hysteresis - Auto Detect (0 -> SP1 -> SP2 -> 0)",
             "Standard Loop - Auto Detect (0 -> Max -> 0)",
-            "Snake - Auto Detect (Alternating)"
+            "Snake - Auto Detect (Alternating)",
+            "Fwd Jump Merge - Auto Detect (Repair)"
         )
         self.mode_combo.current(0)
         self.mode_combo.pack(pady=5)
@@ -228,6 +270,8 @@ class ScanOrganizer:
                     ok = self.process_standard_loop(df, file_path, file_settings)
                 elif "Snake" in mode:
                     ok = self.process_snake(df, file_path, file_settings)
+                elif "Fwd Jump Merge" in mode:
+                    ok = self.process_fwd_merge(df, file_path, file_settings)
                 else:
                     messagebox.showerror("Error", f"Unknown mode: {mode}")
                     ok = False
@@ -925,11 +969,84 @@ class ScanOrganizer:
             block = sweeps[i:i + sweeps_per_block]
             if len(block) < sweeps_per_block:
                 break
-            fwd.extend(block[:s1])
-            fwd.extend(block[s2:])
+            # fwd parts (0->SP1, SP2->0) merged per block into one monotonic
+            # branch so downstream gradient/diff never crosses the SP1->SP2 gap
+            fwd_parts = block[:s1] + block[s2:]
+            if fwd_parts:
+                fwd.append(merge_fwd_monotonic(fwd_parts, axis_col))
             bwd.extend(block[s1:s2])
 
         self.save_simple(file_path, fwd, bwd, f"Hysteresis_{axis_col}")
+        return True
+
+    # =========================================================
+    # MODE: Fwd Jump Merge - Auto Detect (Repair)
+    # =========================================================
+    def process_fwd_merge(self, df, file_path, settings=None):
+        """Repair an already-split Fwd file: cut at large axis jumps,
+        reorder the parts into one monotonic sweep, drop duplicated join
+        points so downstream gradient/diff never crosses the gap."""
+        settings = settings if settings is not None else {}
+        axis_col, _step_thr = self._ask_axis_and_threshold(
+            df, title_prefix="Sweep Axis", settings=settings)
+        if axis_col is None:
+            return False
+        if axis_col not in df.columns:
+            raise ValueError(f"Column '{axis_col}' not found in this file "
+                             f"(available: {', '.join(df.columns)})")
+
+        # jump threshold: diffs larger than this are skips in the sweep.
+        # default 3x the median non-zero step: normal sweep increments
+        # stay far below it, the SP1 -> SP2 gap is dozens of steps above
+        values = df[axis_col].to_numpy()
+        abs_diffs = np.abs(np.diff(values))
+        non_zero = abs_diffs[abs_diffs > 0]
+        if len(non_zero) > 0:
+            default_jump = float(np.median(non_zero)) * 3.0
+        else:
+            default_jump = float(values.max() - values.min()) * 0.01
+
+        jump_thr = settings.get("jump_threshold")
+        if jump_thr is None:
+            jump_thr = simpledialog.askfloat(
+                "Jump Threshold",
+                f"Enter jump threshold for '{axis_col}':\n"
+                "(|change| larger than this = skip in the sweep;\n"
+                "the file is cut and reordered there)\n\n"
+                f"Default (3x median step): {default_jump:.6g}",
+                initialvalue=default_jump, parent=self.root)
+            if jump_thr is None:
+                return False
+            settings["jump_threshold"] = jump_thr
+
+        parts = split_on_jumps(df, axis_col, jump_thr)
+        if len(parts) < 2:
+            messagebox.showinfo("Info", "No large jump detected — file already continuous.")
+            return True
+
+        # all parts must sweep the same direction, else reordering is unsafe
+        dirs = [float(p[axis_col][-1] - p[axis_col][0]) for p in parts]
+        if any(np.sign(dv) != np.sign(dirs[0]) for dv in dirs):
+            messagebox.showerror(
+                "Error",
+                f"Parts sweep in mixed directions ({len(parts)} parts).\n"
+                "Run Forward/Backward Organizer first, then repair the fwd file.")
+            return True
+
+        merged = merge_fwd_monotonic(parts, axis_col)
+        d = os.path.dirname(file_path)
+        n = os.path.splitext(os.path.basename(file_path))[0]
+        out_path = os.path.join(d, f"{n}_FwdMerged_{axis_col}.csv")
+        merged.write_csv(out_path)
+        msg = (f"Jump Merge Complete!\n{len(parts)} parts, "
+               f"jump threshold {jump_thr:.6g}\n"
+               f"{len(df)} rows -> {len(merged)} rows "
+               f"(duplicates at joins dropped)\n"
+               f"Saved: {os.path.basename(out_path)}")
+        print(msg)
+        if not self._batch:
+            messagebox.showinfo("Success", msg)
+            self.root.quit()
         return True
 
     # =========================================================
@@ -1015,6 +1132,24 @@ def _self_test():
     assert res2["slow_fwd"] == [] and res2["slow_bwd"] == []
     assert [len(s) for s in res2["fast_fwd"]] == [31]
     assert [len(s) for s in res2["fast_bwd"]] == [34]
+    # hysteresis fwd merge: parts (0..SP1) + (SP2..0) become one monotonic
+    # branch, duplicated join point dropped
+    p1 = pl.DataFrame({"V": [0.0, 0.5, 1.0], "I": [0.0, 1.0, 2.0]})
+    p2 = pl.DataFrame({"V": [-1.0, -0.5, 0.0], "I": [-2.0, -1.0, 0.1]})
+    m = merge_fwd_monotonic([p1, p2], "V")
+    assert m["V"].to_list() == [-1.0, -0.5, 0.0, 0.5, 1.0], m["V"].to_list()
+    assert np.all(np.diff(m["V"].to_numpy()) > 0)
+
+    # fwd jump merge: split fwd file (0..1, gap, -1..0) cut at the jump
+    # and reordered into one monotonic branch
+    xf = pl.DataFrame({"V": [0.0, 0.5, 1.0, -1.0, -0.5, 0.0]})
+    parts = split_on_jumps(xf, "V", 1.5)
+    assert [len(p) for p in parts] == [3, 3], [len(p) for p in parts]
+    m2 = merge_fwd_monotonic(parts, "V")
+    assert m2["V"].to_list() == [-1.0, -0.5, 0.0, 0.5, 1.0], m2["V"].to_list()
+    whole = split_on_jumps(xf, "V", 5.0)   # no jump: file returned whole
+    assert len(whole) == 1 and whole[0].equals(xf)
+
     print("smart orginizer self-test OK")
 
 
