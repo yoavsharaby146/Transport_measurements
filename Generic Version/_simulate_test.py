@@ -70,4 +70,48 @@ _patch(s)
 s.execute()
 print('sequencer dV/dI branch OK')
 
+# --- differential conductance, unified (SRS860 + MFLI excitation, fakes) ---
+g = procedures.Differential_Conductance()
+g.exc_source = 'SRS860_1'
+g.meas_lockin = 'SRS860_1'
+g.ac_voltage = 1e-3
+g.ac_frequency = 77
+g.use_srs860_1 = True
+g.aux_Target = 0.004
+g.aux_step = 2
+g.acq_delay = 0
+g.scan_mode = 'Sweep and Return'
+g.startup()
+_patch(g)
+g.execute()
+row = dict(zip(g.DATA_COLUMNS, g.getmeas(0.0)))
+assert row['Differential_Conductance_X(S)'] == 0.0, row['Differential_Conductance_X(S)']
+print('SRS860 dI/dV execute OK')
+
+# same procedure, MFLI as excitation lock-in
+g.exc_source = 'MFLI_1'
+g.aux_Target = 0.0
+g.startup()
+g.execute()
+assert float(cfg.MFLI_1.sine_amplitude) == 1e-3, 'AC level not stored on MFLI fake'
+print('MFLI dI/dV execute OK')
+
+# --- differential conductance gate map (fakes) ---
+m = procedures.Differential_Conductance_gate_map()
+m.exc_source = 'SRS860_1'
+m.meas_lockin = 'SRS860_1'
+m.ac_voltage = 1e-3
+m.use_srs860_1 = True
+m.gate_start, m.gate_end, m.gate_step = -0.01, 0.01, 5
+m.gate_delay = 0
+m.aux_start, m.aux_end = 0.0, 0.004
+m.aux_step = 2
+m.acq_delay = 0
+m.scan_mode = 'Snake'
+m.startup()
+_patch(m)
+m.execute()
+assert m.smu == 'Gate_1'
+print('dI/dV gate map execute OK')
+
 print('SIMULATE_TEST_OK')

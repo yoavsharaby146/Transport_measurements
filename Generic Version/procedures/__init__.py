@@ -34,6 +34,10 @@ from .differential_resistance_6221_map import (Differential_Resistance_6221_map,
 from .sequencer_rv_dvdi import RV_dV_dI_sequencer_measurement, proc_RV_dV_dI_sequencer
 from .sequencer_rv_r_aux import RV_R_AUX_sequencer_measurement, proc_RV_R_AUX_sequencer
 from .sequencer_rt_rv import Rt_RV_sequencer_measurement, proc_Rt_RV_sequencer
+from .differential_conductance import (Differential_Conductance,
+                                       proc_diff_conductance)
+from .differential_conductance_gate_map import (Differential_Conductance_gate_map,
+                                                proc_diff_conductance_gate_map)
 
 # Category colors
 CATAGORIES = {
@@ -44,6 +48,7 @@ CATAGORIES = {
     "Aux Sweep": "#F9BEE1",
     "AC+DC": "#F9D3BE",
     "Differential Resistance": "#F9EF9E",
+    "Differential Conductance": "#BEEF9E",
 }
 
 # Build the PROCEDURES dictionary
@@ -61,6 +66,8 @@ PROCEDURES.update(proc_resistance_aux_gate_map)
 PROCEDURES.update(proc_diff_resistance_6221_map)
 PROCEDURES.update(proc_RV_dV_dI_sequencer)
 PROCEDURES.update(proc_RV_R_AUX_sequencer)
+PROCEDURES.update(proc_diff_conductance)
+PROCEDURES.update(proc_diff_conductance_gate_map)
 
 # Export all
 __all__ = [
@@ -87,6 +94,8 @@ __all__ = [
     'Resistance_aux_gate_map',
     'RV_dV_dI_sequencer_measurement',
     'RV_R_AUX_sequencer_measurement',
+    'Differential_Conductance',
+    'Differential_Conductance_gate_map',
     # Registration dicts
     'proc_resistance_time',
     'proc_resistance_gate',
@@ -101,6 +110,8 @@ __all__ = [
     'proc_diff_resistance_6221_map',
     'proc_RV_dV_dI_sequencer',
     'proc_RV_R_AUX_sequencer',
+    'proc_diff_conductance',
+    'proc_diff_conductance_gate_map',
     # Aggregates
     'CATAGORIES',
     'PROCEDURES',

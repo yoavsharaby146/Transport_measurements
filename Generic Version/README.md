@@ -29,6 +29,8 @@ python "Transport measurements.py"
 | Differential Resistance 6221 Gate Map | 2D gate × DC-current map with dV/dI readout (DC bias swept on the K6221 current source, compliance/range set manually on the instrument, AC from a lock-in sine output pre-configured), Snake or Forward/Backward scan modes |
 | Differential Resistance 6221 (DC bias on K6221) | 1D dV/dI sweep: DC bias swept on the K6221 current source, AC from a lock-in sine output (pre-configured; the 6221 waveform is never set here) |
 | Differential Resistance AUX (DC on lock-in AUX) | 1D dV/dI sweep: DC bias swept on a lock-in AUX output (SRS830/SRS860/MFLI); AC accommodated but never configured (set the lock-in sine or the K6221 waveform on the instrument) |
+| Differential Conductance (AC + AUX bias) | 1D dI/dV sweep, voltage-biased: AC excitation from a chosen SRS860/MFLI sine output (amplitude + frequency set here), DC bias swept on the same unit's AUX; live G = I_XY / V_ac columns |
+| Differential Conductance Gate Map | 2D gate × AUX-bias map with dI/dV readout (same excitation lock-in setup), Snake or Forward/Backward scan modes |
 | Resistance AUX Gate Map | 2D gate × AUX map with resistance readout (AUX voltage swept on a chosen lock-in), Snake or Forward/Backward scan modes |
 | RV dV/dI sequencer measurement | Sequence RV gate sweeps and dV/dI sweeps (DC bias on the K6221 current source, no AUX) |
 | RV R_AUX sequencer measurement | Sequence RV gate sweeps and R_AUX output sweeps |

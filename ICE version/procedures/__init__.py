@@ -24,8 +24,11 @@ from .resistance_two_gate_sweep import Resistance_two_gate_scan_sweep_measuremen
 from .resistance_two_gate_map import Resistance_two_gate_mapping_measurement, proc_resistance_two_gate_map
 from .resistance_magnet_gate_map import Resistance_magnet_and_gate_mapping_measurement, proc_resistance_magnet_gate_map
 from .resistance_magnet_2gate_map import Resistance_magnet_and_2gate_mapping_measurement, proc_resistance_magnet_2gate_map
-from .differential_conductance_srs860 import Differential_conductance_SRS860, proc_differential_conductance_SRS860
-from .differential_conductance_zurich import Differential_conductance_Zurich, proc_differential_conductance_Zurich
+from .differential_conductance import Differential_Conductance, proc_differential_conductance
+from .differential_conductance_map import Differential_Conductance_map, proc_differential_conductance_map
+# Superseded by the unified Differential_Conductance procedure (any connected
+# SRS860 / MFLI as excitation): the old differential_conductance_srs860.py /
+# differential_conductance_zurich.py modules were removed.
 # Superseded by the unified AUX procedure (any connected lock-in as source):
 # the old differential_resistance_srs860.py / differential_resistance_zurich.py
 # modules were removed; use Differential_Resistance_AUX instead.
@@ -57,8 +60,8 @@ PROCEDURES.update(proc_resistance_two_gate_sweep)
 PROCEDURES.update(proc_resistance_two_gate_map)
 PROCEDURES.update(proc_resistance_magnet_gate_map)
 PROCEDURES.update(proc_resistance_magnet_2gate_map)
-PROCEDURES.update(proc_differential_conductance_SRS860)
-PROCEDURES.update(proc_differential_conductance_Zurich)
+PROCEDURES.update(proc_differential_conductance)
+PROCEDURES.update(proc_differential_conductance_map)
 PROCEDURES.update(proc_differential_resistance_AUX)
 PROCEDURES.update(proc_differential_resistance_AUX_map)
 PROCEDURES.update(proc_Rt_RV_RH_sequencer)
@@ -85,8 +88,8 @@ __all__ = [
     'Resistance_two_gate_mapping_measurement',
     'Resistance_magnet_and_gate_mapping_measurement',
     'Resistance_magnet_and_2gate_mapping_measurement',
-    'Differential_conductance_SRS860',
-    'Differential_conductance_Zurich',
+    'Differential_Conductance',
+    'Differential_Conductance_map',
     'Differential_Resistance_AUX',
     'Differential_Resistance_AUX_map',
     'Rt_RV_RH_sequencer_measurement',
@@ -101,8 +104,8 @@ __all__ = [
     'proc_resistance_two_gate_map',
     'proc_resistance_magnet_gate_map',
     'proc_resistance_magnet_2gate_map',
-    'proc_differential_conductance_SRS860',
-    'proc_differential_conductance_Zurich',
+    'proc_differential_conductance',
+    'proc_differential_conductance_map',
     'proc_differential_resistance_AUX',
     'proc_differential_resistance_AUX_map',
     'proc_Rt_RV_RH_sequencer',

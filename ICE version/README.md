@@ -78,8 +78,8 @@ ICE version/
     ├── resistance_magnet_gate_map.py     # Magnet × gate 2D map
     ├── resistance_magnet_2gate_map.py    # Magnet × dual-gate 2D map
     │
-    ├── differential_conductance_srs860.py      # dI/dV via SRS860
-    ├── differential_conductance_zurich.py      # dI/dV via Zurich MFLI
+    ├── differential_conductance.py             # dI/dV via any connected SRS860 / MFLI (unified)
+    ├── differential_conductance_map.py         # 2D gate × DC-bias dI/dV map
     ├── differential_resistance_aux.py          # dV/dI via any connected lock-in AUX (unified)
     ├── differential_resistance_aux_map.py      # 2D gate × AUX map, any AUX source / SMU
     │
@@ -151,8 +151,8 @@ Each procedure is an **`ICEProcedure`** subclass (which itself extends the PyMea
 | **Two gate map** | `resistance_two_gate_map.py` | 2D Mapping, Gate Sweep | 2D mapping of two independent gate voltages |
 | **Magnet & gate map** | `resistance_magnet_gate_map.py` | Magnetic Field, 2D Mapping | 2D map of magnetic field vs. gate voltage |
 | **Magnet & 2-gate map** | `resistance_magnet_2gate_map.py` | Magnetic Field, 2D Mapping | 2D map of magnetic field vs. dual gate voltages |
-| **Differential conductance (SRS860)** | `differential_conductance_srs860.py` | Tunneling junction | dI/dV measurement using SRS860 lock-in |
-| **Differential conductance (Zurich)** | `differential_conductance_zurich.py` | Tunneling junction | dI/dV measurement using Zurich MFLI |
+| **Differential Conductance (unified)** | `differential_conductance.py` | Tunneling junction | dI/dV measurement; excitation lock-in selectable from connected SRS860 / MFLI units, DC bias on its sine-output DC offset, live G = I_XY / V_ac columns |
+| **Differential Conductance Gate Map** | `differential_conductance_map.py` | 2D Mapping, Gate Sweep, Tunneling junction | Gate-dependent dI/dV map; excitation lock-in + gate SMU selectable, Snake / Forward-Backward scan modes |
 | **Differential resistance AUX (unified)** | `differential_resistance_aux.py` | Differential Resistance | dV/dI measurement using any connected lock-in's aux output (SRS860/SRS830/MFLI) |
 | **Differential resistance AUX map** | `differential_resistance_aux_map.py` | Differential Resistance, 2D Mapping | Gate-dependent dV/dI map; AUX source (any lock-in) + gate SMU selectable |
 | **Rt/RV/RH sequencer** | `sequencer_rt_rv_rh.py` | Time-based, Gate Sweep, Magnetic Field | Automated sequence of Rt, RV, and RH measurements |

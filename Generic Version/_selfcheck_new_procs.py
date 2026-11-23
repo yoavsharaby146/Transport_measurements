@@ -10,14 +10,18 @@ class F:  # fake connected instrument
 
 b.SRS830_1 = F()
 b.Gate_1 = F()
+b.SRS860_1 = F()
+b.MFLI_1 = F()
 b._rebuild_all_columns()
 
 from procedures import (Differential_Resistance_6221, Differential_Resistance_AUX,
                         Differential_Resistance_6221_map, Resistance_aux_gate_map,
-                        RV_dV_dI_sequencer_measurement, RV_R_AUX_sequencer_measurement)
+                        RV_dV_dI_sequencer_measurement, RV_R_AUX_sequencer_measurement,
+                        Differential_Conductance, Differential_Conductance_gate_map)
 
 for c in (Differential_Resistance_6221_map, Resistance_aux_gate_map,
-          RV_dV_dI_sequencer_measurement, RV_R_AUX_sequencer_measurement):
+          RV_dV_dI_sequencer_measurement, RV_R_AUX_sequencer_measurement,
+          Differential_Conductance, Differential_Conductance_gate_map):
     assert c.DATA_COLUMNS, c.__name__
     print(c.__name__, c.DATA_COLUMNS)
 
@@ -30,9 +34,22 @@ assert 'Auxiliary_Voltage(V)' in Resistance_aux_gate_map.DATA_COLUMNS
 assert 'Auxiliary_Voltage(V)' in RV_R_AUX_sequencer_measurement.DATA_COLUMNS
 assert 'time(s)' in b.BASE_DATA_COLUMNS
 
-# Parameter rebuild hooks
-assert list(Resistance_aux_gate_map.aux_source.choices) == ['SRS830_1']
+# Parameter rebuild hooks (fakes connected: SRS830_1, SRS860_1, MFLI_1)
+assert list(Resistance_aux_gate_map.aux_source.choices) == ['SRS830_1', 'SRS860_1', 'MFLI_1']
 assert list(Resistance_aux_gate_map.smu.choices) == ['Gate_1']
+
+# differential conductance: unified excitation dropdown + map, computed columns
+assert list(Differential_Conductance.exc_source.choices) == ['SRS860_1', 'MFLI_1']
+assert list(Differential_Conductance_gate_map.exc_source.choices) == ['SRS860_1', 'MFLI_1']
+assert list(Differential_Conductance_gate_map.smu.choices) == ['Gate_1']
+assert list(Differential_Conductance.meas_lockin.choices) == \
+    ['SRS830_1', 'SRS860_1', 'MFLI_1']
+for c in (Differential_Conductance, Differential_Conductance_gate_map):
+    cols = c.DATA_COLUMNS
+    assert 'AUX_DC_offset(V)' in cols and 'AC_voltage_RMS(V)' in cols
+    assert 'Differential_Conductance_X(S)' in cols
+    assert 'Differential_Conductance_Y(S)' in cols
+    assert 'Lockin_Current_SRS860_1_X(A)' in cols  # current-type lock-in columns
 
 # 6221 dV/dI family: no AUX params, no AC setup, no compliance param
 # (compliance / current range are set manually on the instrument)
